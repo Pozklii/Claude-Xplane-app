@@ -99,6 +99,8 @@ function buildGlobeData(flights: Flight[]) {
         startLng: from.lon,
         endLat: to.lat,
         endLng: to.lon,
+        fromCode: from.code,
+        toCode: to.code,
         label: `${flight.aircraft} · ${from.code} → ${to.code} · ${flight.flown_on}`,
       });
     }

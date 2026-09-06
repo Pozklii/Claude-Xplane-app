@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GlobeMethods } from "react-globe.gl";
 
 const Globe = dynamic(() => import("react-globe.gl"), {
@@ -27,16 +27,59 @@ export type GlobeArc = {
   startLng: number;
   endLat: number;
   endLng: number;
+  fromCode: string;
+  toCode: string;
   label: string;
 };
 
 type MapStyle = "day" | "night";
+type MarkerDatum = GlobePoint & { highlighted: boolean };
 
 const GLOBE_HEIGHT = 480;
 const TEXTURES: Record<MapStyle, string> = {
   day: "/globe/earth-blue-marble.jpg",
   night: "/globe/earth-night.jpg",
 };
+const ARC_COLOR = "rgba(250, 204, 21, 0.45)";
+const ARC_COLOR_SELECTED = "#ffffff";
+
+function markerElement(d: object) {
+  const point = d as MarkerDatum;
+  const wrapper = document.createElement("div");
+  wrapper.style.display = "flex";
+  wrapper.style.alignItems = "center";
+  wrapper.style.gap = "4px";
+  wrapper.style.transform = "translate(-50%, -50%)";
+  wrapper.style.pointerEvents = "none";
+
+  const dot = document.createElement("div");
+  const size = point.highlighted ? 8 : 5;
+  dot.style.width = `${size}px`;
+  dot.style.height = `${size}px`;
+  dot.style.borderRadius = "50%";
+  dot.style.background = point.highlighted ? "#ffffff" : "#facc15";
+  dot.style.border = "1px solid rgba(0,0,0,0.5)";
+  dot.style.boxSizing = "border-box";
+  wrapper.appendChild(dot);
+
+  if (point.highlighted) {
+    const label = document.createElement("span");
+    label.textContent = `${point.city} (${point.code})`;
+    label.style.fontSize = "11px";
+    label.style.fontWeight = "600";
+    label.style.fontFamily = "ui-sans-serif, system-ui, sans-serif";
+    label.style.color = "#ffffff";
+    label.style.textShadow = "0 1px 3px rgba(0,0,0,0.9)";
+    label.style.whiteSpace = "nowrap";
+    wrapper.appendChild(label);
+  }
+
+  return wrapper;
+}
+
+function setMarkerVisibility(el: HTMLElement, isVisible: boolean) {
+  el.style.display = isVisible ? "flex" : "none";
+}
 
 export function FlightGlobe({
   points,
@@ -49,6 +92,7 @@ export function FlightGlobe({
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [mapStyle, setMapStyle] = useState<MapStyle>("day");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -66,6 +110,22 @@ export function FlightGlobe({
     const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
     globeRef.current.pointOfView({ lat: avgLat, lng: avgLng, altitude: 1 }, 0);
   }, [points]);
+
+  const selectedArc = arcs.find((arc) => arc.id === selectedId) ?? null;
+
+  const highlightedCodes = useMemo(() => {
+    if (!selectedArc) return new Set<string>();
+    return new Set([selectedArc.fromCode, selectedArc.toCode]);
+  }, [selectedArc]);
+
+  const markers = useMemo<MarkerDatum[]>(
+    () =>
+      points.map((p) => ({
+        ...p,
+        highlighted: highlightedCodes.has(p.code),
+      })),
+    [points, highlightedCodes],
+  );
 
   return (
     <div
@@ -103,36 +163,33 @@ export function FlightGlobe({
           backgroundColor="rgba(0,0,0,0)"
           showAtmosphere
           atmosphereColor="#60a5fa"
-          pointsData={points}
-          pointLat="lat"
-          pointLng="lng"
-          pointColor={() => "#facc15"}
-          pointAltitude={0.005}
-          pointRadius={0.15}
-          labelsData={points}
-          labelLat="lat"
-          labelLng="lng"
-          labelText={(d) => {
-            const point = d as GlobePoint;
-            return `${point.city} (${point.code})`;
-          }}
-          labelSize={1.0}
-          labelDotRadius={0}
-          labelColor={() => "#facc15"}
-          labelAltitude={0.006}
-          labelResolution={4}
+          lineHoverPrecision={20}
+          htmlElementsData={markers}
+          htmlLat="lat"
+          htmlLng="lng"
+          htmlElement={markerElement}
+          htmlElementVisibilityModifier={setMarkerVisibility}
           arcsData={arcs}
           arcStartLat="startLat"
           arcStartLng="startLng"
           arcEndLat="endLat"
           arcEndLng="endLng"
-          arcColor={() => "#facc15"}
-          arcLabel={(d) => (d as GlobeArc).label}
+          arcColor={(d: object) =>
+            (d as GlobeArc).id === selectedId ? ARC_COLOR_SELECTED : ARC_COLOR
+          }
+          arcStroke={null}
+          arcLabel={(d: object) => (d as GlobeArc).label}
+          onArcClick={(d: object) => {
+            const arc = d as GlobeArc;
+            setSelectedId((prev) => (prev === arc.id ? null : arc.id));
+          }}
+          onGlobeClick={() => setSelectedId(null)}
         />
       )}
 
       <p className="px-3 py-1.5 text-[11px] text-zinc-400">
-        Imagery &copy; NASA Visible Earth (Blue Marble / Black Marble).
+        Click a flight to see its airports. Imagery &copy; NASA Visible Earth
+        (Blue Marble / Black Marble).
       </p>
     </div>
   );
