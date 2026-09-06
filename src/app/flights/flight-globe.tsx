@@ -51,10 +51,18 @@ const POINT_COLOR_SELECTED = "#ffffff";
 const CLICK_TOLERANCE_PX = 6;
 const DRAG_THRESHOLD_PX = 2;
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 8;
+const MAX_ZOOM = 24;
 // At zoom 1, only cities above this population are shown; zooming in
-// reveals progressively smaller cities.
+// reveals progressively smaller cities (down to the ~20,000 floor of the
+// bundled dataset by MAX_ZOOM).
 const CITY_POPULATION_AT_DEFAULT_ZOOM = 3_000_000;
+const CITY_ZOOM_EXPONENT = 1.6;
+// The rendered base-map bitmap covers up to this many viewports in each
+// dimension, centered on the current pan position, rather than the whole
+// world — so its size (and memory) stays bounded even at high zoom, instead
+// of growing with mapWidth/mapHeight. Panning re-renders it only when the
+// viewport would drift outside this cached area.
+const TILE_ZOOM_FACTOR = 2.5;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -71,7 +79,7 @@ export function FlightGlobe({
     useSelection();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const tileCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [width, setWidth] = useState(0);
   const [countries, setCountries] = useState<Geometry[] | null>(null);
   const [cities, setCities] = useState<CityDatum[]>([]);
@@ -159,91 +167,6 @@ export function FlightGlobe({
     return new Set([selectedArc.fromCode, selectedArc.toCode]);
   }, [selectedArc]);
 
-  // Render the static base map (ocean, graticule, countries, city labels)
-  // to an off-DOM canvas whenever the map's own pixel size or the source
-  // data changes — NOT on every pan. Dragging then costs only a couple of
-  // drawImage blits plus redrawing the handful of arcs/points on top,
-  // regardless of how detailed the country/city data is.
-  const [staticVersion, setStaticVersion] = useState(0);
-  useEffect(() => {
-    if (width === 0) return;
-    let canvas = staticCanvasRef.current;
-    if (!canvas) {
-      canvas = document.createElement("canvas");
-      staticCanvasRef.current = canvas;
-    }
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = mapWidth * dpr;
-    canvas.height = mapHeight * dpr;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, mapWidth, mapHeight);
-
-    const path = geoPath(projection, ctx);
-
-    ctx.beginPath();
-    path({ type: "Sphere" });
-    ctx.fillStyle = OCEAN;
-    ctx.fill();
-
-    ctx.beginPath();
-    path(graticule);
-    ctx.strokeStyle = GRATICULE;
-    ctx.globalAlpha = 0.5;
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-
-    if (countries) {
-      // One combined geometry + a single geoPath/Path2D call, rather than
-      // looping and calling geoPath per country: constructing d3's
-      // projection/clip pipeline has a real fixed cost per call, and with
-      // ~240 countries that per-call overhead dominates.
-      const d = geoPath(projection)({
-        type: "GeometryCollection",
-        geometries: countries,
-      });
-      if (d) {
-        const countryShape = new Path2D(d);
-        ctx.fillStyle = LAND;
-        ctx.fill(countryShape);
-        ctx.strokeStyle = BORDER;
-        ctx.lineWidth = 0.5;
-        ctx.stroke(countryShape);
-      }
-    }
-
-    const cityPopulationCutoff = CITY_POPULATION_AT_DEFAULT_ZOOM / zoom;
-    ctx.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
-    ctx.textBaseline = "middle";
-    for (const city of cities) {
-      if (city.pop < cityPopulationCutoff) continue;
-      const coords = projection([city.lon, city.lat]);
-      if (!coords) continue;
-      const [x, y] = coords;
-
-      ctx.beginPath();
-      ctx.arc(x, y, 1.5, 0, 2 * Math.PI);
-      ctx.fillStyle = CITY_DOT;
-      ctx.fill();
-
-      ctx.fillStyle = CITY_LABEL;
-      ctx.fillText(city.name, x + 4, y);
-    }
-
-    setStaticVersion((v) => v + 1);
-  }, [
-    width,
-    mapWidth,
-    mapHeight,
-    projection,
-    graticule,
-    countries,
-    cities,
-    zoom,
-  ]);
-
   // Pixel pan offset for the current center — recomputed cheaply from the
   // (stable) projection each render, rather than stored directly, so
   // zooming keeps the same lon/lat centered for free.
@@ -254,13 +177,24 @@ export function FlightGlobe({
       ? (height - mapHeight) / 2
       : clamp(rawPanY, height - mapHeight, 0);
 
-  // Draw. Panning only updates `center`, which only shifts where the
-  // pre-rendered static bitmap is blitted from and where the (few) arcs
-  // and airport points are translated to — no geometry is re-projected.
+  // The base map (ocean, graticule, countries, city labels) is rendered to
+  // an off-DOM "tile" canvas covering an area a few viewports wide/tall
+  // around the current pan position — not the whole world — so its size
+  // (and memory) stays bounded even at very high zoom. It's only
+  // re-rendered when zoom/data changes or panning drifts near its edge, so
+  // ordinary dragging costs just a couple of drawImage blits plus
+  // redrawing the handful of arcs/points on top.
+  const tileOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const tileSizeRef = useRef({ w: 0, h: 0 });
+  const tileSourceRef = useRef<{
+    projection: typeof projection;
+    countries: typeof countries;
+    cities: typeof cities;
+  } | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    const staticCanvas = staticCanvasRef.current;
-    if (!canvas || !staticCanvas || width === 0) return;
+    if (!canvas || width === 0) return;
 
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
@@ -273,14 +207,165 @@ export function FlightGlobe({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    // mapWidth is always >= width (MIN_ZOOM is 1), so any window of the
-    // visible canvas's width straddles at most one seam between adjacent
-    // horizontal copies of the map — three copies always fully cover it.
+    const tileWidth = Math.min(mapWidth, width * TILE_ZOOM_FACTOR);
+    const tileHeight = Math.min(mapHeight, height * TILE_ZOOM_FACTOR);
+    // When the tile already spans the full world in a dimension, panning
+    // along it never needs a re-render — it's just modular wraparound
+    // within content that's already fully cached. Checking containment
+    // there instead would be a no-margin, exactly-equal comparison, which
+    // floating-point rounding (mapHeight vs height, computed slightly
+    // differently) can fail spuriously on every single frame.
+    const tileCoversFullWidth = tileWidth >= mapWidth;
+    const tileCoversFullHeight = tileHeight >= mapHeight;
+    const viewLeft = -panX;
+    const viewTop = -panY;
+
+    const sourceChanged =
+      !tileSourceRef.current ||
+      tileSourceRef.current.projection !== projection ||
+      tileSourceRef.current.countries !== countries ||
+      tileSourceRef.current.cities !== cities;
+    const origin = tileOriginRef.current;
+    const horizontalOk =
+      tileCoversFullWidth ||
+      (!!origin &&
+        viewLeft >= origin.x &&
+        viewLeft + width <= origin.x + tileWidth);
+    const verticalOk =
+      tileCoversFullHeight ||
+      (!!origin &&
+        viewTop >= origin.y &&
+        viewTop + height <= origin.y + tileHeight);
+    const needsRender =
+      sourceChanged ||
+      !origin ||
+      tileSizeRef.current.w !== tileWidth ||
+      tileSizeRef.current.h !== tileHeight ||
+      !horizontalOk ||
+      !verticalOk;
+
+    if (needsRender) {
+      const originX = viewLeft - (tileWidth - width) / 2;
+      const originY = clamp(
+        viewTop - (tileHeight - height) / 2,
+        0,
+        Math.max(0, mapHeight - tileHeight),
+      );
+
+      let tileCanvas = tileCanvasRef.current;
+      if (!tileCanvas) {
+        tileCanvas = document.createElement("canvas");
+        tileCanvasRef.current = tileCanvas;
+      }
+      tileCanvas.width = Math.max(1, Math.ceil(tileWidth * dpr));
+      tileCanvas.height = Math.max(1, Math.ceil(tileHeight * dpr));
+      const tctx = tileCanvas.getContext("2d");
+      if (tctx) {
+        tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        tctx.clearRect(0, 0, tileWidth, tileHeight);
+
+        const tilePath = geoPath(projection, tctx);
+        // The world content lives in x ∈ [0, mapWidth); draw it at three
+        // horizontal offsets so it correctly fills the tile regardless of
+        // where the tile's origin falls relative to that range (origin is
+        // a continuous coordinate, not wrapped, so it can land slightly
+        // outside it).
+        const worldOffsets = [0, -mapWidth, mapWidth];
+
+        let countryShape: Path2D | null = null;
+        if (countries) {
+          // One combined geometry + a single geoPath/Path2D call, rather
+          // than looping and calling geoPath per country: constructing
+          // d3's projection/clip pipeline has a real fixed cost per call,
+          // and with ~240 countries that per-call overhead dominates.
+          const d = geoPath(projection)({
+            type: "GeometryCollection",
+            geometries: countries,
+          });
+          if (d) countryShape = new Path2D(d);
+        }
+
+        const cityPopulationCutoff =
+          CITY_POPULATION_AT_DEFAULT_ZOOM / Math.pow(zoom, CITY_ZOOM_EXPONENT);
+        tctx.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
+        tctx.textBaseline = "middle";
+
+        for (const wx of worldOffsets) {
+          tctx.save();
+          tctx.translate(wx - originX, -originY);
+
+          tctx.beginPath();
+          tilePath({ type: "Sphere" });
+          tctx.fillStyle = OCEAN;
+          tctx.fill();
+
+          tctx.beginPath();
+          tilePath(graticule);
+          tctx.strokeStyle = GRATICULE;
+          tctx.globalAlpha = 0.5;
+          tctx.lineWidth = 0.5;
+          tctx.stroke();
+          tctx.globalAlpha = 1;
+
+          if (countryShape) {
+            tctx.fillStyle = LAND;
+            tctx.fill(countryShape);
+            tctx.strokeStyle = BORDER;
+            tctx.lineWidth = 0.5;
+            tctx.stroke(countryShape);
+          }
+
+          for (const city of cities) {
+            if (city.pop < cityPopulationCutoff) continue;
+            const coords = projection([city.lon, city.lat]);
+            if (!coords) continue;
+            const [x, y] = coords;
+
+            tctx.beginPath();
+            tctx.arc(x, y, 1.5, 0, 2 * Math.PI);
+            tctx.fillStyle = CITY_DOT;
+            tctx.fill();
+
+            tctx.fillStyle = CITY_LABEL;
+            tctx.fillText(city.name, x + 4, y);
+          }
+
+          tctx.restore();
+        }
+      }
+
+      tileOriginRef.current = { x: originX, y: originY };
+      tileSizeRef.current = { w: tileWidth, h: tileHeight };
+      tileSourceRef.current = { projection, countries, cities };
+    }
+
+    const tile = tileOriginRef.current;
+    const tileSize = tileSizeRef.current;
+    const tileCanvas = tileCanvasRef.current;
+    if (!tile || !tileCanvas) return;
+
+    // At low zoom the tile covers the entire world width, so blitting it
+    // once isn't enough — the viewport can fall anywhere along that
+    // wrapped content, same as the arcs/points below. At higher zoom the
+    // tile is a genuine crop that needsRender already guarantees covers
+    // the viewport, so a single blit suffices.
+    const blitOffsets = tileCoversFullWidth ? [-mapWidth, 0, mapWidth] : [0];
+    for (const blitOffset of blitOffsets) {
+      ctx.drawImage(
+        tileCanvas,
+        tile.x + panX + blitOffset,
+        tile.y + panY,
+        tileSize.w,
+        tileSize.h,
+      );
+    }
+
+    // The tile itself already covers the full viewport (that's what
+    // needsRender guarantees), so unlike the tile's own content the arcs
+    // and points below only need the same three world-wrap copies used
+    // everywhere else for horizontal wraparound — not the tile's offset.
     const wrappedX = ((panX % mapWidth) + mapWidth) % mapWidth;
     const wrapOffsets = [-mapWidth, 0, mapWidth];
-    for (const offset of wrapOffsets) {
-      ctx.drawImage(staticCanvas, wrappedX + offset, panY, mapWidth, mapHeight);
-    }
 
     const path = geoPath(projection, ctx);
 
@@ -340,11 +425,14 @@ export function FlightGlobe({
     projection,
     width,
     height,
+    zoom,
+    countries,
+    cities,
+    graticule,
     arcs,
     points,
     selectedId,
     highlightedCodes,
-    staticVersion,
   ]);
 
   // Kept in refs (rather than effect deps) so the drag/click listener below
