@@ -6,6 +6,8 @@ import { deleteFlight } from "./actions";
 import { NewFlightForm } from "./new-flight-form";
 import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flight-globe";
 import { FlightMedia, type MediaItem } from "./flight-media";
+import { FlightRow } from "./flight-row";
+import { SelectionProvider } from "./selection-context";
 
 type Flight = {
   id: string;
@@ -160,79 +162,83 @@ export default async function FlightsPage() {
         </p>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <FlightGlobe points={points} arcs={arcs} />
-        {unresolvedCodes.length > 0 && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-500">
-            Not shown on the globe (unrecognized airport code):{" "}
-            {unresolvedCodes.join(", ")}
-          </p>
-        )}
-      </div>
+      <SelectionProvider>
+        <div className="flex flex-col gap-2">
+          <FlightGlobe points={points} arcs={arcs} />
+          {unresolvedCodes.length > 0 && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-500">
+              Not shown on the globe (unrecognized airport code):{" "}
+              {unresolvedCodes.join(", ")}
+            </p>
+          )}
+        </div>
 
-      <NewFlightForm />
+        <NewFlightForm />
 
-      {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">
-          Could not load flights: {error.message}
-        </p>
-      )}
-
-      <div className="flex flex-col gap-3">
-        {flights?.length === 0 && (
-          <p className="text-sm text-zinc-500 dark:text-zinc-500">
-            No flights logged yet. Add your first one above.
+        {error && (
+          <p className="text-sm text-red-600 dark:text-red-400">
+            Could not load flights: {error.message}
           </p>
         )}
 
-        {flights?.map((flight) => (
-          <div
-            key={flight.id}
-            className="flex flex-col gap-3 rounded-2xl border border-black/[.08] p-4 dark:border-white/[.145]"
-          >
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex flex-col gap-1">
-                <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-black dark:text-zinc-50">
-                  <span>{flight.flown_on}</span>
-                  <span className="text-zinc-400">&middot;</span>
-                  {flight.airline && (
-                    <>
-                      <span>{flight.airline}</span>
-                      <span className="text-zinc-400">&middot;</span>
-                    </>
+        <div className="flex flex-col gap-3">
+          {flights?.length === 0 && (
+            <p className="text-sm text-zinc-500 dark:text-zinc-500">
+              No flights logged yet. Add your first one above.
+            </p>
+          )}
+
+          {flights?.map((flight) => (
+            <FlightRow key={flight.id} id={flight.id}>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-black dark:text-zinc-50">
+                    <span>{flight.flown_on}</span>
+                    <span className="text-zinc-400">&middot;</span>
+                    {flight.airline && (
+                      <>
+                        <span>{flight.airline}</span>
+                        <span className="text-zinc-400">&middot;</span>
+                      </>
+                    )}
+                    <span>{flight.aircraft}</span>
+                    <span className="text-zinc-400">&middot;</span>
+                    <span>
+                      {flight.departure} &rarr; {flight.arrival}
+                    </span>
+                    <span className="text-zinc-400">&middot;</span>
+                    <span>{Number(flight.hours).toFixed(1)}h</span>
+                  </div>
+                  {flight.notes && (
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      {flight.notes}
+                    </p>
                   )}
-                  <span>{flight.aircraft}</span>
-                  <span className="text-zinc-400">&middot;</span>
-                  <span>
-                    {flight.departure} &rarr; {flight.arrival}
-                  </span>
-                  <span className="text-zinc-400">&middot;</span>
-                  <span>{Number(flight.hours).toFixed(1)}h</span>
                 </div>
-                {flight.notes && (
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                    {flight.notes}
-                  </p>
-                )}
-              </div>
-              <form action={deleteFlight.bind(null, flight.id)}>
-                <button
-                  type="submit"
-                  className="self-start rounded-full border border-black/[.08] px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-400 dark:hover:bg-[#1a1a1a]"
+                <form
+                  action={deleteFlight.bind(null, flight.id)}
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  Delete
-                </button>
-              </form>
-            </div>
+                  <button
+                    type="submit"
+                    className="self-start rounded-full border border-black/[.08] px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-400 dark:hover:bg-[#1a1a1a]"
+                  >
+                    Delete
+                  </button>
+                </form>
+              </div>
 
-            <FlightMedia
-              flightId={flight.id}
-              userId={user.id}
-              items={mediaByFlight.get(flight.id) ?? []}
-            />
-          </div>
-        ))}
-      </div>
+              <div onClick={(e) => e.stopPropagation()}>
+                <FlightMedia
+                  flightId={flight.id}
+                  userId={user.id}
+                  items={mediaByFlight.get(flight.id) ?? []}
+                />
+              </div>
+            </FlightRow>
+          ))}
+        </div>
+      </SelectionProvider>
     </div>
   );
 }

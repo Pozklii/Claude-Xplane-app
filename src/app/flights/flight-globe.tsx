@@ -7,6 +7,7 @@ import { select } from "d3-selection";
 import { feature } from "topojson-client";
 import type { Topology } from "topojson-specification";
 import type { Feature, Geometry } from "geojson";
+import { useSelection } from "./selection-context";
 
 export type GlobePoint = {
   code: string;
@@ -27,13 +28,23 @@ export type GlobeArc = {
   label: string;
 };
 
+type CityDatum = {
+  name: string;
+  lat: number;
+  lon: number;
+  pop: number;
+};
+
 const GLOBE_HEIGHT = 480;
-const COUNTRIES_URL = "/data/countries-110m.json";
+const COUNTRIES_URL = "/data/countries-50m.json";
+const CITIES_URL = "/data/cities.json";
 
 const OCEAN = "#cfe8f5";
 const GRATICULE = "#8fbfd9";
 const LAND = "#d9e8d3";
 const BORDER = "#93b884";
+const CITY_DOT = "#7a8a70";
+const CITY_LABEL = "#4b5563";
 const ARC_COLOR = "rgba(37, 99, 235, 0.45)";
 const ARC_COLOR_SELECTED = "#2563eb";
 const POINT_COLOR = "#facc15";
@@ -42,6 +53,9 @@ const CLICK_TOLERANCE_PX = 6;
 const DRAG_THRESHOLD_PX = 2;
 const MIN_ZOOM = 0.6;
 const MAX_ZOOM = 6;
+// At zoom 1, only cities above this population are shown; zooming in
+// reveals progressively smaller cities.
+const CITY_POPULATION_AT_DEFAULT_ZOOM = 3_000_000;
 
 function isFrontFacing(rotate: [number, number], lng: number, lat: number) {
   const [lambda, phi] = rotate;
@@ -55,13 +69,15 @@ export function FlightGlobe({
   points: GlobePoint[];
   arcs: GlobeArc[];
 }) {
+  const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
+    useSelection();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
   const [countries, setCountries] = useState<Feature<Geometry>[] | null>(
     null,
   );
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [cities, setCities] = useState<CityDatum[]>([]);
   const [zoom, setZoom] = useState(1);
   const [rotate, setRotate] = useState<[number, number]>(() => {
     if (points.length === 0) return [0, -20];
@@ -83,6 +99,21 @@ export function FlightGlobe({
       })
       .catch(() => {
         if (!cancelled) setCountries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(CITIES_URL)
+      .then((res) => res.json())
+      .then((data: CityDatum[]) => {
+        if (!cancelled) setCities(data);
+      })
+      .catch(() => {
+        if (!cancelled) setCities([]);
       });
     return () => {
       cancelled = true;
@@ -186,6 +217,25 @@ export function FlightGlobe({
       ctx.stroke();
     }
 
+    const cityPopulationCutoff = CITY_POPULATION_AT_DEFAULT_ZOOM / zoom;
+    ctx.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
+    ctx.textBaseline = "middle";
+    for (const city of cities) {
+      if (city.pop < cityPopulationCutoff) continue;
+      if (!isFrontFacing(rotate, city.lon, city.lat)) continue;
+      const coords = projection([city.lon, city.lat]);
+      if (!coords) continue;
+      const [x, y] = coords;
+
+      ctx.beginPath();
+      ctx.arc(x, y, 1.5, 0, 2 * Math.PI);
+      ctx.fillStyle = CITY_DOT;
+      ctx.fill();
+
+      ctx.fillStyle = CITY_LABEL;
+      ctx.fillText(city.name, x + 4, y);
+    }
+
     for (const arc of arcs) {
       if (
         !isFrontFacing(rotate, arc.startLng, arc.startLat) &&
@@ -237,6 +287,8 @@ export function FlightGlobe({
   }, [
     projection,
     countries,
+    cities,
+    zoom,
     points,
     arcs,
     rotate,
@@ -252,9 +304,13 @@ export function FlightGlobe({
   // seeing the latest arcs/selection when a click is finally resolved.
   const arcPathStringsRef = useRef(arcPathStrings);
   const arcsRef = useRef(arcs);
+  const selectedIdRef = useRef(selectedId);
+  const onSelectIdRef = useRef(onSelectId);
   useEffect(() => {
     arcPathStringsRef.current = arcPathStrings;
     arcsRef.current = arcs;
+    selectedIdRef.current = selectedId;
+    onSelectIdRef.current = onSelectId;
   });
 
   useEffect(() => {
@@ -285,11 +341,13 @@ export function FlightGlobe({
         const d = arcPathStringsRef.current.get(arc.id);
         if (!d) continue;
         if (ctx.isPointInStroke(new Path2D(d), x, y)) {
-          setSelectedId((prev) => (prev === arc.id ? null : arc.id));
+          onSelectIdRef.current(
+            selectedIdRef.current === arc.id ? null : arc.id,
+          );
           return;
         }
       }
-      setSelectedId(null);
+      onSelectIdRef.current(null);
     };
 
     const dragBehavior = d3drag<HTMLCanvasElement, unknown>()
@@ -362,6 +420,15 @@ export function FlightGlobe({
           rel="noopener noreferrer"
         >
           Natural Earth
+        </a>
+        , city data &copy;{" "}
+        <a
+          href="https://www.geonames.org/"
+          className="underline"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GeoNames
         </a>
         .
       </p>
