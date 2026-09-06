@@ -1,17 +1,12 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GlobeMethods } from "react-globe.gl";
-
-const Globe = dynamic(() => import("react-globe.gl"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-[480px] items-center justify-center text-sm text-zinc-500">
-      Loading globe…
-    </div>
-  ),
-});
+import { geoDistance, geoGraticule10, geoOrthographic, geoPath } from "d3-geo";
+import { drag as d3drag, type D3DragEvent } from "d3-drag";
+import { select } from "d3-selection";
+import { feature } from "topojson-client";
+import type { Topology } from "topojson-specification";
+import type { Feature, Geometry } from "geojson";
 
 export type GlobePoint = {
   code: string;
@@ -32,342 +27,23 @@ export type GlobeArc = {
   label: string;
 };
 
-type ViewMode = "3d" | "2d";
-type MarkerDatum = GlobePoint & { highlighted: boolean };
-
 const GLOBE_HEIGHT = 480;
-const EARTH_TEXTURE = "/globe/earth-blue-marble.jpg";
-const ARC_COLOR = "rgba(250, 204, 21, 0.45)";
-const ARC_COLOR_SELECTED = "#ffffff";
+const COUNTRIES_URL = "/data/countries-110m.json";
 
-function markerElement(d: object) {
-  const point = d as MarkerDatum;
-  const wrapper = document.createElement("div");
-  wrapper.style.display = "flex";
-  wrapper.style.alignItems = "center";
-  wrapper.style.gap = "4px";
-  wrapper.style.transform = "translate(-50%, -50%)";
-  wrapper.style.pointerEvents = "none";
+const OCEAN = "#cfe8f5";
+const GRATICULE = "#8fbfd9";
+const LAND = "#d9e8d3";
+const BORDER = "#93b884";
+const ARC_COLOR = "rgba(37, 99, 235, 0.45)";
+const ARC_COLOR_SELECTED = "#2563eb";
+const POINT_COLOR = "#facc15";
+const POINT_COLOR_SELECTED = "#ffffff";
+const CLICK_TOLERANCE_PX = 6;
+const DRAG_THRESHOLD_PX = 2;
 
-  const dot = document.createElement("div");
-  const size = point.highlighted ? 8 : 5;
-  dot.style.width = `${size}px`;
-  dot.style.height = `${size}px`;
-  dot.style.borderRadius = "50%";
-  dot.style.background = point.highlighted ? "#ffffff" : "#facc15";
-  dot.style.border = "1px solid rgba(0,0,0,0.5)";
-  dot.style.boxSizing = "border-box";
-  wrapper.appendChild(dot);
-
-  if (point.highlighted) {
-    const label = document.createElement("span");
-    label.textContent = `${point.city} (${point.code})`;
-    label.style.fontSize = "11px";
-    label.style.fontWeight = "600";
-    label.style.fontFamily = "ui-sans-serif, system-ui, sans-serif";
-    label.style.color = "#ffffff";
-    label.style.textShadow = "0 1px 3px rgba(0,0,0,0.9)";
-    label.style.whiteSpace = "nowrap";
-    wrapper.appendChild(label);
-  }
-
-  return wrapper;
-}
-
-function setMarkerVisibility(el: HTMLElement, isVisible: boolean) {
-  el.style.display = isVisible ? "flex" : "none";
-}
-
-function Globe3D({
-  points,
-  arcs,
-  selectedId,
-  onSelect,
-}: {
-  points: GlobePoint[];
-  arcs: GlobeArc[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-}) {
-  const globeRef = useRef<GlobeMethods | undefined>(undefined);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {
-      setWidth(entry.contentRect.width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!globeRef.current || points.length === 0) return;
-    const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
-    const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
-    globeRef.current.pointOfView({ lat: avgLat, lng: avgLng, altitude: 1 }, 0);
-  }, [points]);
-
-  const selectedArc = arcs.find((arc) => arc.id === selectedId) ?? null;
-  const highlightedCodes = useMemo(() => {
-    if (!selectedArc) return new Set<string>();
-    return new Set([selectedArc.fromCode, selectedArc.toCode]);
-  }, [selectedArc]);
-
-  const markers = useMemo<MarkerDatum[]>(
-    () =>
-      points.map((p) => ({
-        ...p,
-        highlighted: highlightedCodes.has(p.code),
-      })),
-    [points, highlightedCodes],
-  );
-
-  return (
-    <div ref={containerRef}>
-      {width > 0 && (
-        <Globe
-          ref={globeRef}
-          width={width}
-          height={GLOBE_HEIGHT}
-          globeImageUrl={EARTH_TEXTURE}
-          backgroundColor="rgba(0,0,0,0)"
-          showAtmosphere
-          atmosphereColor="#60a5fa"
-          onGlobeReady={() => {
-            const renderer = globeRef.current?.renderer();
-            renderer?.setPixelRatio(
-              Math.min(window.devicePixelRatio || 1, 2),
-            );
-          }}
-          htmlElementsData={markers}
-          htmlLat="lat"
-          htmlLng="lng"
-          htmlElement={markerElement}
-          htmlElementVisibilityModifier={setMarkerVisibility}
-          arcsData={arcs}
-          arcStartLat="startLat"
-          arcStartLng="startLng"
-          arcEndLat="endLat"
-          arcEndLng="endLng"
-          arcColor={(d: object) =>
-            (d as GlobeArc).id === selectedId ? ARC_COLOR_SELECTED : ARC_COLOR
-          }
-          arcStroke={null}
-          arcLabel={(d: object) => (d as GlobeArc).label}
-          onArcClick={(d: object) => {
-            const arc = d as GlobeArc;
-            onSelect(selectedId === arc.id ? null : arc.id);
-          }}
-          onGlobeClick={() => onSelect(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-function toRad(deg: number) {
-  return (deg * Math.PI) / 180;
-}
-function toDeg(rad: number) {
-  return (rad * 180) / Math.PI;
-}
-
-/** Great-circle interpolation between two lat/lng points (slerp on the sphere). */
-function greatCirclePoint(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-  t: number,
-): [number, number] {
-  const [la1, lo1, la2, lo2] = [lat1, lng1, lat2, lng2].map(toRad);
-  const d =
-    2 *
-    Math.asin(
-      Math.sqrt(
-        Math.sin((la2 - la1) / 2) ** 2 +
-          Math.cos(la1) * Math.cos(la2) * Math.sin((lo2 - lo1) / 2) ** 2,
-      ),
-    );
-  if (d === 0) return [lat1, lng1];
-  const a = Math.sin((1 - t) * d) / Math.sin(d);
-  const b = Math.sin(t * d) / Math.sin(d);
-  const x = a * Math.cos(la1) * Math.cos(lo1) + b * Math.cos(la2) * Math.cos(lo2);
-  const y = a * Math.cos(la1) * Math.sin(lo1) + b * Math.cos(la2) * Math.sin(lo2);
-  const z = a * Math.sin(la1) + b * Math.sin(la2);
-  const lat = toDeg(Math.atan2(z, Math.sqrt(x * x + y * y)));
-  const lng = toDeg(Math.atan2(y, x));
-  return [lat, lng];
-}
-
-const SAMPLES = 32;
-
-function FlatMap({
-  points,
-  arcs,
-  selectedId,
-  onSelect,
-}: {
-  points: GlobePoint[];
-  arcs: GlobeArc[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
-  const height = width / 2;
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {
-      setWidth(entry.contentRect.width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const selectedArc = arcs.find((arc) => arc.id === selectedId) ?? null;
-  const highlightedCodes = useMemo(() => {
-    if (!selectedArc) return new Set<string>();
-    return new Set([selectedArc.fromCode, selectedArc.toCode]);
-  }, [selectedArc]);
-
-  const project = useMemo(
-    () =>
-      (lat: number, lng: number): [number, number] => [
-        ((lng + 180) / 360) * width,
-        ((90 - lat) / 180) * height,
-      ],
-    [width, height],
-  );
-
-  const arcPaths = useMemo(() => {
-    if (width === 0) return [];
-    return arcs.map((arc) => {
-      const samples: [number, number][] = [];
-      for (let i = 0; i <= SAMPLES; i++) {
-        const t = i / SAMPLES;
-        samples.push(
-          greatCirclePoint(
-            arc.startLat,
-            arc.startLng,
-            arc.endLat,
-            arc.endLng,
-            t,
-          ),
-        );
-      }
-      const projected = samples.map(([lat, lng]) => project(lat, lng));
-      // Split into segments wherever the path crosses the antimeridian
-      // (a jump of more than half the map width between consecutive samples).
-      const segments: [number, number][][] = [[]];
-      for (let i = 0; i < projected.length; i++) {
-        const [x, y] = projected[i];
-        const current = segments[segments.length - 1];
-        if (current.length > 0) {
-          const [px] = current[current.length - 1];
-          if (Math.abs(x - px) > width / 2) {
-            segments.push([]);
-          }
-        }
-        segments[segments.length - 1].push([x, y]);
-      }
-      return { arc, segments };
-    });
-  }, [arcs, width, project]);
-
-  return (
-    <div
-      ref={containerRef}
-      className="relative w-full"
-      style={{ aspectRatio: "2 / 1" }}
-      onClick={() => onSelect(null)}
-    >
-      {width > 0 && (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={EARTH_TEXTURE}
-            alt="World map"
-            className="absolute inset-0 h-full w-full select-none object-cover"
-            draggable={false}
-          />
-          <svg
-            width={width}
-            height={height}
-            viewBox={`0 0 ${width} ${height}`}
-            className="absolute inset-0"
-          >
-            {arcPaths.map(({ arc, segments }) => {
-              const selected = arc.id === selectedId;
-              return (
-                <g key={arc.id}>
-                  {segments.map((segment, i) => (
-                    <g key={i}>
-                      <polyline
-                        points={segment.map(([x, y]) => `${x},${y}`).join(" ")}
-                        fill="none"
-                        stroke="transparent"
-                        strokeWidth={5}
-                        className="cursor-pointer"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelect(selected ? null : arc.id);
-                        }}
-                      />
-                      <polyline
-                        points={segment.map(([x, y]) => `${x},${y}`).join(" ")}
-                        fill="none"
-                        stroke={selected ? ARC_COLOR_SELECTED : ARC_COLOR}
-                        strokeWidth={selected ? 2 : 1.2}
-                        pointerEvents="none"
-                      >
-                        <title>{arc.label}</title>
-                      </polyline>
-                    </g>
-                  ))}
-                </g>
-              );
-            })}
-            {points.map((point) => {
-              const highlighted = highlightedCodes.has(point.code);
-              const [x, y] = project(point.lat, point.lng);
-              return (
-                <g key={point.code}>
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r={highlighted ? 5 : 3}
-                    fill={highlighted ? "#ffffff" : "#facc15"}
-                    stroke="rgba(0,0,0,0.5)"
-                    strokeWidth={1}
-                  />
-                  {highlighted && (
-                    <text
-                      x={x + 8}
-                      y={y + 4}
-                      fontSize={11}
-                      fontWeight={600}
-                      fill="#ffffff"
-                      stroke="rgba(0,0,0,0.9)"
-                      strokeWidth={3}
-                      paintOrder="stroke"
-                    >
-                      {point.city} ({point.code})
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </svg>
-        </>
-      )}
-    </div>
-  );
+function isFrontFacing(rotate: [number, number], lng: number, lat: number) {
+  const [lambda, phi] = rotate;
+  return geoDistance([-lambda, -phi], [lng, lat]) < Math.PI / 2;
 }
 
 export function FlightGlobe({
@@ -377,52 +53,296 @@ export function FlightGlobe({
   points: GlobePoint[];
   arcs: GlobeArc[];
 }) {
-  const [viewMode, setViewMode] = useState<ViewMode>("3d");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [width, setWidth] = useState(0);
+  const [countries, setCountries] = useState<Feature<Geometry>[] | null>(
+    null,
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [rotate, setRotate] = useState<[number, number]>(() => {
+    if (points.length === 0) return [0, -20];
+    const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
+    const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+    return [-avgLng, -avgLat];
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(COUNTRIES_URL)
+      .then((res) => res.json())
+      .then((topology: Topology) => {
+        if (cancelled) return;
+        const collection = feature(topology, topology.objects.countries);
+        const features =
+          "features" in collection ? collection.features : [collection];
+        setCountries(features as Feature<Geometry>[]);
+      })
+      .catch(() => {
+        if (!cancelled) setCountries([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setWidth(entry.contentRect.width);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const height = GLOBE_HEIGHT;
+  const scale = Math.max(width, 1) * 0.42;
+
+  const projection = useMemo(
+    () =>
+      geoOrthographic()
+        .rotate([rotate[0], rotate[1], 0])
+        .translate([width / 2, height / 2])
+        .scale(scale)
+        .clipAngle(90),
+    [rotate, width, height, scale],
+  );
+
+  const graticule = useMemo(() => geoGraticule10(), []);
+
+  const selectedArc = arcs.find((arc) => arc.id === selectedId) ?? null;
+  const highlightedCodes = useMemo(() => {
+    if (!selectedArc) return new Set<string>();
+    return new Set([selectedArc.fromCode, selectedArc.toCode]);
+  }, [selectedArc]);
+
+  // SVG path strings for each arc, in the current projection — used both to
+  // draw (via a canvas-bound geoPath below) and, unchanged here, to hit-test
+  // clicks precisely against the actual rendered curve.
+  const arcPathStrings = useMemo(() => {
+    const path = geoPath(projection);
+    const map = new Map<string, string>();
+    for (const arc of arcs) {
+      const d = path({
+        type: "LineString",
+        coordinates: [
+          [arc.startLng, arc.startLat],
+          [arc.endLng, arc.endLat],
+        ],
+      });
+      if (d) map.set(arc.id, d);
+    }
+    return map;
+  }, [arcs, projection]);
+
+  // Draw. Runs on every rotation/selection change; a single imperative
+  // canvas pass rather than per-country/per-point DOM nodes keeps dragging
+  // smooth even with ~180 country shapes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || width === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+
+    const path = geoPath(projection, ctx);
+
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.beginPath();
+    path({ type: "Sphere" });
+    ctx.fillStyle = OCEAN;
+    ctx.fill();
+    ctx.strokeStyle = GRATICULE;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.beginPath();
+    path(graticule);
+    ctx.strokeStyle = GRATICULE;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    if (countries) {
+      ctx.beginPath();
+      for (const countryFeature of countries) path(countryFeature);
+      ctx.fillStyle = LAND;
+      ctx.fill();
+      ctx.strokeStyle = BORDER;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+
+    for (const arc of arcs) {
+      if (
+        !isFrontFacing(rotate, arc.startLng, arc.startLat) &&
+        !isFrontFacing(rotate, arc.endLng, arc.endLat)
+      ) {
+        continue;
+      }
+      const selected = arc.id === selectedId;
+      ctx.beginPath();
+      path({
+        type: "LineString",
+        coordinates: [
+          [arc.startLng, arc.startLat],
+          [arc.endLng, arc.endLat],
+        ],
+      });
+      ctx.strokeStyle = selected ? ARC_COLOR_SELECTED : ARC_COLOR;
+      ctx.lineWidth = selected ? 2 : 1.2;
+      ctx.stroke();
+    }
+
+    for (const point of points) {
+      if (!isFrontFacing(rotate, point.lng, point.lat)) continue;
+      const coords = projection([point.lng, point.lat]);
+      if (!coords) continue;
+      const [x, y] = coords;
+      const highlighted = highlightedCodes.has(point.code);
+
+      ctx.beginPath();
+      ctx.arc(x, y, highlighted ? 5 : 3, 0, 2 * Math.PI);
+      ctx.fillStyle = highlighted ? POINT_COLOR_SELECTED : POINT_COLOR;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (highlighted) {
+        const label = `${point.city} (${point.code})`;
+        ctx.font =
+          "600 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.fillStyle = "#1f2937";
+        ctx.textBaseline = "middle";
+        ctx.strokeText(label, x + 7, y);
+        ctx.fillText(label, x + 7, y);
+      }
+    }
+  }, [
+    projection,
+    countries,
+    points,
+    arcs,
+    rotate,
+    width,
+    height,
+    graticule,
+    selectedId,
+    highlightedCodes,
+  ]);
+
+  // Kept in refs (rather than effect deps) so the drag/click listener below
+  // is bound once per size change and never mid-gesture, while still always
+  // seeing the latest arcs/selection when a click is finally resolved.
+  const arcPathStringsRef = useRef(arcPathStrings);
+  const arcsRef = useRef(arcs);
+  useEffect(() => {
+    arcPathStringsRef.current = arcPathStrings;
+    arcsRef.current = arcs;
+  });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || width === 0) return;
+
+    let pendingDelta: { dx: number; dy: number } | null = null;
+    let frame: number | null = null;
+    let moved = 0;
+
+    const flush = () => {
+      frame = null;
+      if (!pendingDelta) return;
+      const { dx, dy } = pendingDelta;
+      pendingDelta = null;
+      const sensitivity = 240 / scale;
+      setRotate(([lambda, phi]) => [
+        lambda + dx * sensitivity,
+        Math.max(-90, Math.min(90, phi - dy * sensitivity)),
+      ]);
+    };
+
+    const handleClick = (x: number, y: number) => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.lineWidth = CLICK_TOLERANCE_PX;
+      for (const arc of arcsRef.current) {
+        const d = arcPathStringsRef.current.get(arc.id);
+        if (!d) continue;
+        if (ctx.isPointInStroke(new Path2D(d), x, y)) {
+          setSelectedId((prev) => (prev === arc.id ? null : arc.id));
+          return;
+        }
+      }
+      setSelectedId(null);
+    };
+
+    const dragBehavior = d3drag<HTMLCanvasElement, unknown>()
+      .on("start", () => {
+        moved = 0;
+      })
+      .on(
+        "drag",
+        (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
+          moved += Math.abs(event.dx) + Math.abs(event.dy);
+          pendingDelta = pendingDelta
+            ? {
+                dx: pendingDelta.dx + event.dx,
+                dy: pendingDelta.dy + event.dy,
+              }
+            : { dx: event.dx, dy: event.dy };
+          if (frame === null) frame = requestAnimationFrame(flush);
+        },
+      )
+      .on(
+        "end",
+        (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
+          if (moved <= DRAG_THRESHOLD_PX) {
+            handleClick(event.x, event.y);
+          }
+        },
+      );
+
+    select(canvas).call(dragBehavior);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [width, scale]);
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-black/[.08] bg-[#04060f] dark:border-white/[.145]">
-      <div className="absolute right-3 top-3 z-10 flex rounded-full border border-white/20 bg-black/40 p-0.5 backdrop-blur-sm">
-        {(
-          [
-            ["3d", "3D"],
-            ["2d", "2D"],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setViewMode(value)}
-            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-              viewMode === value
-                ? "bg-white text-black"
-                : "text-white/80 hover:text-white"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {viewMode === "3d" ? (
-        <Globe3D
-          points={points}
-          arcs={arcs}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-        />
-      ) : (
-        <FlatMap
-          points={points}
-          arcs={arcs}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
+    <div
+      ref={containerRef}
+      className="overflow-hidden rounded-2xl border border-black/[.08] bg-[#cfe8f5] dark:border-white/[.145]"
+    >
+      {width > 0 && (
+        <canvas
+          ref={canvasRef}
+          className="cursor-grab touch-none active:cursor-grabbing"
         />
       )}
-
-      <p className="px-3 py-1.5 text-[11px] text-zinc-400">
-        Click a flight to see its airports. Imagery &copy; NASA Visible Earth
-        (Blue Marble).
+      <p className="px-3 py-1.5 text-[11px] text-zinc-600">
+        Drag to rotate, click a flight to see its airports. Map data &copy;{" "}
+        <a
+          href="https://www.naturalearthdata.com/"
+          className="underline"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Natural Earth
+        </a>
+        .
       </p>
     </div>
   );
