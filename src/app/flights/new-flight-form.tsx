@@ -21,11 +21,17 @@ export function NewFlightForm() {
       action={action}
       className="flex flex-col gap-3 rounded-2xl border border-black/[.08] p-4 dark:border-white/[.145]"
     >
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
         <input
           name="flownOn"
           type="date"
           required
+          className="col-span-2 rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 sm:col-span-1 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
+        />
+        <input
+          name="airline"
+          type="text"
+          placeholder="Airline (optional)"
           className="col-span-2 rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 sm:col-span-1 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
         />
         <input

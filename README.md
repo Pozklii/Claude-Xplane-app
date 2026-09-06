@@ -43,12 +43,16 @@ After deploying, add your Vercel URL (and any preview URLs) to Supabase's Authen
 ## Features
 
 - Email/password sign-up and sign-in via Supabase Auth (`/login`)
-- A protected `/flights` page for logging and reviewing your flights, backed by a `flights` table scoped to each user via row-level security
+- A protected `/flights` page for logging and reviewing your flights (date, airline, aircraft, route, hours, notes), backed by a `flights` table scoped to each user via row-level security
+- A 3D globe on the flights page plotting each flight as an arc between its airports, using real colored map tiles (CARTO/OpenStreetMap) and a bundled ICAO/IATA airport coordinate lookup — no coordinates to enter manually
+- Screenshots/videos per flight, uploaded to a private Supabase Storage bucket (`flight-media`) scoped to each user
 
 ## Roadmap
 
 - [x] Landing page
 - [x] Supabase auth (sign up / log in)
 - [x] Flight log CRUD (create, view, delete flights)
+- [x] Flight route globe
+- [x] Per-flight media (screenshots/videos)
 - [ ] Editing existing flights
 - [ ] Flight history / stats view

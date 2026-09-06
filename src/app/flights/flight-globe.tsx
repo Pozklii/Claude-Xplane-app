@@ -72,16 +72,18 @@ export function FlightGlobe({
           ref={globeRef}
           width={width}
           height={GLOBE_HEIGHT}
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-night.jpg"
+          globeTileEngineUrl={(x, y, l) =>
+            `https://basemaps.cartocdn.com/rastertiles/voyager/${l}/${x}/${y}.png`
+          }
           backgroundColor="rgba(0,0,0,0)"
           showAtmosphere
           atmosphereColor="#60a5fa"
           pointsData={points}
           pointLat="lat"
           pointLng="lng"
-          pointColor={() => "#f97316"}
+          pointColor={() => "#e11d48"}
           pointAltitude={0.01}
-          pointRadius={0.35}
+          pointRadius={0.3}
           pointLabel={(d) => {
             const point = d as GlobePoint;
             return `${point.name} (${point.code})`;
@@ -91,7 +93,7 @@ export function FlightGlobe({
           arcStartLng="startLng"
           arcEndLat="endLat"
           arcEndLng="endLng"
-          arcColor={() => ["#38bdf8", "#a78bfa"]}
+          arcColor={() => ["#2563eb", "#7c3aed"]}
           arcDashLength={0.4}
           arcDashGap={0.2}
           arcDashAnimateTime={4000}
@@ -99,6 +101,27 @@ export function FlightGlobe({
           arcLabel={(d) => (d as GlobeArc).label}
         />
       )}
+      <p className="px-3 py-1.5 text-[11px] text-zinc-500 dark:text-zinc-500">
+        Map tiles &copy;{" "}
+        <a
+          href="https://carto.com/attributions"
+          className="underline"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          CARTO
+        </a>
+        , data &copy;{" "}
+        <a
+          href="https://www.openstreetmap.org/copyright"
+          className="underline"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          OpenStreetMap
+        </a>{" "}
+        contributors
+      </p>
     </div>
   );
 }

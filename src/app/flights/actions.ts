@@ -20,6 +20,7 @@ export async function addFlight(
   }
 
   const flownOn = String(formData.get("flownOn") ?? "");
+  const airline = String(formData.get("airline") ?? "").trim();
   const aircraft = String(formData.get("aircraft") ?? "").trim();
   const departure = String(formData.get("departure") ?? "")
     .trim()
@@ -42,6 +43,7 @@ export async function addFlight(
   const { error } = await supabase.from("flights").insert({
     user_id: user.id,
     flown_on: flownOn,
+    airline: airline || null,
     aircraft,
     departure,
     arrival,
@@ -64,6 +66,17 @@ export async function deleteFlight(id: string) {
 
   if (!user) {
     redirect("/login");
+  }
+
+  const folder = `${user.id}/${id}`;
+  const { data: files } = await supabase.storage
+    .from("flight-media")
+    .list(folder);
+
+  if (files && files.length > 0) {
+    await supabase.storage
+      .from("flight-media")
+      .remove(files.map((file) => `${folder}/${file.name}`));
   }
 
   await supabase.from("flights").delete().eq("id", id);
