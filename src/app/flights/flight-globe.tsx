@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { geoDistance, geoGraticule10, geoOrthographic, geoPath } from "d3-geo";
+import {
+  geoBounds,
+  geoCentroid,
+  geoDistance,
+  geoGraticule10,
+  geoOrthographic,
+  geoPath,
+} from "d3-geo";
 import { drag as d3drag, type D3DragEvent } from "d3-drag";
 import { select } from "d3-selection";
 import { feature } from "topojson-client";
@@ -34,6 +41,32 @@ type CityDatum = {
   lon: number;
   pop: number;
 };
+
+// A country's shape plus a bounding cap (centroid + angular radius covering
+// its full extent) used to skip it entirely when it's certainly not in the
+// visible hemisphere, without changing what ends up on screen.
+type CountryCap = {
+  geometry: Geometry;
+  centroid: [number, number];
+  radius: number;
+};
+
+function boundingCap(feature: Feature<Geometry>): CountryCap {
+  const centroid = geoCentroid(feature) as [number, number];
+  const [[lon0, lat0], [lon1, lat1]] = geoBounds(feature);
+  const corners: [number, number][] = [
+    [lon0, lat0],
+    [lon0, lat1],
+    [lon1, lat0],
+    [lon1, lat1],
+  ];
+  let radius = 0;
+  for (const corner of corners) {
+    const d = geoDistance(centroid, corner);
+    if (d > radius) radius = d;
+  }
+  return { geometry: feature.geometry, centroid, radius };
+}
 
 const GLOBE_HEIGHT = 480;
 const COUNTRIES_URL = "/data/countries-50m.json";
@@ -74,9 +107,7 @@ export function FlightGlobe({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
-  const [countries, setCountries] = useState<Feature<Geometry>[] | null>(
-    null,
-  );
+  const [countries, setCountries] = useState<CountryCap[] | null>(null);
   const [cities, setCities] = useState<CityDatum[]>([]);
   const [zoom, setZoom] = useState(1);
   const [rotate, setRotate] = useState<[number, number]>(() => {
@@ -95,7 +126,7 @@ export function FlightGlobe({
         const collection = feature(topology, topology.objects.countries);
         const features =
           "features" in collection ? collection.features : [collection];
-        setCountries(features as Feature<Geometry>[]);
+        setCountries((features as Feature<Geometry>[]).map(boundingCap));
       })
       .catch(() => {
         if (!cancelled) setCountries([]);
@@ -151,25 +182,6 @@ export function FlightGlobe({
     return new Set([selectedArc.fromCode, selectedArc.toCode]);
   }, [selectedArc]);
 
-  // SVG path strings for each arc, in the current projection — used both to
-  // draw (via a canvas-bound geoPath below) and, unchanged here, to hit-test
-  // clicks precisely against the actual rendered curve.
-  const arcPathStrings = useMemo(() => {
-    const path = geoPath(projection);
-    const map = new Map<string, string>();
-    for (const arc of arcs) {
-      const d = path({
-        type: "LineString",
-        coordinates: [
-          [arc.startLng, arc.startLat],
-          [arc.endLng, arc.endLat],
-        ],
-      });
-      if (d) map.set(arc.id, d);
-    }
-    return map;
-  }, [arcs, projection]);
-
   // Draw. Runs on every rotation/selection change; a single imperative
   // canvas pass rather than per-country/per-point DOM nodes keeps dragging
   // smooth even with ~180 country shapes.
@@ -208,13 +220,35 @@ export function FlightGlobe({
     ctx.globalAlpha = 1;
 
     if (countries) {
-      ctx.beginPath();
-      for (const countryFeature of countries) path(countryFeature);
-      ctx.fillStyle = LAND;
-      ctx.fill();
-      ctx.strokeStyle = BORDER;
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
+      // Build one combined geometry of the (likely) visible countries and
+      // render it with a single geoPath call + Path2D fill/stroke, rather
+      // than invoking geoPath separately per country: constructing d3's
+      // projection/clip pipeline has a real fixed cost per call, and with
+      // ~240 countries that per-call overhead — not the point count — was
+      // the actual drag-time bottleneck.
+      const viewCenter: [number, number] = [-rotate[0], -rotate[1]];
+      const geometries: Geometry[] = [];
+      for (const { geometry, centroid, radius } of countries) {
+        // Skip countries whose full extent is certainly beyond the visible
+        // hemisphere — d3's clip pipeline would draw nothing for them
+        // anyway, but only after walking every point of their boundary.
+        if (geoDistance(viewCenter, centroid) > Math.PI / 2 + radius) {
+          continue;
+        }
+        geometries.push(geometry);
+      }
+      const countriesPath = geoPath(projection)({
+        type: "GeometryCollection",
+        geometries,
+      });
+      if (countriesPath) {
+        const countryShape = new Path2D(countriesPath);
+        ctx.fillStyle = LAND;
+        ctx.fill(countryShape);
+        ctx.strokeStyle = BORDER;
+        ctx.lineWidth = 0.5;
+        ctx.stroke(countryShape);
+      }
     }
 
     const cityPopulationCutoff = CITY_POPULATION_AT_DEFAULT_ZOOM / zoom;
@@ -301,16 +335,20 @@ export function FlightGlobe({
 
   // Kept in refs (rather than effect deps) so the drag/click listener below
   // is bound once per size change and never mid-gesture, while still always
-  // seeing the latest arcs/selection when a click is finally resolved.
-  const arcPathStringsRef = useRef(arcPathStrings);
+  // seeing the latest arcs/selection/projection when a click is finally
+  // resolved. Arc hit-test paths are built from projectionRef on demand
+  // (inside handleClick) rather than eagerly on every render, since that's
+  // the only place they're used but rotate (and so projection) changes on
+  // every drag frame.
   const arcsRef = useRef(arcs);
   const selectedIdRef = useRef(selectedId);
   const onSelectIdRef = useRef(onSelectId);
+  const projectionRef = useRef(projection);
   useEffect(() => {
-    arcPathStringsRef.current = arcPathStrings;
     arcsRef.current = arcs;
     selectedIdRef.current = selectedId;
     onSelectIdRef.current = onSelectId;
+    projectionRef.current = projection;
   });
 
   useEffect(() => {
@@ -337,8 +375,15 @@ export function FlightGlobe({
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.lineWidth = CLICK_TOLERANCE_PX;
+      const svgPath = geoPath(projectionRef.current);
       for (const arc of arcsRef.current) {
-        const d = arcPathStringsRef.current.get(arc.id);
+        const d = svgPath({
+          type: "LineString",
+          coordinates: [
+            [arc.startLng, arc.startLat],
+            [arc.endLng, arc.endLat],
+          ],
+        });
         if (!d) continue;
         if (ctx.isPointInStroke(new Path2D(d), x, y)) {
           onSelectIdRef.current(
@@ -354,27 +399,21 @@ export function FlightGlobe({
       .on("start", () => {
         moved = 0;
       })
-      .on(
-        "drag",
-        (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
-          moved += Math.abs(event.dx) + Math.abs(event.dy);
-          pendingDelta = pendingDelta
-            ? {
-                dx: pendingDelta.dx + event.dx,
-                dy: pendingDelta.dy + event.dy,
-              }
-            : { dx: event.dx, dy: event.dy };
-          if (frame === null) frame = requestAnimationFrame(flush);
-        },
-      )
-      .on(
-        "end",
-        (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
-          if (moved <= DRAG_THRESHOLD_PX) {
-            handleClick(event.x, event.y);
-          }
-        },
-      );
+      .on("drag", (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
+        moved += Math.abs(event.dx) + Math.abs(event.dy);
+        pendingDelta = pendingDelta
+          ? {
+              dx: pendingDelta.dx + event.dx,
+              dy: pendingDelta.dy + event.dy,
+            }
+          : { dx: event.dx, dy: event.dy };
+        if (frame === null) frame = requestAnimationFrame(flush);
+      })
+      .on("end", (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
+        if (moved <= DRAG_THRESHOLD_PX) {
+          handleClick(event.x, event.y);
+        }
+      });
 
     select(canvas).call(dragBehavior);
     return () => {
@@ -411,8 +450,8 @@ export function FlightGlobe({
         />
       )}
       <p className="px-3 py-1.5 text-[11px] text-zinc-600">
-        Drag to rotate, scroll to zoom, click a flight to see its airports.
-        Map data &copy;{" "}
+        Drag to rotate, scroll to zoom, click a flight to see its airports. Map
+        data &copy;{" "}
         <a
           href="https://www.naturalearthdata.com/"
           className="underline"
