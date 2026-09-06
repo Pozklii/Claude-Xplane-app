@@ -30,14 +30,13 @@ export type GlobeArc = {
   label: string;
 };
 
-type MapStyle = "satellite" | "map";
+type MapStyle = "day" | "night";
 
 const GLOBE_HEIGHT = 480;
-const SATELLITE_TEXTURE = "/globe/earth-blue-marble.jpg";
-
-function mapTileUrl(x: number, y: number, level: number) {
-  return `https://basemaps.cartocdn.com/rastertiles/voyager/${level}/${x}/${y}.png`;
-}
+const TEXTURES: Record<MapStyle, string> = {
+  day: "/globe/earth-blue-marble.jpg",
+  night: "/globe/earth-night.jpg",
+};
 
 export function FlightGlobe({
   points,
@@ -49,7 +48,7 @@ export function FlightGlobe({
   const globeRef = useRef<GlobeMethods | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
-  const [mapStyle, setMapStyle] = useState<MapStyle>("satellite");
+  const [mapStyle, setMapStyle] = useState<MapStyle>("day");
 
   useEffect(() => {
     const el = containerRef.current;
@@ -76,8 +75,8 @@ export function FlightGlobe({
       <div className="absolute right-3 top-3 z-10 flex rounded-full border border-white/20 bg-black/40 p-0.5 backdrop-blur-sm">
         {(
           [
-            ["satellite", "Satellite"],
-            ["map", "Map"],
+            ["day", "Day"],
+            ["night", "Night"],
           ] as const
         ).map(([value, label]) => (
           <button
@@ -100,8 +99,7 @@ export function FlightGlobe({
           ref={globeRef}
           width={width}
           height={GLOBE_HEIGHT}
-          globeImageUrl={mapStyle === "satellite" ? SATELLITE_TEXTURE : null}
-          globeTileEngineUrl={mapStyle === "map" ? mapTileUrl : null}
+          globeImageUrl={TEXTURES[mapStyle]}
           backgroundColor="rgba(0,0,0,0)"
           showAtmosphere
           atmosphereColor="#60a5fa"
@@ -109,8 +107,8 @@ export function FlightGlobe({
           pointLat="lat"
           pointLng="lng"
           pointColor={() => "#facc15"}
-          pointAltitude={0.01}
-          pointRadius={0.3}
+          pointAltitude={0.005}
+          pointRadius={0.15}
           labelsData={points}
           labelLat="lat"
           labelLng="lng"
@@ -118,48 +116,23 @@ export function FlightGlobe({
             const point = d as GlobePoint;
             return `${point.city} (${point.code})`;
           }}
-          labelSize={2.2}
+          labelSize={1.0}
           labelDotRadius={0}
           labelColor={() => "#facc15"}
-          labelAltitude={0.011}
+          labelAltitude={0.006}
           labelResolution={4}
           arcsData={arcs}
           arcStartLat="startLat"
           arcStartLng="startLng"
           arcEndLat="endLat"
           arcEndLng="endLng"
-          arcColor={() => ["#2563eb", "#7c3aed"]}
-          arcStroke={0.5}
+          arcColor={() => "#facc15"}
           arcLabel={(d) => (d as GlobeArc).label}
         />
       )}
 
       <p className="px-3 py-1.5 text-[11px] text-zinc-400">
-        {mapStyle === "satellite" ? (
-          <>Satellite imagery &copy; NASA Visible Earth (Blue Marble).</>
-        ) : (
-          <>
-            Map tiles &copy;{" "}
-            <a
-              href="https://carto.com/attributions"
-              className="underline"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              CARTO
-            </a>
-            , data &copy;{" "}
-            <a
-              href="https://www.openstreetmap.org/copyright"
-              className="underline"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              OpenStreetMap
-            </a>{" "}
-            contributors.
-          </>
-        )}
+        Imagery &copy; NASA Visible Earth (Blue Marble / Black Marble).
       </p>
     </div>
   );
