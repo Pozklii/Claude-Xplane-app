@@ -40,6 +40,8 @@ const POINT_COLOR = "#facc15";
 const POINT_COLOR_SELECTED = "#ffffff";
 const CLICK_TOLERANCE_PX = 6;
 const DRAG_THRESHOLD_PX = 2;
+const MIN_ZOOM = 0.6;
+const MAX_ZOOM = 6;
 
 function isFrontFacing(rotate: [number, number], lng: number, lat: number) {
   const [lambda, phi] = rotate;
@@ -60,6 +62,7 @@ export function FlightGlobe({
     null,
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
   const [rotate, setRotate] = useState<[number, number]>(() => {
     if (points.length === 0) return [0, -20];
     const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
@@ -97,7 +100,7 @@ export function FlightGlobe({
   }, []);
 
   const height = GLOBE_HEIGHT;
-  const scale = Math.max(width, 1) * 0.42;
+  const scale = Math.max(width, 1) * 0.42 * zoom;
 
   const projection = useMemo(
     () =>
@@ -321,6 +324,23 @@ export function FlightGlobe({
     };
   }, [width, scale]);
 
+  // Scroll/pinch to zoom. Kept in its own effect (rather than folded into
+  // the drag effect above) so rapid wheel events don't repeatedly tear down
+  // and rebind the drag/click listeners.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || width === 0) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const delta = -event.deltaY * 0.0015;
+      setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (1 + delta))));
+    };
+
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, [width]);
+
   return (
     <div
       ref={containerRef}
@@ -333,7 +353,8 @@ export function FlightGlobe({
         />
       )}
       <p className="px-3 py-1.5 text-[11px] text-zinc-600">
-        Drag to rotate, click a flight to see its airports. Map data &copy;{" "}
+        Drag to rotate, scroll to zoom, click a flight to see its airports.
+        Map data &copy;{" "}
         <a
           href="https://www.naturalearthdata.com/"
           className="underline"
