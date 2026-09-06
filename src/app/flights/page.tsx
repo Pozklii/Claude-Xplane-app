@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { findAirport } from "@/lib/airports";
 import { deleteFlight } from "./actions";
 import { NewFlightForm } from "./new-flight-form";
+import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flight-globe";
 
 type Flight = {
   id: string;
@@ -12,6 +14,56 @@ type Flight = {
   hours: number;
   notes: string | null;
 };
+
+function buildGlobeData(flights: Flight[]) {
+  const pointsByCode = new Map<string, GlobePoint>();
+  const arcs: GlobeArc[] = [];
+  const unresolvedCodes = new Set<string>();
+
+  for (const flight of flights) {
+    const from = findAirport(flight.departure);
+    const to = findAirport(flight.arrival);
+
+    if (from) {
+      pointsByCode.set(from.code, {
+        code: from.code,
+        name: from.name,
+        lat: from.lat,
+        lng: from.lon,
+      });
+    } else {
+      unresolvedCodes.add(flight.departure);
+    }
+
+    if (to) {
+      pointsByCode.set(to.code, {
+        code: to.code,
+        name: to.name,
+        lat: to.lat,
+        lng: to.lon,
+      });
+    } else {
+      unresolvedCodes.add(flight.arrival);
+    }
+
+    if (from && to) {
+      arcs.push({
+        id: flight.id,
+        startLat: from.lat,
+        startLng: from.lon,
+        endLat: to.lat,
+        endLng: to.lon,
+        label: `${flight.aircraft} · ${from.code} → ${to.code} · ${flight.flown_on}`,
+      });
+    }
+  }
+
+  return {
+    points: Array.from(pointsByCode.values()),
+    arcs,
+    unresolvedCodes: Array.from(unresolvedCodes),
+  };
+}
 
 export default async function FlightsPage() {
   const supabase = await createClient();
@@ -32,6 +84,8 @@ export default async function FlightsPage() {
   const totalHours =
     flights?.reduce((sum, flight) => sum + Number(flight.hours), 0) ?? 0;
 
+  const { points, arcs, unresolvedCodes } = buildGlobeData(flights ?? []);
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-6 py-16">
       <div className="flex flex-col gap-1">
@@ -42,6 +96,16 @@ export default async function FlightsPage() {
           {flights?.length ?? 0} flight{flights?.length === 1 ? "" : "s"}{" "}
           logged &middot; {totalHours.toFixed(1)} total hours
         </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <FlightGlobe points={points} arcs={arcs} />
+        {unresolvedCodes.length > 0 && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-500">
+            Not shown on the globe (unrecognized airport code):{" "}
+            {unresolvedCodes.join(", ")}
+          </p>
+        )}
       </div>
 
       <NewFlightForm />
