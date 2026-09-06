@@ -24,3 +24,13 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.flight-arc {
+  animation: flight-arc-dash 1.2s linear infinite;
+}
+
+@keyframes flight-arc-dash {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
