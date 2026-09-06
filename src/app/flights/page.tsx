@@ -72,6 +72,7 @@ function buildGlobeData(flights: Flight[]) {
       pointsByCode.set(from.code, {
         code: from.code,
         name: from.name,
+        city: from.city,
         lat: from.lat,
         lng: from.lon,
       });
@@ -83,6 +84,7 @@ function buildGlobeData(flights: Flight[]) {
       pointsByCode.set(to.code, {
         code: to.code,
         name: to.name,
+        city: to.city,
         lat: to.lat,
         lng: to.lon,
       });

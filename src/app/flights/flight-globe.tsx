@@ -11,6 +11,7 @@ import type { Feature, Geometry } from "geojson";
 export type GlobePoint = {
   code: string;
   name: string;
+  city: string;
   lat: number;
   lng: number;
 };
@@ -25,7 +26,14 @@ export type GlobeArc = {
 };
 
 const GLOBE_HEIGHT = 480;
-const COUNTRIES_URL = "/data/countries-50m.json";
+const COUNTRIES_URL = "/data/countries-110m.json";
+
+const OCEAN = "#cfe8f5";
+const GRATICULE = "#8fbfd9";
+const LAND = "#d9e8d3";
+const BORDER = "#93b884";
+const ARC_COLOR = "#2563eb";
+const POINT_COLOR = "#e11d48";
 
 function isFrontFacing(rotate: [number, number], lng: number, lat: number) {
   const [lambda, phi] = rotate;
@@ -40,17 +48,15 @@ export function FlightGlobe({
   arcs: GlobeArc[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [width, setWidth] = useState(0);
   const [countries, setCountries] = useState<Feature<Geometry>[] | null>(
     null,
   );
   const [rotate, setRotate] = useState<[number, number]>(() => {
     if (points.length === 0) return [0, -20];
-    const avgLng =
-      points.reduce((sum, p) => sum + p.lng, 0) / points.length;
-    const avgLat =
-      points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+    const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
+    const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
     return [-avgLng, -avgLat];
   });
 
@@ -96,32 +102,138 @@ export function FlightGlobe({
     [rotate, width, height, scale],
   );
 
-  const path = useMemo(() => geoPath(projection), [projection]);
   const graticule = useMemo(() => geoGraticule10(), []);
 
+  // Draw imperatively on a canvas rather than as SVG elements: with ~100+
+  // country shapes, re-rendering them as DOM nodes on every drag tick (each
+  // one re-diffed and re-painted by the browser) is what made dragging feel
+  // laggy. A canvas redraw is a single imperative pass with no DOM diffing.
   useEffect(() => {
-    if (!svgRef.current || width === 0) return;
+    const canvas = canvasRef.current;
+    if (!canvas || width === 0) return;
 
-    const dragBehavior = d3drag<SVGSVGElement, unknown>().on(
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+
+    const path = geoPath(projection, ctx);
+
+    ctx.clearRect(0, 0, width, height);
+
+    ctx.beginPath();
+    path({ type: "Sphere" });
+    ctx.fillStyle = OCEAN;
+    ctx.fill();
+    ctx.strokeStyle = GRATICULE;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.beginPath();
+    path(graticule);
+    ctx.strokeStyle = GRATICULE;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    if (countries) {
+      ctx.beginPath();
+      for (const countryFeature of countries) path(countryFeature);
+      ctx.fillStyle = LAND;
+      ctx.fill();
+      ctx.strokeStyle = BORDER;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+
+    for (const arc of arcs) {
+      if (
+        !isFrontFacing(rotate, arc.startLng, arc.startLat) &&
+        !isFrontFacing(rotate, arc.endLng, arc.endLat)
+      ) {
+        continue;
+      }
+      ctx.beginPath();
+      path({
+        type: "LineString",
+        coordinates: [
+          [arc.startLng, arc.startLat],
+          [arc.endLng, arc.endLat],
+        ],
+      });
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = ARC_COLOR;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    for (const point of points) {
+      if (!isFrontFacing(rotate, point.lng, point.lat)) continue;
+      const coords = projection([point.lng, point.lat]);
+      if (!coords) continue;
+      const [x, y] = coords;
+
+      ctx.beginPath();
+      ctx.arc(x, y, 3.5, 0, 2 * Math.PI);
+      ctx.fillStyle = POINT_COLOR;
+      ctx.fill();
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      const label = `${point.city} (${point.code})`;
+      ctx.font =
+        "600 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.fillStyle = "#1f2937";
+      ctx.textBaseline = "middle";
+      ctx.strokeText(label, x + 7, y);
+      ctx.fillText(label, x + 7, y);
+    }
+  }, [projection, countries, points, arcs, rotate, width, height, graticule]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || width === 0) return;
+
+    let pendingDelta: { dx: number; dy: number } | null = null;
+    let frame: number | null = null;
+
+    const flush = () => {
+      frame = null;
+      if (!pendingDelta) return;
+      const { dx, dy } = pendingDelta;
+      pendingDelta = null;
+      const sensitivity = 240 / scale;
+      setRotate(([lambda, phi]) => [
+        lambda + dx * sensitivity,
+        Math.max(-90, Math.min(90, phi - dy * sensitivity)),
+      ]);
+    };
+
+    const dragBehavior = d3drag<HTMLCanvasElement, unknown>().on(
       "drag",
-      (event: D3DragEvent<SVGSVGElement, unknown, unknown>) => {
-        const sensitivity = 240 / scale;
-        setRotate(([lambda, phi]) => [
-          lambda + event.dx * sensitivity,
-          Math.max(-90, Math.min(90, phi - event.dy * sensitivity)),
-        ]);
+      (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
+        pendingDelta = pendingDelta
+          ? { dx: pendingDelta.dx + event.dx, dy: pendingDelta.dy + event.dy }
+          : { dx: event.dx, dy: event.dy };
+        if (frame === null) frame = requestAnimationFrame(flush);
       },
     );
 
-    select(svgRef.current).call(dragBehavior);
+    select(canvas).call(dragBehavior);
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, [width, scale]);
-
-  const visiblePoints = points.filter((p) => isFrontFacing(rotate, p.lng, p.lat));
-  const visibleArcs = arcs.filter(
-    (a) =>
-      isFrontFacing(rotate, a.startLng, a.startLat) ||
-      isFrontFacing(rotate, a.endLng, a.endLat),
-  );
 
   return (
     <div
@@ -129,75 +241,10 @@ export function FlightGlobe({
       className="overflow-hidden rounded-2xl border border-black/[.08] bg-[#cfe8f5] dark:border-white/[.145]"
     >
       {width > 0 && (
-        <svg
-          ref={svgRef}
-          width={width}
-          height={height}
+        <canvas
+          ref={canvasRef}
           className="cursor-grab touch-none active:cursor-grabbing"
-        >
-          <path
-            d={path({ type: "Sphere" }) ?? undefined}
-            fill="#cfe8f5"
-            stroke="#8fbfd9"
-            strokeWidth={1}
-          />
-          <path
-            d={path(graticule) ?? undefined}
-            fill="none"
-            stroke="#8fbfd9"
-            strokeWidth={0.5}
-            opacity={0.5}
-          />
-          {countries?.map((countryFeature, i) => (
-            <path
-              key={i}
-              d={path(countryFeature) ?? undefined}
-              fill="#d9e8d3"
-              stroke="#93b884"
-              strokeWidth={0.5}
-            />
-          ))}
-          {visibleArcs.map((arc) => (
-            <path
-              key={arc.id}
-              d={
-                path({
-                  type: "LineString",
-                  coordinates: [
-                    [arc.startLng, arc.startLat],
-                    [arc.endLng, arc.endLat],
-                  ],
-                }) ?? undefined
-              }
-              fill="none"
-              stroke="#2563eb"
-              strokeWidth={1.6}
-              strokeDasharray="5 4"
-              className="flight-arc"
-            >
-              <title>{arc.label}</title>
-            </path>
-          ))}
-          {visiblePoints.map((point) => {
-            const coords = projection([point.lng, point.lat]);
-            if (!coords) return null;
-            return (
-              <circle
-                key={point.code}
-                cx={coords[0]}
-                cy={coords[1]}
-                r={3.5}
-                fill="#e11d48"
-                stroke="white"
-                strokeWidth={1}
-              >
-                <title>
-                  {point.name} ({point.code})
-                </title>
-              </circle>
-            );
-          })}
-        </svg>
+        />
       )}
       <p className="px-3 py-1.5 text-[11px] text-zinc-600">
         Drag the globe to rotate. Map data &copy;{" "}
