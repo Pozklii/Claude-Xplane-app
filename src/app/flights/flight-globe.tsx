@@ -136,7 +136,6 @@ function Globe3D({
           backgroundColor="rgba(0,0,0,0)"
           showAtmosphere
           atmosphereColor="#60a5fa"
-          lineHoverPrecision={20}
           onGlobeReady={() => {
             const renderer = globeRef.current?.renderer();
             renderer?.setPixelRatio(
@@ -313,7 +312,7 @@ function FlatMap({
                         points={segment.map(([x, y]) => `${x},${y}`).join(" ")}
                         fill="none"
                         stroke="transparent"
-                        strokeWidth={14}
+                        strokeWidth={5}
                         className="cursor-pointer"
                         onClick={(e) => {
                           e.stopPropagation();
