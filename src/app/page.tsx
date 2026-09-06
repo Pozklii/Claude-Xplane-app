@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 const features = [
   {
     title: "Log every flight",
@@ -31,6 +33,12 @@ export default function Home() {
             A simple place to log flights, review your history, and keep
             track of the hours you&apos;ve flown.
           </p>
+          <Link
+            href="/login"
+            className="rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+          >
+            Get started
+          </Link>
         </div>
 
         <div className="grid w-full grid-cols-1 gap-6 text-left sm:grid-cols-3">
@@ -48,10 +56,6 @@ export default function Home() {
             </div>
           ))}
         </div>
-
-        <p className="text-sm text-zinc-500 dark:text-zinc-500">
-          Sign-in and flight logging are coming soon.
-        </p>
       </main>
     </div>
   );
