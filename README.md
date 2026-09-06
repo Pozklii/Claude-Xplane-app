@@ -44,7 +44,7 @@ After deploying, add your Vercel URL (and any preview URLs) to Supabase's Authen
 
 - Email/password sign-up and sign-in via Supabase Auth (`/login`)
 - A protected `/flights` page for logging and reviewing your flights (date, airline, aircraft, route, hours, notes), backed by a `flights` table scoped to each user via row-level security
-- A draggable 3D globe on the flights page (WebGL, via [react-globe.gl](https://github.com/vasturiano/react-globe.gl)) plotting every flight as a thin line with a small flat dot at each airport, with a Day/Night satellite imagery switch (both textures self-hosted, no external map service or API key needed). Airport coordinates come from a bundled ICAO/IATA lookup — no coordinates to enter manually. Routes are unlabeled by default to avoid clutter; clicking one highlights it and shows its two airports' city/code labels
+- A flight map on the flights page, switchable between a draggable 3D globe (WebGL, via [react-globe.gl](https://github.com/vasturiano/react-globe.gl)) and a flat 2D world map (SVG), both using the same self-hosted, high-resolution NASA satellite imagery — no external map service or API key needed. Every flight renders as a thin line (a true curved great-circle path in 2D) with a small flat dot at each airport. Airport coordinates come from a bundled ICAO/IATA lookup — no coordinates to enter manually. Routes are unlabeled by default to avoid clutter; clicking one highlights it and shows its two airports' city/code labels
 - Screenshots/videos per flight, uploaded to a private Supabase Storage bucket (`flight-media`) scoped to each user
 
 ## Roadmap
