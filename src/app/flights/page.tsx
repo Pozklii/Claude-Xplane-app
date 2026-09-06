@@ -8,6 +8,7 @@ import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flight-globe";
 import { FlightMedia, type MediaItem } from "./flight-media";
 import { FlightRow } from "./flight-row";
 import { SelectionProvider } from "./selection-context";
+import { StopPropagation } from "./stop-propagation";
 
 type Flight = {
   id: string;
@@ -215,26 +216,25 @@ export default async function FlightsPage() {
                     </p>
                   )}
                 </div>
-                <form
-                  action={deleteFlight.bind(null, flight.id)}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    type="submit"
-                    className="self-start rounded-full border border-black/[.08] px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-400 dark:hover:bg-[#1a1a1a]"
-                  >
-                    Delete
-                  </button>
-                </form>
+                <StopPropagation>
+                  <form action={deleteFlight.bind(null, flight.id)}>
+                    <button
+                      type="submit"
+                      className="self-start rounded-full border border-black/[.08] px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-400 dark:hover:bg-[#1a1a1a]"
+                    >
+                      Delete
+                    </button>
+                  </form>
+                </StopPropagation>
               </div>
 
-              <div onClick={(e) => e.stopPropagation()}>
+              <StopPropagation>
                 <FlightMedia
                   flightId={flight.id}
                   userId={user.id}
                   items={mediaByFlight.get(flight.id) ?? []}
                 />
-              </div>
+              </StopPropagation>
             </FlightRow>
           ))}
         </div>
