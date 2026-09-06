@@ -1,14 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  geoBounds,
-  geoCentroid,
-  geoDistance,
-  geoGraticule10,
-  geoOrthographic,
-  geoPath,
-} from "d3-geo";
+import { geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
 import { drag as d3drag, type D3DragEvent } from "d3-drag";
 import { select } from "d3-selection";
 import { feature } from "topojson-client";
@@ -42,33 +35,6 @@ type CityDatum = {
   pop: number;
 };
 
-// A country's shape plus a bounding cap (centroid + angular radius covering
-// its full extent) used to skip it entirely when it's certainly not in the
-// visible hemisphere, without changing what ends up on screen.
-type CountryCap = {
-  geometry: Geometry;
-  centroid: [number, number];
-  radius: number;
-};
-
-function boundingCap(feature: Feature<Geometry>): CountryCap {
-  const centroid = geoCentroid(feature) as [number, number];
-  const [[lon0, lat0], [lon1, lat1]] = geoBounds(feature);
-  const corners: [number, number][] = [
-    [lon0, lat0],
-    [lon0, lat1],
-    [lon1, lat0],
-    [lon1, lat1],
-  ];
-  let radius = 0;
-  for (const corner of corners) {
-    const d = geoDistance(centroid, corner);
-    if (d > radius) radius = d;
-  }
-  return { geometry: feature.geometry, centroid, radius };
-}
-
-const GLOBE_HEIGHT = 480;
 const COUNTRIES_URL = "/data/countries-50m.json";
 const CITIES_URL = "/data/cities.json";
 
@@ -84,15 +50,14 @@ const POINT_COLOR = "#facc15";
 const POINT_COLOR_SELECTED = "#ffffff";
 const CLICK_TOLERANCE_PX = 6;
 const DRAG_THRESHOLD_PX = 2;
-const MIN_ZOOM = 0.6;
-const MAX_ZOOM = 6;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 8;
 // At zoom 1, only cities above this population are shown; zooming in
 // reveals progressively smaller cities.
 const CITY_POPULATION_AT_DEFAULT_ZOOM = 3_000_000;
 
-function isFrontFacing(rotate: [number, number], lng: number, lat: number) {
-  const [lambda, phi] = rotate;
-  return geoDistance([-lambda, -phi], [lng, lat]) < Math.PI / 2;
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 export function FlightGlobe({
@@ -106,15 +71,19 @@ export function FlightGlobe({
     useSelection();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const staticCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [width, setWidth] = useState(0);
-  const [countries, setCountries] = useState<CountryCap[] | null>(null);
+  const [countries, setCountries] = useState<Geometry[] | null>(null);
   const [cities, setCities] = useState<CityDatum[]>([]);
   const [zoom, setZoom] = useState(1);
-  const [rotate, setRotate] = useState<[number, number]>(() => {
-    if (points.length === 0) return [0, -20];
+  // The lon/lat currently centered in the viewport. Panning only ever
+  // updates this — it never touches the projection itself, so dragging
+  // never re-projects the map's geometry (see the draw effect below).
+  const [center, setCenter] = useState<[number, number]>(() => {
+    if (points.length === 0) return [0, 20];
     const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
     const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
-    return [-avgLng, -avgLat];
+    return [avgLng, avgLat];
   });
 
   useEffect(() => {
@@ -126,7 +95,7 @@ export function FlightGlobe({
         const collection = feature(topology, topology.objects.countries);
         const features =
           "features" in collection ? collection.features : [collection];
-        setCountries((features as Feature<Geometry>[]).map(boundingCap));
+        setCountries((features as Feature<Geometry>[]).map((f) => f.geometry));
       })
       .catch(() => {
         if (!cancelled) setCountries([]);
@@ -161,17 +130,25 @@ export function FlightGlobe({
     return () => observer.disconnect();
   }, []);
 
-  const height = GLOBE_HEIGHT;
-  const scale = Math.max(width, 1) * 0.42 * zoom;
+  // A flat world map is naturally 2:1 (width:height); match the viewport to
+  // that so the whole world fits with no blank margins at the default zoom.
+  const height = Math.max(Math.round(width / 2), 1);
+  // The whole world, at the current zoom, rendered at mapWidth x mapHeight
+  // pixels (2:1 aspect, standard for an equirectangular map). This is
+  // independent of pan — only zoom (and container width) change it — so
+  // panning never needs to touch the projection or re-render the map.
+  const mapWidth = Math.max(width, 1) * zoom;
+  const mapHeight = mapWidth / 2;
+  const scale = mapWidth / (2 * Math.PI);
 
+  // Fixed projection: prime meridian at the center of the rendered map,
+  // never rotated or re-translated by panning.
   const projection = useMemo(
     () =>
-      geoOrthographic()
-        .rotate([rotate[0], rotate[1], 0])
-        .translate([width / 2, height / 2])
-        .scale(scale)
-        .clipAngle(90),
-    [rotate, width, height, scale],
+      geoEquirectangular()
+        .translate([mapWidth / 2, mapHeight / 2])
+        .scale(scale),
+    [mapWidth, mapHeight, scale],
   );
 
   const graticule = useMemo(() => geoGraticule10(), []);
@@ -182,34 +159,33 @@ export function FlightGlobe({
     return new Set([selectedArc.fromCode, selectedArc.toCode]);
   }, [selectedArc]);
 
-  // Draw. Runs on every rotation/selection change; a single imperative
-  // canvas pass rather than per-country/per-point DOM nodes keeps dragging
-  // smooth even with ~180 country shapes.
+  // Render the static base map (ocean, graticule, countries, city labels)
+  // to an off-DOM canvas whenever the map's own pixel size or the source
+  // data changes — NOT on every pan. Dragging then costs only a couple of
+  // drawImage blits plus redrawing the handful of arcs/points on top,
+  // regardless of how detailed the country/city data is.
+  const [staticVersion, setStaticVersion] = useState(0);
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || width === 0) return;
-
+    if (width === 0) return;
+    let canvas = staticCanvasRef.current;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      staticCanvasRef.current = canvas;
+    }
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-
+    canvas.width = mapWidth * dpr;
+    canvas.height = mapHeight * dpr;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, mapWidth, mapHeight);
 
     const path = geoPath(projection, ctx);
-
-    ctx.clearRect(0, 0, width, height);
 
     ctx.beginPath();
     path({ type: "Sphere" });
     ctx.fillStyle = OCEAN;
     ctx.fill();
-    ctx.strokeStyle = GRATICULE;
-    ctx.lineWidth = 1;
-    ctx.stroke();
 
     ctx.beginPath();
     path(graticule);
@@ -220,29 +196,16 @@ export function FlightGlobe({
     ctx.globalAlpha = 1;
 
     if (countries) {
-      // Build one combined geometry of the (likely) visible countries and
-      // render it with a single geoPath call + Path2D fill/stroke, rather
-      // than invoking geoPath separately per country: constructing d3's
+      // One combined geometry + a single geoPath/Path2D call, rather than
+      // looping and calling geoPath per country: constructing d3's
       // projection/clip pipeline has a real fixed cost per call, and with
-      // ~240 countries that per-call overhead — not the point count — was
-      // the actual drag-time bottleneck.
-      const viewCenter: [number, number] = [-rotate[0], -rotate[1]];
-      const geometries: Geometry[] = [];
-      for (const { geometry, centroid, radius } of countries) {
-        // Skip countries whose full extent is certainly beyond the visible
-        // hemisphere — d3's clip pipeline would draw nothing for them
-        // anyway, but only after walking every point of their boundary.
-        if (geoDistance(viewCenter, centroid) > Math.PI / 2 + radius) {
-          continue;
-        }
-        geometries.push(geometry);
-      }
-      const countriesPath = geoPath(projection)({
+      // ~240 countries that per-call overhead dominates.
+      const d = geoPath(projection)({
         type: "GeometryCollection",
-        geometries,
+        geometries: countries,
       });
-      if (countriesPath) {
-        const countryShape = new Path2D(countriesPath);
+      if (d) {
+        const countryShape = new Path2D(d);
         ctx.fillStyle = LAND;
         ctx.fill(countryShape);
         ctx.strokeStyle = BORDER;
@@ -256,7 +219,6 @@ export function FlightGlobe({
     ctx.textBaseline = "middle";
     for (const city of cities) {
       if (city.pop < cityPopulationCutoff) continue;
-      if (!isFrontFacing(rotate, city.lon, city.lat)) continue;
       const coords = projection([city.lon, city.lat]);
       if (!coords) continue;
       const [x, y] = coords;
@@ -270,85 +232,135 @@ export function FlightGlobe({
       ctx.fillText(city.name, x + 4, y);
     }
 
-    for (const arc of arcs) {
-      if (
-        !isFrontFacing(rotate, arc.startLng, arc.startLat) &&
-        !isFrontFacing(rotate, arc.endLng, arc.endLat)
-      ) {
-        continue;
-      }
-      const selected = arc.id === selectedId;
-      ctx.beginPath();
-      path({
-        type: "LineString",
-        coordinates: [
-          [arc.startLng, arc.startLat],
-          [arc.endLng, arc.endLat],
-        ],
-      });
-      ctx.strokeStyle = selected ? ARC_COLOR_SELECTED : ARC_COLOR;
-      ctx.lineWidth = selected ? 2 : 1.2;
-      ctx.stroke();
-    }
-
-    for (const point of points) {
-      if (!isFrontFacing(rotate, point.lng, point.lat)) continue;
-      const coords = projection([point.lng, point.lat]);
-      if (!coords) continue;
-      const [x, y] = coords;
-      const highlighted = highlightedCodes.has(point.code);
-
-      ctx.beginPath();
-      ctx.arc(x, y, highlighted ? 5 : 3, 0, 2 * Math.PI);
-      ctx.fillStyle = highlighted ? POINT_COLOR_SELECTED : POINT_COLOR;
-      ctx.fill();
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      if (highlighted) {
-        const label = `${point.city} (${point.code})`;
-        ctx.font =
-          "600 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-        ctx.fillStyle = "#1f2937";
-        ctx.textBaseline = "middle";
-        ctx.strokeText(label, x + 7, y);
-        ctx.fillText(label, x + 7, y);
-      }
-    }
+    setStaticVersion((v) => v + 1);
   }, [
+    width,
+    mapWidth,
+    mapHeight,
     projection,
+    graticule,
     countries,
     cities,
     zoom,
-    points,
-    arcs,
-    rotate,
+  ]);
+
+  // Pixel pan offset for the current center — recomputed cheaply from the
+  // (stable) projection each render, rather than stored directly, so
+  // zooming keeps the same lon/lat centered for free.
+  const panX = width / 2 - (projection([center[0], 0])?.[0] ?? 0);
+  const rawPanY = height / 2 - (projection([0, center[1]])?.[1] ?? 0);
+  const panY =
+    mapHeight <= height
+      ? (height - mapHeight) / 2
+      : clamp(rawPanY, height - mapHeight, 0);
+
+  // Draw. Panning only updates `center`, which only shifts where the
+  // pre-rendered static bitmap is blitted from and where the (few) arcs
+  // and airport points are translated to — no geometry is re-projected.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const staticCanvas = staticCanvasRef.current;
+    if (!canvas || !staticCanvas || width === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    // mapWidth is always >= width (MIN_ZOOM is 1), so any window of the
+    // visible canvas's width straddles at most one seam between adjacent
+    // horizontal copies of the map — three copies always fully cover it.
+    const wrappedX = ((panX % mapWidth) + mapWidth) % mapWidth;
+    const wrapOffsets = [-mapWidth, 0, mapWidth];
+    for (const offset of wrapOffsets) {
+      ctx.drawImage(staticCanvas, wrappedX + offset, panY, mapWidth, mapHeight);
+    }
+
+    const path = geoPath(projection, ctx);
+
+    for (const offset of wrapOffsets) {
+      ctx.save();
+      ctx.translate(wrappedX + offset, panY);
+
+      for (const arc of arcs) {
+        const selected = arc.id === selectedId;
+        ctx.beginPath();
+        path({
+          type: "LineString",
+          coordinates: [
+            [arc.startLng, arc.startLat],
+            [arc.endLng, arc.endLat],
+          ],
+        });
+        ctx.strokeStyle = selected ? ARC_COLOR_SELECTED : ARC_COLOR;
+        ctx.lineWidth = selected ? 2 : 1.2;
+        ctx.stroke();
+      }
+
+      for (const point of points) {
+        const coords = projection([point.lng, point.lat]);
+        if (!coords) continue;
+        const [x, y] = coords;
+        const highlighted = highlightedCodes.has(point.code);
+
+        ctx.beginPath();
+        ctx.arc(x, y, highlighted ? 5 : 3, 0, 2 * Math.PI);
+        ctx.fillStyle = highlighted ? POINT_COLOR_SELECTED : POINT_COLOR;
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        if (highlighted) {
+          const label = `${point.city} (${point.code})`;
+          ctx.font =
+            "600 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+          ctx.fillStyle = "#1f2937";
+          ctx.textBaseline = "middle";
+          ctx.strokeText(label, x + 7, y);
+          ctx.fillText(label, x + 7, y);
+        }
+      }
+
+      ctx.restore();
+    }
+  }, [
+    panX,
+    panY,
+    mapWidth,
+    mapHeight,
+    projection,
     width,
     height,
-    graticule,
+    arcs,
+    points,
     selectedId,
     highlightedCodes,
+    staticVersion,
   ]);
 
   // Kept in refs (rather than effect deps) so the drag/click listener below
   // is bound once per size change and never mid-gesture, while still always
-  // seeing the latest arcs/selection/projection when a click is finally
-  // resolved. Arc hit-test paths are built from projectionRef on demand
-  // (inside handleClick) rather than eagerly on every render, since that's
-  // the only place they're used but rotate (and so projection) changes on
-  // every drag frame.
+  // seeing the latest arcs/selection/pan when a click is finally resolved.
   const arcsRef = useRef(arcs);
   const selectedIdRef = useRef(selectedId);
   const onSelectIdRef = useRef(onSelectId);
   const projectionRef = useRef(projection);
+  const panRef = useRef({ x: panX, y: panY, mapWidth });
   useEffect(() => {
     arcsRef.current = arcs;
     selectedIdRef.current = selectedId;
     onSelectIdRef.current = onSelectId;
     projectionRef.current = projection;
+    panRef.current = { x: panX, y: panY, mapWidth };
   });
 
   useEffect(() => {
@@ -364,17 +376,21 @@ export function FlightGlobe({
       if (!pendingDelta) return;
       const { dx, dy } = pendingDelta;
       pendingDelta = null;
-      const sensitivity = 240 / scale;
-      setRotate(([lambda, phi]) => [
-        lambda + dx * sensitivity,
-        Math.max(-90, Math.min(90, phi - dy * sensitivity)),
-      ]);
+      const degreesPerPixel = 360 / mapWidth;
+      setCenter(([lng, lat]) => {
+        const nextLng = ((lng - dx * degreesPerPixel + 540) % 360) - 180;
+        const nextLat = clamp(lat + dy * degreesPerPixel, -85, 85);
+        return [nextLng, nextLat];
+      });
     };
 
     const handleClick = (x: number, y: number) => {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.lineWidth = CLICK_TOLERANCE_PX;
+      const { x: px, y: py, mapWidth: mw } = panRef.current;
+      const wrappedX = ((px % mw) + mw) % mw;
+      const localY = y - py;
       const svgPath = geoPath(projectionRef.current);
       for (const arc of arcsRef.current) {
         const d = svgPath({
@@ -385,7 +401,11 @@ export function FlightGlobe({
           ],
         });
         if (!d) continue;
-        if (ctx.isPointInStroke(new Path2D(d), x, y)) {
+        const arcPath = new Path2D(d);
+        const hit = [wrappedX - mw, wrappedX, wrappedX + mw].some((offsetX) =>
+          ctx.isPointInStroke(arcPath, x - offsetX, localY),
+        );
+        if (hit) {
           onSelectIdRef.current(
             selectedIdRef.current === arc.id ? null : arc.id,
           );
@@ -419,7 +439,7 @@ export function FlightGlobe({
     return () => {
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [width, scale]);
+  }, [width, mapWidth]);
 
   // Scroll/pinch to zoom. Kept in its own effect (rather than folded into
   // the drag effect above) so rapid wheel events don't repeatedly tear down
@@ -450,7 +470,7 @@ export function FlightGlobe({
         />
       )}
       <p className="px-3 py-1.5 text-[11px] text-zinc-600">
-        Drag to rotate, scroll to zoom, click a flight to see its airports. Map
+        Drag to pan, scroll to zoom, click a flight to see its airports. Map
         data &copy;{" "}
         <a
           href="https://www.naturalearthdata.com/"
