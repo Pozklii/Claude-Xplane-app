@@ -8,8 +8,6 @@ import {
   NavigationControl,
   type GeoJSONSource,
   type LngLatBoundsLike,
-  type LayerSpecification,
-  type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useSelection } from "./selection-context";
@@ -34,110 +32,20 @@ export type GlobeArc = {
 };
 
 // A free, no-API-key vector style — good detail (roads, place labels,
-// land/water) without needing a MapTiler (or similar) key. Its colors are
-// overridden below (applyNeonStyle) rather than forking a whole new style.
-const STYLE_URL: string | StyleSpecification =
-  "https://tiles.openfreemap.org/styles/liberty";
+// land/water) without needing a MapTiler (or similar) key. Swap for a
+// MapTiler satellite style once a key is available.
+const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 const MAP_HEIGHT = 480;
 
-// "Neon Approach" palette — ultraviolet ocean, acid-teal coastlines,
-// magenta-to-cyan flight routes with a soft glow.
-const NEON = {
-  background: "#170a2e",
-  water: "#170a2e",
-  waterway: "#3a1461",
-  landcover: "#0f2e2f",
-  building: "#1c1033",
-  boundary: "#22e6b0",
-  road: "#4a1a6b",
-  labelText: "#eafcff",
-  labelHalo: "#170a2e",
-  skyColor: "#170a2e",
-  horizonColor: "#5a1f8f",
-} as const;
-
 // deck.gl color accessors take [r, g, b, a] (0-255), not CSS strings.
-const ARC_SOURCE: [number, number, number, number] = [255, 63, 214, 210];
-const ARC_TARGET: [number, number, number, number] = [34, 230, 255, 210];
-const ARC_SOURCE_SELECTED: [number, number, number, number] = [
-  255, 63, 214, 255,
+const ARC_COLOR: [number, number, number, number] = [37, 99, 235, 140];
+const ARC_COLOR_SELECTED: [number, number, number, number] = [
+  29, 78, 216, 242,
 ];
-const ARC_TARGET_SELECTED: [number, number, number, number] = [
-  34, 230, 255, 255,
-];
-const ARC_GLOW: [number, number, number, number] = [217, 70, 239, 70];
-const ARC_GLOW_SELECTED: [number, number, number, number] = [
-  217, 70, 239, 130,
-];
-const MARKER: [number, number, number, number] = [232, 255, 91, 255];
-const MARKER_HIGHLIGHTED: [number, number, number, number] = [
+const POINT_COLOR: [number, number, number, number] = [250, 204, 21, 255];
+const POINT_COLOR_SELECTED: [number, number, number, number] = [
   255, 255, 255, 255,
 ];
-const MARKER_GLOW: [number, number, number, number] = [232, 255, 91, 90];
-const MARKER_GLOW_HIGHLIGHTED: [number, number, number, number] = [
-  255, 255, 255, 130,
-];
-
-// Recolors an OpenMapTiles-schema style (which OpenFreeMap's styles follow)
-// by source-layer/type rather than hardcoding this particular style's own
-// layer names, so it keeps working if the upstream style is regenerated.
-function applyNeonStyle(map: MapLibreMap) {
-  const layers = map.getStyle()?.layers as LayerSpecification[] | undefined;
-  if (!layers) return;
-
-  for (const layer of layers) {
-    const sourceLayer =
-      "source-layer" in layer ? layer["source-layer"] : undefined;
-    try {
-      if (layer.type === "background") {
-        map.setPaintProperty(layer.id, "background-color", NEON.background);
-      } else if (layer.type === "fill") {
-        if (sourceLayer === "water") {
-          map.setPaintProperty(layer.id, "fill-color", NEON.water);
-        } else if (
-          sourceLayer === "landcover" ||
-          sourceLayer === "landuse" ||
-          sourceLayer === "park"
-        ) {
-          map.setPaintProperty(layer.id, "fill-color", NEON.landcover);
-        } else if (sourceLayer === "building") {
-          map.setPaintProperty(layer.id, "fill-color", NEON.building);
-          map.setPaintProperty(layer.id, "fill-opacity", 0.5);
-        }
-      } else if (layer.type === "fill-extrusion" && sourceLayer === "building") {
-        map.setPaintProperty(layer.id, "fill-extrusion-color", NEON.building);
-      } else if (layer.type === "line") {
-        if (sourceLayer === "waterway") {
-          map.setPaintProperty(layer.id, "line-color", NEON.waterway);
-        } else if (sourceLayer === "boundary") {
-          map.setPaintProperty(layer.id, "line-color", NEON.boundary);
-          map.setPaintProperty(layer.id, "line-opacity", 0.55);
-        } else if (
-          sourceLayer === "road" ||
-          sourceLayer === "transportation"
-        ) {
-          map.setPaintProperty(layer.id, "line-color", NEON.road);
-          map.setPaintProperty(layer.id, "line-opacity", 0.45);
-        } else if (sourceLayer === "building") {
-          map.setPaintProperty(layer.id, "line-color", NEON.building);
-        }
-      } else if (layer.type === "symbol") {
-        map.setPaintProperty(layer.id, "text-color", NEON.labelText);
-        map.setPaintProperty(layer.id, "text-halo-color", NEON.labelHalo);
-      }
-    } catch {
-      // Not every layer supports every paint property for its type (e.g. a
-      // layer with no opacity ever set) — skip it rather than aborting the
-      // whole recolor pass over one layer.
-    }
-  }
-
-  map.setSky({
-    "sky-color": NEON.skyColor,
-    "horizon-color": NEON.horizonColor,
-    "atmosphere-blend": 0.9,
-  });
-}
 
 export function FlightGlobe({
   points,
@@ -178,11 +86,10 @@ export function FlightGlobe({
 
     map.on("load", () => {
       map.setProjection({ type: "globe" });
-      applyNeonStyle(map);
 
       // Text labels for the two airports of the selected flight only —
       // the dots themselves are drawn by the deck.gl ScatterplotLayer
-      // below, which can glow in a way MapLibre's circle layer can't.
+      // below.
       map.addSource("flight-point-labels", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -195,12 +102,12 @@ export function FlightGlobe({
           "text-field": ["get", "label"],
           "text-size": 12,
           "text-font": ["Noto Sans Bold"],
-          "text-offset": [0.9, 0],
+          "text-offset": [0.8, 0],
           "text-anchor": "left",
         },
         paint: {
-          "text-color": "#eafcff",
-          "text-halo-color": NEON.background,
+          "text-color": "#1f2937",
+          "text-halo-color": "rgba(255, 255, 255, 0.9)",
           "text-halo-width": 2,
         },
       });
@@ -219,7 +126,7 @@ export function FlightGlobe({
           x: event.point.x,
           y: event.point.y,
           radius: 6,
-          layerIds: ["flight-arcs-glow"],
+          layerIds: ["flight-arcs"],
         });
         const hitId = (hit?.object as GlobeArc | undefined)?.id ?? null;
         onSelectIdRef.current(
@@ -258,8 +165,8 @@ export function FlightGlobe({
         ? new Set([selectedArc.fromCode, selectedArc.toCode])
         : new Set<string>();
 
-      const arcGlowLayer = new ArcLayer<GlobeArc>({
-        id: "flight-arcs-glow",
+      const arcLayer = new ArcLayer<GlobeArc>({
+        id: "flight-arcs",
         data: arcs,
         pickable: true,
         greatCircle: true,
@@ -269,58 +176,30 @@ export function FlightGlobe({
         getSourcePosition: (d) => [d.startLng, d.startLat],
         getTargetPosition: (d) => [d.endLng, d.endLat],
         getSourceColor: (d) =>
-          d.id === selectedId ? ARC_GLOW_SELECTED : ARC_GLOW,
+          d.id === selectedId ? ARC_COLOR_SELECTED : ARC_COLOR,
         getTargetColor: (d) =>
-          d.id === selectedId ? ARC_GLOW_SELECTED : ARC_GLOW,
-        getWidth: (d) => (d.id === selectedId ? 10 : 6),
+          d.id === selectedId ? ARC_COLOR_SELECTED : ARC_COLOR,
+        getWidth: (d) => (d.id === selectedId ? 2.5 : 1.2),
         getHeight: 0.35,
         widthUnits: "pixels",
       });
 
-      const arcCoreLayer = new ArcLayer<GlobeArc>({
-        id: "flight-arcs-core",
-        data: arcs,
-        pickable: false,
-        greatCircle: true,
-        parameters: { cullMode: "none" },
-        getSourcePosition: (d) => [d.startLng, d.startLat],
-        getTargetPosition: (d) => [d.endLng, d.endLat],
-        getSourceColor: (d) =>
-          d.id === selectedId ? ARC_SOURCE_SELECTED : ARC_SOURCE,
-        getTargetColor: (d) =>
-          d.id === selectedId ? ARC_TARGET_SELECTED : ARC_TARGET,
-        getWidth: (d) => (d.id === selectedId ? 2.6 : 1.3),
-        getHeight: 0.35,
-        widthUnits: "pixels",
-      });
-
-      const pointGlowLayer = new ScatterplotLayer<GlobePoint>({
-        id: "flight-points-glow",
+      const pointLayer = new ScatterplotLayer<GlobePoint>({
+        id: "flight-points",
         data: points,
         pickable: false,
         getPosition: (d) => [d.lng, d.lat],
         getFillColor: (d) =>
-          highlightedCodes.has(d.code) ? MARKER_GLOW_HIGHLIGHTED : MARKER_GLOW,
-        getRadius: (d) => (highlightedCodes.has(d.code) ? 16 : 9),
-        radiusUnits: "pixels",
-      });
-
-      const pointCoreLayer = new ScatterplotLayer<GlobePoint>({
-        id: "flight-points-core",
-        data: points,
-        pickable: false,
-        getPosition: (d) => [d.lng, d.lat],
-        getFillColor: (d) =>
-          highlightedCodes.has(d.code) ? MARKER_HIGHLIGHTED : MARKER,
+          highlightedCodes.has(d.code) ? POINT_COLOR_SELECTED : POINT_COLOR,
         getRadius: (d) => (highlightedCodes.has(d.code) ? 6 : 3.5),
         radiusUnits: "pixels",
         stroked: true,
-        getLineColor: [10, 6, 20, 200],
+        getLineColor: [0, 0, 0, 150],
         lineWidthMinPixels: 1,
       });
 
       overlayRef.current.setProps({
-        layers: [arcGlowLayer, arcCoreLayer, pointGlowLayer, pointCoreLayer],
+        layers: [arcLayer, pointLayer],
       });
 
       const labelSource = map.getSource("flight-point-labels") as
