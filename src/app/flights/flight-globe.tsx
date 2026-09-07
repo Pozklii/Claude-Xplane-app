@@ -38,14 +38,28 @@ const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 const MAP_HEIGHT = 480;
 
 // deck.gl color accessors take [r, g, b, a] (0-255), not CSS strings.
-const ARC_COLOR: [number, number, number, number] = [37, 99, 235, 140];
-const ARC_COLOR_SELECTED: [number, number, number, number] = [
-  29, 78, 216, 242,
+// A "space" palette for the flight paths and airport markers — electric
+// cyan-to-violet plasma arcs with a soft glow, and glowing satellite-like
+// markers — layered over the map's regular (unrecolored) basemap.
+const ARC_SOURCE: [number, number, number, number] = [56, 217, 255, 210];
+const ARC_TARGET: [number, number, number, number] = [168, 85, 247, 210];
+const ARC_SOURCE_SELECTED: [number, number, number, number] = [
+  150, 240, 255, 255,
 ];
-const POINT_COLOR: [number, number, number, number] = [250, 204, 21, 255];
-const POINT_COLOR_SELECTED: [number, number, number, number] = [
-  255, 255, 255, 255,
+const ARC_TARGET_SELECTED: [number, number, number, number] = [
+  200, 140, 255, 255,
 ];
+const ARC_GLOW: [number, number, number, number] = [130, 170, 255, 55];
+const ARC_GLOW_SELECTED: [number, number, number, number] = [
+  170, 150, 255, 110,
+];
+const MARKER: [number, number, number, number] = [214, 250, 255, 255];
+const MARKER_SELECTED: [number, number, number, number] = [255, 255, 255, 255];
+const MARKER_GLOW: [number, number, number, number] = [56, 217, 255, 90];
+const MARKER_GLOW_SELECTED: [number, number, number, number] = [
+  120, 170, 255, 150,
+];
+const MARKER_RING: [number, number, number, number] = [16, 40, 70, 200];
 
 export function FlightGlobe({
   points,
@@ -165,10 +179,13 @@ export function FlightGlobe({
         ? new Set([selectedArc.fromCode, selectedArc.toCode])
         : new Set<string>();
 
-      const arcLayer = new ArcLayer<GlobeArc>({
-        id: "flight-arcs",
+      // deck.gl has no native bloom/glow — approximated here with a wide,
+      // low-opacity layer under a thin, bright one for both arcs and
+      // markers, purely via alpha blending.
+      const arcGlowLayer = new ArcLayer<GlobeArc>({
+        id: "flight-arcs-glow",
         data: arcs,
-        pickable: true,
+        pickable: false,
         greatCircle: true,
         // GlobeView back-face-culls by default, which hides an arc's tube
         // geometry from most angles unless culling is disabled for it.
@@ -176,12 +193,40 @@ export function FlightGlobe({
         getSourcePosition: (d) => [d.startLng, d.startLat],
         getTargetPosition: (d) => [d.endLng, d.endLat],
         getSourceColor: (d) =>
-          d.id === selectedId ? ARC_COLOR_SELECTED : ARC_COLOR,
+          d.id === selectedId ? ARC_GLOW_SELECTED : ARC_GLOW,
         getTargetColor: (d) =>
-          d.id === selectedId ? ARC_COLOR_SELECTED : ARC_COLOR,
-        getWidth: (d) => (d.id === selectedId ? 2.5 : 1.2),
+          d.id === selectedId ? ARC_GLOW_SELECTED : ARC_GLOW,
+        getWidth: (d) => (d.id === selectedId ? 9 : 5),
         getHeight: 0.35,
         widthUnits: "pixels",
+      });
+
+      const arcLayer = new ArcLayer<GlobeArc>({
+        id: "flight-arcs",
+        data: arcs,
+        pickable: true,
+        greatCircle: true,
+        parameters: { cullMode: "none" },
+        getSourcePosition: (d) => [d.startLng, d.startLat],
+        getTargetPosition: (d) => [d.endLng, d.endLat],
+        getSourceColor: (d) =>
+          d.id === selectedId ? ARC_SOURCE_SELECTED : ARC_SOURCE,
+        getTargetColor: (d) =>
+          d.id === selectedId ? ARC_TARGET_SELECTED : ARC_TARGET,
+        getWidth: (d) => (d.id === selectedId ? 2.5 : 1.3),
+        getHeight: 0.35,
+        widthUnits: "pixels",
+      });
+
+      const pointGlowLayer = new ScatterplotLayer<GlobePoint>({
+        id: "flight-points-glow",
+        data: points,
+        pickable: false,
+        getPosition: (d) => [d.lng, d.lat],
+        getFillColor: (d) =>
+          highlightedCodes.has(d.code) ? MARKER_GLOW_SELECTED : MARKER_GLOW,
+        getRadius: (d) => (highlightedCodes.has(d.code) ? 15 : 9),
+        radiusUnits: "pixels",
       });
 
       const pointLayer = new ScatterplotLayer<GlobePoint>({
@@ -190,16 +235,16 @@ export function FlightGlobe({
         pickable: false,
         getPosition: (d) => [d.lng, d.lat],
         getFillColor: (d) =>
-          highlightedCodes.has(d.code) ? POINT_COLOR_SELECTED : POINT_COLOR,
+          highlightedCodes.has(d.code) ? MARKER_SELECTED : MARKER,
         getRadius: (d) => (highlightedCodes.has(d.code) ? 6 : 3.5),
         radiusUnits: "pixels",
         stroked: true,
-        getLineColor: [0, 0, 0, 150],
+        getLineColor: MARKER_RING,
         lineWidthMinPixels: 1,
       });
 
       overlayRef.current.setProps({
-        layers: [arcLayer, pointLayer],
+        layers: [arcGlowLayer, arcLayer, pointGlowLayer, pointLayer],
       });
 
       const labelSource = map.getSource("flight-point-labels") as
