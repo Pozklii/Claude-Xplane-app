@@ -1,4 +1,4 @@
-# Flight Tracker
+# Flight World
 
 A web app for logging and reviewing flights, built with Next.js, Supabase, and deployed on Vercel.
 
@@ -42,6 +42,7 @@ After deploying, add your Vercel URL (and any preview URLs) to Supabase's Authen
 
 ## Features
 
+- A landing page (`/`) with an animated day/night sky (sun and drifting clouds in light mode, a moon and twinkling stars in dark mode — pure CSS, driven by `prefers-color-scheme`) and a live example globe using the same `FlightGlobe` component as the flights page, seeded with a sample JFK → LHR → CDG route
 - Email/password sign-up and sign-in via Supabase Auth (`/login`)
 - A protected `/flights` page for logging and reviewing your flights (date, airline, aircraft, route, hours, notes), backed by a `flights` table scoped to each user via row-level security
 - A rotatable 3D globe on the flights page, rendered with [MapLibre GL JS](https://maplibre.org/maplibre-gl-js/docs/) over free, no-API-key [OpenStreetMap](https://www.openstreetmap.org/copyright) vector tiles from [OpenFreeMap](https://openfreemap.org/) (swap `STYLE_URL` in `flight-globe.tsx` for a MapTiler/Mapbox satellite style if you have a key). Flight routes and airport markers are drawn with [deck.gl](https://deck.gl/)'s `ArcLayer` and `ScatterplotLayer`, composited into the MapLibre render pass via `@deck.gl/mapbox`'s `MapboxOverlay` (`interleaved: true`), styled as glowing cyan-to-violet plasma arcs and satellite-like markers (a wide, low-opacity layer under a thin, bright one approximates the glow, since deck.gl has no native bloom). Clicking a route highlights it on the globe (with its two airports' city/code labels) and highlights the matching entry in the flight log below, and vice versa. Airport coordinates come from a bundled ICAO/IATA lookup — no coordinates to enter manually.

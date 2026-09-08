@@ -1,0 +1,200 @@
+.hero {
+  --sky-grad-1: #6cbaff;
+  --sky-grad-2: #1c8cff;
+  --sky-grad-3: #0e6fdb;
+  --on-bg-strong: #ffffff;
+  --on-bg: #142433;
+  --on-bg-soft: #1f3f57;
+  --line-on-bg: rgba(20, 36, 51, 0.22);
+  --panel: #ffffff;
+  --ink: #142433;
+  --muted: #4c6e89;
+  --line: rgba(15, 56, 92, 0.16);
+  --glow-rgb: 255, 255, 255;
+  --panel-shadow:
+    0 26px 50px -20px rgba(6, 20, 34, 0.38),
+    0 3px 10px rgba(6, 20, 34, 0.14);
+
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    180deg,
+    var(--sky-grad-1) 0%,
+    var(--sky-grad-2) 55%,
+    var(--sky-grad-3) 100%
+  );
+  color: var(--on-bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .hero {
+    --sky-grad-1: #13314f;
+    --sky-grad-2: #081521;
+    --sky-grad-3: #04090f;
+    --on-bg-strong: #e9f4ff;
+    --on-bg: #e9f4ff;
+    --on-bg-soft: #8fb3d1;
+    --line-on-bg: rgba(147, 210, 255, 0.2);
+    --panel: #0e2233;
+    --ink: #e9f4ff;
+    --muted: #8fb3d1;
+    --line: rgba(147, 210, 255, 0.2);
+    --glow-rgb: 205, 226, 255;
+    --panel-shadow:
+      0 26px 54px -18px rgba(0, 0, 0, 0.6),
+      0 0 0 1px rgba(147, 210, 255, 0.06);
+  }
+}
+
+.skyFx {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sunGlow,
+.moonGlow {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(var(--glow-rgb), 0.6),
+    rgba(var(--glow-rgb), 0) 62%
+  );
+}
+.sunGlow {
+  top: -20%;
+  right: -8%;
+  width: 46vw;
+  aspect-ratio: 1;
+}
+.moonGlow {
+  top: 5%;
+  right: 10%;
+  width: 16vw;
+  aspect-ratio: 1;
+  display: none;
+}
+.moonCore {
+  position: absolute;
+  top: 5%;
+  right: 10%;
+  width: 5.5vw;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(5.2vw, 5.2vw);
+  background: rgba(var(--glow-rgb), 0.92);
+  display: none;
+}
+
+.cloud {
+  position: absolute;
+  background:
+    radial-gradient(
+      ellipse 42% 60% at 28% 55%,
+      rgba(255, 255, 255, 0.92) 60%,
+      transparent 64%
+    ),
+    radial-gradient(
+      ellipse 36% 55% at 52% 36%,
+      rgba(255, 255, 255, 0.92) 60%,
+      transparent 64%
+    ),
+    radial-gradient(
+      ellipse 46% 62% at 75% 58%,
+      rgba(255, 255, 255, 0.92) 60%,
+      transparent 64%
+    ),
+    radial-gradient(
+      ellipse 54% 70% at 50% 76%,
+      rgba(255, 255, 255, 0.92) 60%,
+      transparent 64%
+    );
+  filter: blur(16px);
+  animation-name: drift;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+.star {
+  position: absolute;
+  border-radius: 50%;
+  background: rgb(var(--glow-rgb));
+  animation-name: twinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  display: none;
+}
+
+@keyframes drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(4%);
+  }
+}
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud,
+  .star {
+    animation: none !important;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .sunGlow,
+  .cloud {
+    display: none;
+  }
+  .moonGlow,
+  .moonCore,
+  .star {
+    display: block;
+  }
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+}
+
+.introHeading {
+  color: var(--on-bg-strong);
+}
+.introLede {
+  color: var(--on-bg-soft);
+}
+.cta {
+  color: var(--on-bg);
+  border: 1.5px solid var(--on-bg);
+}
+.cta:hover {
+  background: var(--on-bg);
+  color: var(--sky-grad-2);
+}
+
+.mapPanel {
+  background: var(--panel);
+  border: 1px solid var(--line-on-bg);
+  box-shadow: var(--panel-shadow);
+  color: var(--ink);
+}
+.mapToolbar {
+  border-bottom: 1px solid var(--line);
+}
+.mapToolbarMeta {
+  color: var(--muted);
+}

@@ -14,7 +14,7 @@ export async function SiteHeader() {
         href="/"
         className="text-sm font-semibold text-black dark:text-zinc-50"
       >
-        Flight Tracker
+        Flight World
       </Link>
       <nav className="flex items-center gap-4 text-sm">
         {user ? (
@@ -51,7 +51,7 @@ export function SiteHeaderFallback() {
   return (
     <header className="flex items-center justify-between border-b border-black/[.08] px-6 py-4 dark:border-white/[.145]">
       <span className="text-sm font-semibold text-black dark:text-zinc-50">
-        Flight Tracker
+        Flight World
       </span>
       <nav />
     </header>

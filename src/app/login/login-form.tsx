@@ -22,7 +22,7 @@ export function LoginForm() {
       <div className="flex w-full max-w-sm flex-col gap-10">
         <div className="flex flex-col gap-1 text-center">
           <h1 className="text-2xl font-semibold text-black dark:text-zinc-50">
-            Flight Tracker
+            Flight World
           </h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Sign in or create an account to log your flights.
