@@ -194,7 +194,13 @@ export function FlightGlobe({
       // Scroll-wheel and pinch zooming go through MapLibre's own eased
       // zoomTo, not a drag — without pausing spin for it too, the spin
       // loop's per-frame setCenter() fights that animation every frame,
-      // which is what made zooming feel broken/stuck.
+      // which is what made zooming feel broken/stuck. And like
+      // dragstart, zoomstart only fires once MapLibre has recognized the
+      // gesture (accumulated a few wheel ticks) — pause on the raw wheel
+      // event too so a spin frame can't land in that gap and throw off
+      // the "zoom around the point under the cursor" reference, the same
+      // class of race fixed above for drag.
+      map.on("wheel", startInteracting);
       map.on("zoomstart", startInteracting);
       map.on("zoomend", stopInteracting);
     }
