@@ -80,6 +80,13 @@ const AIRPORT_ZOOM = 16;
 const AIRPORT_PITCH = 60;
 const AIRPORT_FLY_DURATION = 1800;
 
+// Idle auto-rotation, paused during any drag/rotate/pitch gesture and once
+// zoomed in past the overview (selecting a flight or an airport both push
+// zoom well above this, so it also naturally stays off while either is
+// active, and resumes once the camera eases back out to the overview).
+const SPIN_DEGREES_PER_SECOND = 4;
+const SPIN_MAX_ZOOM = 3;
+
 export function FlightGlobe({
   points,
   arcs,
@@ -94,6 +101,20 @@ export function FlightGlobe({
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectIdRef = useRef(onSelectId);
   const selectedIdRef = useRef(selectedId);
+  // Set around every programmatic flyTo so the idle-spin loop below doesn't
+  // fight it by nudging the center mid-animation.
+  const cameraAnimatingRef = useRef(false);
+  const flyToTracked = (
+    map: MapLibreMap,
+    options: Parameters<MapLibreMap["flyTo"]>[0],
+  ) => {
+    cameraAnimatingRef.current = true;
+    map.once("moveend", () => {
+      cameraAnimatingRef.current = false;
+    });
+    map.flyTo(options);
+  };
+
   useEffect(() => {
     onSelectIdRef.current = onSelectId;
     selectedIdRef.current = selectedId;
@@ -116,6 +137,44 @@ export function FlightGlobe({
     });
     mapRef.current = map;
     map.addControl(new NavigationControl(), "top-right");
+
+    // Slowly spin the globe on its axis (moving the center longitude, not
+    // the bearing, so it reads as the Earth turning rather than the camera
+    // orbiting) whenever it's idle at the overview zoom — paused for the
+    // duration of any user gesture, and skipped entirely for
+    // prefers-reduced-motion.
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    let userInteracting = false;
+    let spinFrame = 0;
+    let lastFrameTime = 0;
+    const spinGlobe = (time: number) => {
+      const deltaSeconds = lastFrameTime ? (time - lastFrameTime) / 1000 : 0;
+      lastFrameTime = time;
+      if (
+        !userInteracting &&
+        !cameraAnimatingRef.current &&
+        !document.hidden &&
+        map.getZoom() < SPIN_MAX_ZOOM
+      ) {
+        const center = map.getCenter();
+        center.lng -= SPIN_DEGREES_PER_SECOND * deltaSeconds;
+        map.setCenter(center);
+      }
+      spinFrame = requestAnimationFrame(spinGlobe);
+    };
+    if (!prefersReducedMotion) {
+      spinFrame = requestAnimationFrame(spinGlobe);
+      const startInteracting = () => (userInteracting = true);
+      const stopInteracting = () => (userInteracting = false);
+      map.on("dragstart", startInteracting);
+      map.on("rotatestart", startInteracting);
+      map.on("pitchstart", startInteracting);
+      map.on("dragend", stopInteracting);
+      map.on("rotateend", stopInteracting);
+      map.on("pitchend", stopInteracting);
+    }
 
     map.on("load", () => {
       map.setProjection({ type: "globe" });
@@ -179,7 +238,7 @@ export function FlightGlobe({
         if (hit?.layer?.id === "flight-points") {
           const point = hit.object as GlobePoint | undefined;
           if (point) {
-            map.flyTo({
+            flyToTracked(map, {
               center: [point.lng, point.lat],
               zoom: AIRPORT_ZOOM,
               pitch: AIRPORT_PITCH,
@@ -200,6 +259,7 @@ export function FlightGlobe({
     resizeObserver.observe(container);
 
     return () => {
+      cancelAnimationFrame(spinFrame);
       resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
@@ -336,7 +396,7 @@ export function FlightGlobe({
           pitch: SELECTION_PITCH,
           maxZoom: SELECTION_MAX_ZOOM,
         });
-        map.flyTo({
+        flyToTracked(map, {
           center: camera?.center ?? [
             (selectedArc.startLng + selectedArc.endLng) / 2,
             (selectedArc.startLat + selectedArc.endLat) / 2,
@@ -358,7 +418,11 @@ export function FlightGlobe({
           maxZoom: 4,
         });
         if (camera) {
-          map.flyTo({ ...camera, pitch: 0, duration: OVERVIEW_FLY_DURATION });
+          flyToTracked(map, {
+            ...camera,
+            pitch: 0,
+            duration: OVERVIEW_FLY_DURATION,
+          });
         }
       }
     };
