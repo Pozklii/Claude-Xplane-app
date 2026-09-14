@@ -317,7 +317,14 @@ export function FlightGlobe({
 
       // deck.gl has no native bloom/glow — approximated here with a wide,
       // low-opacity layer under a thin, bright one for both arcs and
-      // markers, purely via alpha blending.
+      // markers, purely via alpha blending. Both layers sit at the exact
+      // same ground position as their core counterpart, so under the
+      // globe's real depth testing they'd tie on depth and flicker
+      // (whichever fragment happened to win varying frame to frame,
+      // worse once the camera is continuously moving during idle spin) —
+      // depthWriteEnabled: false keeps the glow from contesting that tie
+      // while still letting it be occluded by real geometry like the
+      // globe itself.
       const arcGlowLayer = new ArcLayer<GlobeArc>({
         id: "flight-arcs-glow",
         data: arcs,
@@ -325,7 +332,7 @@ export function FlightGlobe({
         greatCircle: true,
         // GlobeView back-face-culls by default, which hides an arc's tube
         // geometry from most angles unless culling is disabled for it.
-        parameters: { cullMode: "none" },
+        parameters: { cullMode: "none", depthWriteEnabled: false },
         getSourcePosition: (d) => [d.startLng, d.startLat],
         getTargetPosition: (d) => [d.endLng, d.endLat],
         getSourceColor: (d) =>
@@ -358,6 +365,8 @@ export function FlightGlobe({
         id: "flight-points-glow",
         data: points,
         pickable: false,
+        // Same GlobeView back-face-culling caveat as the arcs above.
+        parameters: { cullMode: "none", depthWriteEnabled: false },
         getPosition: (d) => [d.lng, d.lat],
         getFillColor: (d) =>
           highlightedCodes.has(d.code) ? MARKER_GLOW_SELECTED : MARKER_GLOW,
@@ -369,6 +378,7 @@ export function FlightGlobe({
         id: "flight-points",
         data: points,
         pickable: true,
+        parameters: { cullMode: "none" },
         getPosition: (d) => [d.lng, d.lat],
         getFillColor: (d) =>
           highlightedCodes.has(d.code) ? MARKER_SELECTED : MARKER,
