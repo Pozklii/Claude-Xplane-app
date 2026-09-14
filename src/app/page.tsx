@@ -174,7 +174,7 @@ export default function Home() {
     <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black">
       <section className={styles.hero}>
         <div className={styles.mechBg} aria-hidden="true">
-          <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+          <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid meet">
             <defs>
               <linearGradient id="sheen" x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stopColor="#bcd9ef" stopOpacity="0" />
@@ -230,7 +230,7 @@ export default function Home() {
         </div>
 
         <div className={styles.liveryFx} aria-hidden="true">
-          <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+          <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid meet">
             <defs>
               <radialGradient id="noseGlow" cx="50%" cy="50%" r="50%">
                 <stop offset="0%" stopColor="#3f7fb5" stopOpacity="0.35" />
