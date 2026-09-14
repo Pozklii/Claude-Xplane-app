@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { ArcLayer, ColumnLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
+  LngLatBounds,
   Map as MapLibreMap,
   NavigationControl,
   type GeoJSONSource,
@@ -60,6 +61,20 @@ const MARKER_GLOW_SELECTED: [number, number, number, number] = [
   120, 170, 255, 150,
 ];
 const MARKER_RING: [number, number, number, number] = [16, 40, 70, 200];
+const MARKER_COLUMN: [number, number, number, number] = [214, 250, 255, 190];
+const MARKER_COLUMN_SELECTED: [number, number, number, number] = [
+  255, 255, 255, 220,
+];
+
+// Selecting a flight zooms and tilts the camera in on its two airports —
+// close enough, at a high enough pitch, for the deck.gl ColumnLayer below
+// to read as a 3D beacon rather than a flat dot. Deselecting eases back
+// out to the full overview.
+const SELECTION_PITCH = 55;
+const SELECTION_PADDING = 90;
+const SELECTION_MAX_ZOOM = 9;
+const SELECTION_FLY_DURATION = 1500;
+const OVERVIEW_FLY_DURATION = 1200;
 
 export function FlightGlobe({
   points,
@@ -243,8 +258,32 @@ export function FlightGlobe({
         lineWidthMinPixels: 1,
       });
 
+      // A real-world-scale (meters, not pixels) extruded column per
+      // airport — imperceptibly small at the world overview, but reads as
+      // a 3D beacon once the camera zooms and tilts in on a selected
+      // flight's two airports (see the flyTo below).
+      const pointColumnLayer = new ColumnLayer<GlobePoint>({
+        id: "flight-points-3d",
+        data: points,
+        pickable: false,
+        diskResolution: 24,
+        radius: 12000,
+        radiusUnits: "meters",
+        extruded: true,
+        getPosition: (d) => [d.lng, d.lat],
+        getElevation: (d) => (highlightedCodes.has(d.code) ? 140000 : 60000),
+        getFillColor: (d) =>
+          highlightedCodes.has(d.code) ? MARKER_COLUMN_SELECTED : MARKER_COLUMN,
+      });
+
       overlayRef.current.setProps({
-        layers: [arcGlowLayer, arcLayer, pointGlowLayer, pointLayer],
+        layers: [
+          arcGlowLayer,
+          arcLayer,
+          pointGlowLayer,
+          pointColumnLayer,
+          pointLayer,
+        ],
       });
 
       const labelSource = map.getSource("flight-point-labels") as
@@ -272,6 +311,47 @@ export function FlightGlobe({
           [Math.max(...lngs), Math.max(...lats)],
         ];
         map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: 4 });
+        return;
+      }
+
+      if (selectedArc) {
+        const lngs = [selectedArc.startLng, selectedArc.endLng];
+        const lats = [selectedArc.startLat, selectedArc.endLat];
+        const bounds = new LngLatBounds([
+          Math.min(...lngs),
+          Math.min(...lats),
+          Math.max(...lngs),
+          Math.max(...lats),
+        ]);
+        const camera = map.cameraForBounds(bounds, {
+          padding: SELECTION_PADDING,
+          pitch: SELECTION_PITCH,
+          maxZoom: SELECTION_MAX_ZOOM,
+        });
+        map.flyTo({
+          center: camera?.center ?? [
+            (selectedArc.startLng + selectedArc.endLng) / 2,
+            (selectedArc.startLat + selectedArc.endLat) / 2,
+          ],
+          zoom: camera?.zoom ?? SELECTION_MAX_ZOOM,
+          bearing: camera?.bearing ?? 0,
+          pitch: SELECTION_PITCH,
+          duration: SELECTION_FLY_DURATION,
+        });
+      } else if (points.length > 0) {
+        const lngs = points.map((p) => p.lng);
+        const lats = points.map((p) => p.lat);
+        const overviewBounds: LngLatBoundsLike = [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ];
+        const camera = map.cameraForBounds(overviewBounds, {
+          padding: 60,
+          maxZoom: 4,
+        });
+        if (camera) {
+          map.flyTo({ ...camera, pitch: 0, duration: OVERVIEW_FLY_DURATION });
+        }
       }
     };
 
