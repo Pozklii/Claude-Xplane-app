@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ArcLayer, ColumnLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
   LngLatBounds,
@@ -61,20 +61,24 @@ const MARKER_GLOW_SELECTED: [number, number, number, number] = [
   120, 170, 255, 150,
 ];
 const MARKER_RING: [number, number, number, number] = [16, 40, 70, 200];
-const MARKER_COLUMN: [number, number, number, number] = [214, 250, 255, 190];
-const MARKER_COLUMN_SELECTED: [number, number, number, number] = [
-  255, 255, 255, 220,
-];
 
-// Selecting a flight zooms and tilts the camera in on its two airports —
-// close enough, at a high enough pitch, for the deck.gl ColumnLayer below
-// to read as a 3D beacon rather than a flat dot. Deselecting eases back
-// out to the full overview.
+// Selecting a flight zooms and tilts the camera in on its two airports,
+// giving a pitched view of the route. Deselecting eases back out to the
+// full overview.
 const SELECTION_PITCH = 55;
 const SELECTION_PADDING = 90;
 const SELECTION_MAX_ZOOM = 9;
 const SELECTION_FLY_DURATION = 1500;
 const OVERVIEW_FLY_DURATION = 1200;
+
+// Clicking an individual airport flies in close enough, at a steep enough
+// pitch, for MapLibre's native 3D buildings (real OpenStreetMap building
+// footprints, extruded by height) to render — an actual, if only as
+// detailed as OSM's own coverage of that airport, 3D view of its
+// buildings, rather than a generic marker standing in for one.
+const AIRPORT_ZOOM = 16;
+const AIRPORT_PITCH = 60;
+const AIRPORT_FLY_DURATION = 1800;
 
 export function FlightGlobe({
   points,
@@ -116,6 +120,20 @@ export function FlightGlobe({
     map.on("load", () => {
       map.setProjection({ type: "globe" });
 
+      // The style's own 3D building layer(s) are typically gated behind a
+      // minzoom tuned for street-level browsing; clear that so they're
+      // free to render as soon as we fly in close on an airport, whatever
+      // the upstream style's default turns out to be.
+      for (const layer of map.getStyle()?.layers ?? []) {
+        if (layer.type === "fill-extrusion") {
+          try {
+            map.setLayerZoomRange(layer.id, 0, 24);
+          } catch {
+            // Not fatal — worst case the layer keeps its own zoom range.
+          }
+        }
+      }
+
       // Text labels for the two airports of the selected flight only —
       // the dots themselves are drawn by the deck.gl ScatterplotLayer
       // below.
@@ -145,8 +163,8 @@ export function FlightGlobe({
       map.addControl(overlay);
       overlayRef.current = overlay;
 
-      // deck.gl's own onClick prop on the arc layer doesn't reliably fire
-      // from real MapLibre-driven clicks in interleaved mode (interaction
+      // deck.gl's own onClick prop on a layer doesn't reliably fire from
+      // real MapLibre-driven clicks in interleaved mode (interaction
       // handling is delegated to MapLibre, which only forwards a subset of
       // events) — pick manually from MapLibre's click event instead, which
       // is proven reliable.
@@ -155,8 +173,22 @@ export function FlightGlobe({
           x: event.point.x,
           y: event.point.y,
           radius: 6,
-          layerIds: ["flight-arcs"],
+          layerIds: ["flight-arcs", "flight-points"],
         });
+
+        if (hit?.layer?.id === "flight-points") {
+          const point = hit.object as GlobePoint | undefined;
+          if (point) {
+            map.flyTo({
+              center: [point.lng, point.lat],
+              zoom: AIRPORT_ZOOM,
+              pitch: AIRPORT_PITCH,
+              duration: AIRPORT_FLY_DURATION,
+            });
+          }
+          return;
+        }
+
         const hitId = (hit?.object as GlobeArc | undefined)?.id ?? null;
         onSelectIdRef.current(
           hitId && selectedIdRef.current !== hitId ? hitId : null,
@@ -247,7 +279,7 @@ export function FlightGlobe({
       const pointLayer = new ScatterplotLayer<GlobePoint>({
         id: "flight-points",
         data: points,
-        pickable: false,
+        pickable: true,
         getPosition: (d) => [d.lng, d.lat],
         getFillColor: (d) =>
           highlightedCodes.has(d.code) ? MARKER_SELECTED : MARKER,
@@ -258,32 +290,8 @@ export function FlightGlobe({
         lineWidthMinPixels: 1,
       });
 
-      // A real-world-scale (meters, not pixels) extruded column per
-      // airport — imperceptibly small at the world overview, but reads as
-      // a 3D beacon once the camera zooms and tilts in on a selected
-      // flight's two airports (see the flyTo below).
-      const pointColumnLayer = new ColumnLayer<GlobePoint>({
-        id: "flight-points-3d",
-        data: points,
-        pickable: false,
-        diskResolution: 24,
-        radius: 12000,
-        radiusUnits: "meters",
-        extruded: true,
-        getPosition: (d) => [d.lng, d.lat],
-        getElevation: (d) => (highlightedCodes.has(d.code) ? 140000 : 60000),
-        getFillColor: (d) =>
-          highlightedCodes.has(d.code) ? MARKER_COLUMN_SELECTED : MARKER_COLUMN,
-      });
-
       overlayRef.current.setProps({
-        layers: [
-          arcGlowLayer,
-          arcLayer,
-          pointGlowLayer,
-          pointColumnLayer,
-          pointLayer,
-        ],
+        layers: [arcGlowLayer, arcLayer, pointGlowLayer, pointLayer],
       });
 
       const labelSource = map.getSource("flight-point-labels") as
@@ -363,8 +371,8 @@ export function FlightGlobe({
     <div className="overflow-hidden rounded-2xl border border-black/[.08] dark:border-white/[.145]">
       <div ref={containerRef} style={{ height: MAP_HEIGHT }} />
       <p className="px-3 py-1.5 text-[11px] text-zinc-600">
-        Drag to rotate, scroll to zoom, click a flight to see its airports.
-        Map data &copy;{" "}
+        Drag to rotate, scroll to zoom, click a flight for its route, click
+        an airport to fly into its real 3D buildings. Map data &copy;{" "}
         <a
           href="https://www.openstreetmap.org/copyright"
           className="underline"
