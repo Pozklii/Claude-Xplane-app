@@ -172,6 +172,19 @@ export function FlightGlobe({
       spinFrame = requestAnimationFrame(spinGlobe);
       const startInteracting = () => (userInteracting = true);
       const stopInteracting = () => (userInteracting = false);
+      // MapLibre only fires dragstart/rotatestart/pitchstart once it has
+      // recognized real gesture movement past its own threshold — in the
+      // gap between the initial mousedown/touchstart and that recognition,
+      // spin's per-frame setCenter() was still running, and could shift
+      // the center out from under the drag handler's own reference point
+      // for "how far has the pointer moved," making the drag it was about
+      // to start feel like it didn't register. Pausing on the raw
+      // press/release closes that gap; the gesture-specific events stay as
+      // a fallback (e.g. a drag released outside the canvas).
+      map.on("mousedown", startInteracting);
+      map.on("touchstart", startInteracting);
+      map.on("mouseup", stopInteracting);
+      map.on("touchend", stopInteracting);
       map.on("dragstart", startInteracting);
       map.on("rotatestart", startInteracting);
       map.on("pitchstart", startInteracting);
