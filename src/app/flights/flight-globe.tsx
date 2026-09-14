@@ -178,6 +178,12 @@ export function FlightGlobe({
       map.on("dragend", stopInteracting);
       map.on("rotateend", stopInteracting);
       map.on("pitchend", stopInteracting);
+      // Scroll-wheel and pinch zooming go through MapLibre's own eased
+      // zoomTo, not a drag — without pausing spin for it too, the spin
+      // loop's per-frame setCenter() fights that animation every frame,
+      // which is what made zooming feel broken/stuck.
+      map.on("zoomstart", startInteracting);
+      map.on("zoomend", stopInteracting);
     }
 
     map.on("load", () => {
