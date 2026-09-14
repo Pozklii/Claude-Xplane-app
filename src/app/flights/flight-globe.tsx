@@ -85,7 +85,10 @@ const AIRPORT_FLY_DURATION = 1800;
 // zoom well above this, so it also naturally stays off while either is
 // active, and resumes once the camera eases back out to the overview).
 const SPIN_DEGREES_PER_SECOND = 4;
-const SPIN_MAX_ZOOM = 3;
+// Comfortably above the fitBounds zoom for most flight-log spans (even a
+// fairly tight regional cluster lands around 3-4), so idle spin actually
+// engages for realistic data rather than only for globe-spanning ones.
+const SPIN_MAX_ZOOM = 5;
 
 export function FlightGlobe({
   points,
@@ -155,6 +158,7 @@ export function FlightGlobe({
       if (
         !userInteracting &&
         !cameraAnimatingRef.current &&
+        !selectedIdRef.current &&
         !document.hidden &&
         map.getZoom() < SPIN_MAX_ZOOM
       ) {
