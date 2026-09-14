@@ -1,0 +1,214 @@
+.page {
+  --bg: #060608;
+  --panel: #14101f;
+  --ink: #e7e3f4;
+  --muted: #8a84a8;
+  --line: rgba(231, 227, 244, 0.14);
+  --on-bg-strong: #f2effa;
+  --on-bg: #e7e3f4;
+  --purple: #8a6ff0;
+  --teal: #48d9c8;
+  --panel-shadow:
+    0 0 0 1px rgba(138, 111, 240, 0.22), 0 30px 60px -22px rgba(0, 0, 0, 0.7);
+
+  position: relative;
+  isolation: isolate;
+  background: var(--bg);
+  color: var(--on-bg);
+  font-family: var(--font-public-sans), system-ui, sans-serif;
+}
+.page h1,
+.page p {
+  text-wrap: balance;
+}
+.page a {
+  text-decoration: none;
+}
+.page svg {
+  display: block;
+}
+
+/* ---- livery: bundled ribbon curves, echoing the aircraft's fuselage lines ---- */
+.liveryFx {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.liveryFx svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+.curve {
+  fill: none;
+  stroke-dasharray: 2600;
+  stroke-dashoffset: 2600;
+  animation: draw 2.4s cubic-bezier(0.16, 0.84, 0.44, 1) forwards;
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes starTwinkle {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+.star {
+  animation-name: starTwinkle;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+@keyframes engineSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.engineBlades {
+  animation: engineSpin 22s linear infinite;
+  transform-box: view-box;
+}
+@media (prefers-reduced-motion: reduce) {
+  .curve {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .star {
+    animation: none;
+    opacity: 0.45;
+  }
+  .engineBlades {
+    animation: none;
+  }
+}
+
+.main {
+  position: relative;
+  z-index: 1;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 64px 40px 80px;
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 56px;
+  align-items: start;
+}
+
+.intro h1 {
+  font-weight: 700;
+  font-size: clamp(28px, 3.2vw, 38px);
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  margin: 0 0 26px;
+  color: var(--on-bg-strong);
+}
+
+.cta {
+  display: inline-block;
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--purple);
+  border: 1.5px solid var(--purple);
+  border-radius: 6px;
+  padding: 10px 20px;
+  margin-bottom: 10px;
+}
+.cta:hover {
+  background: var(--purple);
+  color: var(--bg);
+}
+.cta:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 3px;
+}
+
+.mapPanel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  color: var(--ink);
+  box-shadow: var(--panel-shadow);
+}
+.mapToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.mtTitle {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.mtMeta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.mapCanvas {
+  position: relative;
+  aspect-ratio: 16 / 10.5;
+  background: radial-gradient(
+    circle at 50% 46%,
+    #221a3e 0%,
+    #14101f 62%,
+    #0e0b18 100%
+  );
+}
+.globe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.routeProgress {
+  stroke-dasharray: 420;
+  stroke-dashoffset: 420;
+  animation: routeDraw 9s ease-in-out infinite;
+}
+@keyframes routeDraw {
+  0% {
+    stroke-dashoffset: 420;
+  }
+  50% {
+    stroke-dashoffset: 0;
+  }
+  90% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -420;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .routeProgress {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+.mapCaption {
+  position: absolute;
+  bottom: 10px;
+  right: 14px;
+  font-size: 11px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+@media (max-width: 800px) {
+  .main {
+    grid-template-columns: 1fr;
+    padding: 44px 22px 56px;
+    gap: 36px;
+  }
+}
