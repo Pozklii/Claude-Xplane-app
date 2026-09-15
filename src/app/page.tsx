@@ -341,7 +341,7 @@ export default function Home() {
         </div>
 
         <div
-          className={`${styles.content} mx-auto grid w-full max-w-5xl grid-cols-1 items-start gap-14 px-6 py-16 sm:py-24 lg:grid-cols-[360px_1fr]`}
+          className={`${styles.content} mx-auto grid w-full max-w-5xl grid-cols-1 items-start gap-14 px-6 py-16 sm:py-24 lg:grid-cols-[1fr_380px]`}
         >
           <div className="flex flex-col items-start gap-4 text-left">
             <h1
@@ -357,7 +357,7 @@ export default function Home() {
             </Link>
           </div>
 
-          <div className={`${styles.mapPanel} overflow-hidden rounded-xl`}>
+          <div className={`${styles.mapPanel} justify-self-end overflow-hidden rounded-xl`}>
             <div
               className={`${styles.mapToolbar} flex items-center justify-between px-4 py-3`}
             >
