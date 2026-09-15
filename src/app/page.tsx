@@ -384,7 +384,7 @@ export default function Home() {
         </div>
       </section>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-16">
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 pt-32 pb-20">
         <div className="grid w-full grid-cols-1 gap-8 text-left sm:grid-cols-3">
           {features.map((feature) => (
             <div key={feature.title} className="flex flex-col gap-2">
