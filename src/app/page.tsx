@@ -92,6 +92,14 @@ function arcPath(cx: number, cy: number, r: number, fromDeg: number, toDeg: numb
 // without cropping.
 const ENGINE_CX = 1280;
 const ENGINE_CY = 760;
+// Fractional position within the 1440x900 background space — since the
+// background SVGs use preserveAspectRatio="none" (pure non-uniform scale,
+// no letterboxing offset), a point's fractional position always maps to
+// the same fractional position on screen. Positioning the CSS engineBox
+// at this same fraction (see the .engineBox style below) keeps it exactly
+// where the livery curves converge, at any viewport width.
+const ENGINE_X_PCT = (ENGINE_CX / 1440) * 100;
+const ENGINE_Y_PCT = (ENGINE_CY / 900) * 100;
 const ENGINE_BOX_R = 130;
 const ENGINE_LOCAL_CX = ENGINE_BOX_R;
 const ENGINE_LOCAL_CY = ENGINE_BOX_R;
@@ -154,8 +162,10 @@ function pathFrom(pts: [Point, Point, Point, Point, Point, Point, Point]) {
 const LIVERY_COLORS = ["#3f7fb5", "#5a9fd4", "#8fd0f5"];
 const LIVERY_CURVE_COUNT = 9;
 
-// Lines fan out from the left edge and sweep together into the engine
-// intake, like fuselage livery lines gathering toward the nose.
+// Lines start at the engine and sweep outward to the left edge, like
+// motion/thrust streaks trailing off it — reversed from the original
+// "gathering toward the nose" so the path (and its draw-in animation)
+// reads as originating from the engine rather than feeding into it.
 const liveryCurves = Array.from({ length: LIVERY_CURVE_COUNT }, (_, i) => {
   const t = i / (LIVERY_CURVE_COUNT - 1);
   const p0: Point = [-120, 30 + t * 760];
@@ -168,7 +178,7 @@ const liveryCurves = Array.from({ length: LIVERY_CURVE_COUNT }, (_, i) => {
   const jy = ((i % 4) - 1.5) * 16;
   const p6: Point = [ENGINE_CX + jx, ENGINE_CY + jy];
   return {
-    d: pathFrom([p0, p1, p2, p3, p4, p5, p6]),
+    d: pathFrom([p6, p5, p4, p3, p2, p1, p0]),
     stroke: LIVERY_COLORS[i % LIVERY_COLORS.length],
     strokeWidth: i === 2 || i === 5 ? 2.2 : 1.2,
     opacity: i === 2 || i === 5 ? 0.6 : 0.32,
@@ -272,12 +282,18 @@ export default function Home() {
         {/* Turbofan intake: recessed nacelle, riveted cowl, fan-case rings,
             static stator vanes, a ring of spinning swept blades with lit
             leading edges and root bolts, and a shaded spinner hub — the
-            livery lines above read as airflow feeding into it. Its own
-            independent, CSS-sized-and-positioned <svg> (not nested inside
-            the non-uniformly stretched background SVGs above), so its
-            circles stay genuinely circular no matter how the hero's own
-            aspect ratio varies with viewport width. */}
-        <div className={styles.engineBox} aria-hidden="true">
+            livery lines above read as motion streaks trailing off it. Its
+            own independent, CSS-sized-and-positioned <svg> (not nested
+            inside the non-uniformly stretched background SVGs above), so
+            its circles stay genuinely circular no matter how the hero's
+            own aspect ratio varies with viewport width. Centered at the
+            same fractional position (ENGINE_X_PCT/ENGINE_Y_PCT) the
+            livery curves converge to, so the two stay aligned. */}
+        <div
+          className={styles.engineBox}
+          aria-hidden="true"
+          style={{ left: `${ENGINE_X_PCT}%`, top: `${ENGINE_Y_PCT}%` }}
+        >
           <svg viewBox={`0 0 ${ENGINE_BOX_R * 2} ${ENGINE_BOX_R * 2}`} width="100%" height="100%">
             <defs>
               <radialGradient id="engineHub" cx="38%" cy="32%" r="70%">

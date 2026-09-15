@@ -41,11 +41,13 @@
    SVGs, with a genuinely square CSS box, so the engine's circles render
    as true circles regardless of the hero's own aspect ratio. min() with
    both a vw and a vh term keeps it reasonably sized on both very wide and
-   very narrow/tall (mobile) viewports. */
+   very narrow/tall (mobile) viewports. left/top are set inline (see
+   page.tsx) to the same fractional position the livery curves converge
+   to; translate(-50%, -50%) centers the box on that point regardless of
+   its own size. */
 .engineBox {
   position: absolute;
-  right: 2%;
-  bottom: 3%;
+  transform: translate(-50%, -50%);
   width: min(260px, 24vw, 40vh);
   aspect-ratio: 1;
   z-index: 0;
@@ -69,7 +71,7 @@
   }
 }
 .engineBlades {
-  animation: engineSpin 22s linear infinite;
+  animation: engineSpin 4s linear infinite;
   transform-box: view-box;
   transform-origin: 130px 130px;
 }
