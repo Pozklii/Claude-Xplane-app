@@ -27,6 +27,12 @@ const EXAMPLE_ROUTE: [string, string][] = [
   ["LHR", "CDG"],
 ];
 
+// The demo globe's container is much smaller than the /flights page's, so
+// the default fitBounds cap (tuned for that larger layout) would zoom in
+// tight enough on this route to overflow the sphere past the container's
+// edges. This keeps the whole globe in view instead.
+const EXAMPLE_GLOBE_OVERVIEW_MAX_ZOOM = 1;
+
 function buildExampleGlobeData(): { points: GlobePoint[]; arcs: GlobeArc[] } {
   const pointsByCode = new Map<string, GlobePoint>();
   const arcs: GlobeArc[] = [];
@@ -190,7 +196,7 @@ export default function Home() {
   const { points, arcs } = buildExampleGlobeData();
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-50 font-sans dark:bg-black">
+    <div className={`${styles.page} flex flex-1 flex-col font-sans`}>
       <section className={styles.hero}>
         <div className={styles.mechBg} aria-hidden="true">
           <svg viewBox="0 0 1440 900" preserveAspectRatio="none">
@@ -367,23 +373,25 @@ export default function Home() {
               </span>
             </div>
             <SelectionProvider>
-              <FlightGlobe points={points} arcs={arcs} bare />
+              <FlightGlobe
+                points={points}
+                arcs={arcs}
+                bare
+                overviewMaxZoom={EXAMPLE_GLOBE_OVERVIEW_MAX_ZOOM}
+              />
             </SelectionProvider>
           </div>
         </div>
       </section>
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-16">
-        <div className="grid w-full grid-cols-1 gap-6 text-left sm:grid-cols-3">
+        <div className="grid w-full grid-cols-1 gap-8 text-left sm:grid-cols-3">
           {features.map((feature) => (
-            <div
-              key={feature.title}
-              className="flex flex-col gap-2 rounded-2xl border border-black/[.08] p-6 dark:border-white/[.145]"
-            >
-              <h2 className="font-semibold text-black dark:text-zinc-50">
+            <div key={feature.title} className="flex flex-col gap-2">
+              <h2 className={`${styles.introHeading} font-semibold`}>
                 {feature.title}
               </h2>
-              <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              <p className={`${styles.featureText} text-sm leading-6`}>
                 {feature.description}
               </p>
             </div>

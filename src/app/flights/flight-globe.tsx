@@ -70,6 +70,10 @@ const SELECTION_PADDING = 90;
 const SELECTION_MAX_ZOOM = 9;
 const SELECTION_FLY_DURATION = 1500;
 const OVERVIEW_FLY_DURATION = 1200;
+// Default cap for the initial fit and the post-deselect overview — can be
+// overridden per instance (see the overviewMaxZoom prop) for containers
+// too small for this to keep the whole globe in view.
+const OVERVIEW_MAX_ZOOM = 4;
 
 // Clicking an individual airport flies in close enough, at a steep enough
 // pitch, for MapLibre's native 3D buildings (real OpenStreetMap building
@@ -94,6 +98,7 @@ export function FlightGlobe({
   points,
   arcs,
   bare = false,
+  overviewMaxZoom = OVERVIEW_MAX_ZOOM,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
@@ -101,6 +106,12 @@ export function FlightGlobe({
    * a standalone card, for use where the globe should sit directly on its
    * own background instead of looking like a boxed widget. */
   bare?: boolean;
+  /** Caps how far the initial fit (and the post-deselect overview) zooms
+   * in. The default suits the roomier /flights layout; a small container
+   * (like the landing page's compact globe) needs a lower cap so the
+   * whole sphere stays visible instead of the fit tightening around a
+   * tight cluster of points until it overflows the container's edges. */
+  overviewMaxZoom?: number;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -422,7 +433,7 @@ export function FlightGlobe({
           [Math.min(...lngs), Math.min(...lats)],
           [Math.max(...lngs), Math.max(...lats)],
         ];
-        map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: 4 });
+        map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: overviewMaxZoom });
         return;
       }
 
@@ -459,7 +470,7 @@ export function FlightGlobe({
         ];
         const camera = map.cameraForBounds(overviewBounds, {
           padding: 60,
-          maxZoom: 4,
+          maxZoom: overviewMaxZoom,
         });
         if (camera) {
           flyToTracked(map, {
@@ -473,7 +484,7 @@ export function FlightGlobe({
 
     if (overlay && map.isStyleLoaded()) apply();
     else map.once("load", apply);
-  }, [arcs, points, selectedId]);
+  }, [arcs, points, selectedId, overviewMaxZoom]);
 
   return (
     <div

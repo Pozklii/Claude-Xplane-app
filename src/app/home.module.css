@@ -1,4 +1,9 @@
-.hero {
+/* This is a deliberately single, committed dark theme (an instrument
+   panel at night) for the whole page, not adapted to the viewer's
+   light/dark preference — these tokens live on the page wrapper so both
+   the hero and the plain content below it share one continuous
+   background instead of handing off to a separate light/dark section. */
+.page {
   --bg: #020304;
   --muted: #7b93a8;
   --on-bg-strong: #f1f6fa;
@@ -7,13 +12,13 @@
   --accent: #3f7fb5;
   --accent-mid: #5a9fd4;
   --accent-bright: #8fd0f5;
-
-  /* This is a deliberately single, committed dark theme (an instrument
-     panel at night), not adapted to the viewer's light/dark preference. */
-  position: relative;
-  overflow: hidden;
   background: var(--bg);
   color: var(--on-bg);
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
 }
 
 .mechBg,
@@ -99,4 +104,8 @@
 
 .mapToolbarMeta {
   color: var(--muted);
+}
+
+.featureText {
+  color: var(--on-bg-soft);
 }
