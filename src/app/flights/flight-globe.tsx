@@ -93,9 +93,14 @@ const SPIN_MAX_ZOOM = 5;
 export function FlightGlobe({
   points,
   arcs,
+  bare = false,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
+  /** Skip the bordered/rounded card wrapper and caption styling meant for
+   * a standalone card, for use where the globe should sit directly on its
+   * own background instead of looking like a boxed widget. */
+  bare?: boolean;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -471,9 +476,22 @@ export function FlightGlobe({
   }, [arcs, points, selectedId]);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-black/[.08] dark:border-white/[.145]">
+    <div
+      className={
+        bare
+          ? ""
+          : "overflow-hidden rounded-2xl border border-black/[.08] dark:border-white/[.145]"
+      }
+    >
       <div ref={containerRef} style={{ height: MAP_HEIGHT }} />
-      <p className="px-3 py-1.5 text-[11px] text-zinc-600">
+      <p
+        className={
+          bare
+            ? "px-1 py-1.5 text-[11px] text-white/40"
+            : "px-3 py-1.5 text-[11px] text-zinc-600"
+        }
+      >
+
         Drag to rotate, scroll to zoom, click a flight for its route, click
         an airport to fly into its real 3D buildings. Map data &copy;{" "}
         <a

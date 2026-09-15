@@ -1,18 +1,12 @@
 .hero {
   --bg: #020304;
-  --panel: #0c1a28;
-  --ink: #e7eef5;
   --muted: #7b93a8;
-  --line: rgba(205, 224, 238, 0.14);
   --on-bg-strong: #f1f6fa;
   --on-bg: #e7eef5;
   --on-bg-soft: #93aec2;
   --accent: #3f7fb5;
   --accent-mid: #5a9fd4;
   --accent-bright: #8fd0f5;
-  --panel-shadow:
-    0 0 0 1px rgba(79, 143, 199, 0.22),
-    0 30px 60px -22px rgba(0, 0, 0, 0.7);
 
   /* This is a deliberately single, committed dark theme (an instrument
      panel at night), not adapted to the viewer's light/dark preference. */
@@ -103,15 +97,6 @@
   color: var(--bg);
 }
 
-.mapPanel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  box-shadow: var(--panel-shadow);
-  color: var(--ink);
-}
-.mapToolbar {
-  border-bottom: 1px solid var(--line);
-}
 .mapToolbarMeta {
   color: var(--muted);
 }

@@ -357,20 +357,18 @@ export default function Home() {
             </Link>
           </div>
 
-          <div className={`${styles.mapPanel} justify-self-end overflow-hidden rounded-xl`}>
-            <div
-              className={`${styles.mapToolbar} flex items-center justify-between px-4 py-3`}
-            >
-              <span className="text-sm font-semibold">Example flights</span>
+          <div className="flex w-[380px] max-w-full justify-self-end flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span className={`${styles.introHeading} text-sm font-semibold`}>
+                Example flights
+              </span>
               <span className={`${styles.mapToolbarMeta} text-xs`}>
                 {arcs.length} routes &middot; sample data
               </span>
             </div>
-            <div className="p-4">
-              <SelectionProvider>
-                <FlightGlobe points={points} arcs={arcs} />
-              </SelectionProvider>
-            </div>
+            <SelectionProvider>
+              <FlightGlobe points={points} arcs={arcs} bare />
+            </SelectionProvider>
           </div>
         </div>
       </section>
