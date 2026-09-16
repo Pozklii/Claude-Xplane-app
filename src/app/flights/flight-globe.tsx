@@ -99,12 +99,18 @@ export function FlightGlobe({
   arcs,
   bare = false,
   overviewMaxZoom = OVERVIEW_MAX_ZOOM,
+  height = MAP_HEIGHT,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
   /** Skip the bordered/rounded card wrapper and caption styling meant for
    * a standalone card, for use where the globe should sit directly on its
-   * own background instead of looking like a boxed widget. */
+   * own background instead of looking like a boxed widget. In bare mode
+   * the map container is also a square (aspect-ratio: 1, tracking
+   * whatever width its parent gives it) clipped to a circle, so it always
+   * reads as a floating globe rather than a rectangular map, whatever the
+   * zoom level — the navigation control is skipped too, since it would
+   * otherwise sit in a corner the circular clip cuts off. */
   bare?: boolean;
   /** Caps how far the initial fit (and the post-deselect overview) zooms
    * in. The default suits the roomier /flights layout; a small container
@@ -112,6 +118,9 @@ export function FlightGlobe({
    * whole sphere stays visible instead of the fit tightening around a
    * tight cluster of points until it overflows the container's edges. */
   overviewMaxZoom?: number;
+  /** Pixel height of the map container outside bare mode (which sizes
+   * itself via aspect-ratio instead). Defaults to the /flights layout. */
+  height?: number;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -159,7 +168,12 @@ export function FlightGlobe({
       attributionControl: { compact: true },
     });
     mapRef.current = map;
-    map.addControl(new NavigationControl(), "top-right");
+    // Skipped in bare mode: its container is clipped to a circle (see the
+    // render below), and this control sits in a screen corner that a
+    // circular clip would cut off.
+    if (!bareRef.current) {
+      map.addControl(new NavigationControl(), "top-right");
+    }
 
     // Slowly spin the globe on its axis (moving the center longitude, not
     // the bearing, so it reads as the Earth turning rather than the camera
@@ -516,7 +530,14 @@ export function FlightGlobe({
           : "overflow-hidden rounded-2xl border border-black/[.08] dark:border-white/[.145]"
       }
     >
-      <div ref={containerRef} style={{ height: MAP_HEIGHT }} />
+      <div
+        ref={containerRef}
+        style={
+          bare
+            ? { aspectRatio: "1", borderRadius: "50%", overflow: "hidden" }
+            : { height }
+        }
+      />
       <p
         className={
           bare
