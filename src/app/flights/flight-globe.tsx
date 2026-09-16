@@ -120,6 +120,10 @@ export function FlightGlobe({
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectIdRef = useRef(onSelectId);
   const selectedIdRef = useRef(selectedId);
+  // bare doesn't change over an instance's lifetime; captured in a ref
+  // purely so the mount-once effect below can read it without needing to
+  // be in that effect's dependency array.
+  const bareRef = useRef(bare);
   // Set around every programmatic flyTo so the idle-spin loop below doesn't
   // fight it by nudging the center mid-animation.
   const cameraAnimatingRef = useRef(false);
@@ -234,6 +238,24 @@ export function FlightGlobe({
             map.setLayerZoomRange(layer.id, 0, 24);
           } catch {
             // Not fatal — worst case the layer keeps its own zoom range.
+          }
+        }
+      }
+
+      // In bare mode the globe sits directly on the page's own background
+      // rather than a card, so the style's "space" fill (the background
+      // layer, painted across the whole canvas rectangle behind the
+      // sphere) would otherwise show up as a visible box around the
+      // circular globe. Make it transparent so only the sphere itself —
+      // real map content — is visible, at any zoom.
+      if (bareRef.current) {
+        for (const layer of map.getStyle()?.layers ?? []) {
+          if (layer.type === "background") {
+            try {
+              map.setPaintProperty(layer.id, "background-opacity", 0);
+            } catch {
+              // Not fatal — worst case that layer keeps its own fill.
+            }
           }
         }
       }

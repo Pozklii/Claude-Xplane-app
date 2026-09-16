@@ -5,7 +5,6 @@
    background instead of handing off to a separate light/dark section. */
 .page {
   --bg: #020304;
-  --muted: #7b93a8;
   --on-bg-strong: #f1f6fa;
   --on-bg: #e7eef5;
   --on-bg-soft: #93aec2;
@@ -100,10 +99,6 @@
 .cta:hover {
   background: var(--accent-mid);
   color: var(--bg);
-}
-
-.mapToolbarMeta {
-  color: var(--muted);
 }
 
 .featureText {

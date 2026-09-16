@@ -363,15 +363,7 @@ export default function Home() {
             </Link>
           </div>
 
-          <div className="flex w-[380px] max-w-full justify-self-end flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className={`${styles.introHeading} text-sm font-semibold`}>
-                Example flights
-              </span>
-              <span className={`${styles.mapToolbarMeta} text-xs`}>
-                {arcs.length} routes &middot; sample data
-              </span>
-            </div>
+          <div className="w-[380px] max-w-full justify-self-end">
             <SelectionProvider>
               <FlightGlobe
                 points={points}
