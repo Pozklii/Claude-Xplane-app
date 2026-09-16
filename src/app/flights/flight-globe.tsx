@@ -303,6 +303,43 @@ export function FlightGlobe({
       map.addControl(overlay);
       overlayRef.current = overlay;
 
+      // MapboxOverlay's own camera sync (for its interleaved picking
+      // viewport, as opposed to the separately-and-correctly-synced
+      // rendering path) only takes effect once its underlying Deck
+      // instance finishes its own async init, which can land after our
+      // initial fitBounds below — leaving pickObject() permanently
+      // testing against the *construction-time* camera (here, the
+      // placeholder center/zoom passed to `new MapLibreMap` above) rather
+      // than wherever the map actually ends up, so a click would never
+      // find anything under the cursor. Keeping it in sync ourselves on
+      // every "move" closes that gap.
+      // viewState is deliberately excluded from MapboxOverlayProps (the
+      // library expects to own it via that same internal sync), so this
+      // needs a narrow cast to set it directly.
+      const setOverlayViewState = overlay.setProps.bind(overlay) as (props: {
+        viewState: {
+          longitude: number;
+          latitude: number;
+          zoom: number;
+          bearing: number;
+          pitch: number;
+        };
+      }) => void;
+      const syncOverlayViewState = () => {
+        const center = map.getCenter();
+        setOverlayViewState({
+          viewState: {
+            longitude: ((center.lng + 540) % 360) - 180,
+            latitude: center.lat,
+            zoom: map.getZoom(),
+            bearing: map.getBearing(),
+            pitch: map.getPitch(),
+          },
+        });
+      };
+      map.on("move", syncOverlayViewState);
+      syncOverlayViewState();
+
       // deck.gl's own onClick prop on a layer doesn't reliably fire from
       // real MapLibre-driven clicks in interleaved mode (interaction
       // handling is delegated to MapLibre, which only forwards a subset of
