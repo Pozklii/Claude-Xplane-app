@@ -4,7 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { findAirport } from "@/lib/airports";
 import { deleteFlight } from "./actions";
 import { NewFlightForm } from "./new-flight-form";
-import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flight-globe";
+import { type GlobeArc, type GlobePoint } from "./flight-globe";
+import { CustomizableGlobe } from "./customizable-globe";
 import { FlightMedia, type MediaItem } from "./flight-media";
 import { FlightRow } from "./flight-row";
 import { SelectionProvider } from "./selection-context";
@@ -165,7 +166,7 @@ export default async function FlightsPage() {
 
       <SelectionProvider>
         <div className="flex flex-col gap-2">
-          <FlightGlobe points={points} arcs={arcs} />
+          <CustomizableGlobe points={points} arcs={arcs} />
           {unresolvedCodes.length > 0 && (
             <p className="text-xs text-zinc-500 dark:text-zinc-500">
               Not shown on the globe (unrecognized airport code):{" "}

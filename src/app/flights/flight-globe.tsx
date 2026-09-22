@@ -58,6 +58,58 @@ const MARKER: [number, number, number, number] = [214, 250, 255, 255];
 const MARKER_SELECTED: [number, number, number, number] = [255, 255, 255, 255];
 const MARKER_RING: [number, number, number, number] = [16, 40, 70, 200];
 
+type Rgb = [number, number, number];
+
+function hexToRgb(hex: string): Rgb {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function mixToward(rgb: Rgb, target: Rgb, amount: number): Rgb {
+  return [
+    Math.round(rgb[0] + (target[0] - rgb[0]) * amount),
+    Math.round(rgb[1] + (target[1] - rgb[1]) * amount),
+    Math.round(rgb[2] + (target[2] - rgb[2]) * amount),
+  ];
+}
+
+// The default look is a deliberate cyan-to-violet gradient (different
+// source/target colors per arc); a user-chosen color instead applies as
+// one flat color for the whole arc, with brighter/dimmer variants for
+// its selected and glow states derived from that same color rather than
+// needing four separate pickers.
+function resolveArcColors(arcColor: string | undefined) {
+  if (!arcColor) {
+    return {
+      source: ARC_SOURCE,
+      target: ARC_TARGET,
+      sourceSelected: ARC_SOURCE_SELECTED,
+      targetSelected: ARC_TARGET_SELECTED,
+      glow: ARC_GLOW,
+      glowSelected: ARC_GLOW_SELECTED,
+    };
+  }
+  const rgb = hexToRgb(arcColor);
+  const base: [number, number, number, number] = [...rgb, 210];
+  const selected: [number, number, number, number] = [
+    ...mixToward(rgb, [255, 255, 255], 0.55),
+    255,
+  ];
+  const glow: [number, number, number, number] = [...rgb, 55];
+  const glowSelected: [number, number, number, number] = [
+    ...mixToward(rgb, [255, 255, 255], 0.3),
+    110,
+  ];
+  return {
+    source: base,
+    target: base,
+    sourceSelected: selected,
+    targetSelected: selected,
+    glow,
+    glowSelected,
+  };
+}
+
 // Selecting a flight zooms and tilts the camera in on its two airports,
 // giving a pitched view of the route. Deselecting eases back out to the
 // full overview.
@@ -100,6 +152,7 @@ export function FlightGlobe({
   bare = false,
   overviewMaxZoom = OVERVIEW_MAX_ZOOM,
   height = MAP_HEIGHT,
+  arcColor,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
@@ -121,6 +174,11 @@ export function FlightGlobe({
   /** Pixel height of the map container outside bare mode (which sizes
    * itself via aspect-ratio instead). Defaults to the /flights layout. */
   height?: number;
+  /** A CSS hex color (e.g. "#38d9ff") to use for every flight route
+   * instead of the default cyan-to-violet gradient — one flat color per
+   * arc, with brighter/dimmer variants for its selected and glow states
+   * derived from it. Omit to keep the default gradient. */
+  arcColor?: string;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -512,6 +570,7 @@ export function FlightGlobe({
       const highlightedCodes = selectedArc
         ? new Set([selectedArc.fromCode, selectedArc.toCode])
         : new Set<string>();
+      const arcColors = resolveArcColors(arcColor);
 
       // deck.gl has no native bloom/glow — approximated here with a wide,
       // low-opacity layer under a thin, bright one for both arcs and
@@ -534,9 +593,9 @@ export function FlightGlobe({
         getSourcePosition: (d) => [d.startLng, d.startLat],
         getTargetPosition: (d) => [d.endLng, d.endLat],
         getSourceColor: (d) =>
-          d.id === selectedId ? ARC_GLOW_SELECTED : ARC_GLOW,
+          d.id === selectedId ? arcColors.glowSelected : arcColors.glow,
         getTargetColor: (d) =>
-          d.id === selectedId ? ARC_GLOW_SELECTED : ARC_GLOW,
+          d.id === selectedId ? arcColors.glowSelected : arcColors.glow,
         getWidth: (d) => (d.id === selectedId ? 9 : 5),
         getHeight: 0.35,
         widthUnits: "pixels",
@@ -551,9 +610,9 @@ export function FlightGlobe({
         getSourcePosition: (d) => [d.startLng, d.startLat],
         getTargetPosition: (d) => [d.endLng, d.endLat],
         getSourceColor: (d) =>
-          d.id === selectedId ? ARC_SOURCE_SELECTED : ARC_SOURCE,
+          d.id === selectedId ? arcColors.sourceSelected : arcColors.source,
         getTargetColor: (d) =>
-          d.id === selectedId ? ARC_TARGET_SELECTED : ARC_TARGET,
+          d.id === selectedId ? arcColors.targetSelected : arcColors.target,
         getWidth: (d) => (d.id === selectedId ? 2.5 : 1.3),
         getHeight: 0.35,
         widthUnits: "pixels",
@@ -653,7 +712,7 @@ export function FlightGlobe({
 
     if (overlay && map.isStyleLoaded()) apply();
     else map.once("load", apply);
-  }, [arcs, points, selectedId, overviewMaxZoom]);
+  }, [arcs, points, selectedId, overviewMaxZoom, arcColor]);
 
   return (
     <div
