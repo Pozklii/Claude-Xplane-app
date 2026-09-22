@@ -289,6 +289,47 @@ export function FlightGlobe({
         }
       }
 
+      // The "aeroway" layer(s) kept above draw the physical layout
+      // (runways, taxiways, aprons, terminal footprints) but — being
+      // fill/line geometry, not symbol layers — carry no text of their
+      // own. Label whichever of those features actually have a name (most
+      // named ones are terminals) or a ref (most stands/gates use this
+      // instead of a name), sourced from that exact same vector source/
+      // source-layer rather than guessing the source id, so it stays
+      // correct even if OpenFreeMap changes which style/source backs it.
+      const aerowayLayer = map
+        .getStyle()
+        ?.layers?.find(
+          (layer) =>
+            (layer as { "source-layer"?: string })["source-layer"] ===
+            "aeroway",
+        ) as { source?: string } | undefined;
+      if (aerowayLayer?.source) {
+        try {
+          map.addLayer({
+            id: "aeroway-detail-label",
+            type: "symbol",
+            source: aerowayLayer.source,
+            "source-layer": "aeroway",
+            minzoom: 12,
+            filter: ["any", ["has", "name"], ["has", "ref"]],
+            layout: {
+              "text-field": ["coalesce", ["get", "name"], ["get", "ref"]],
+              "text-size": 11,
+              "text-font": ["Noto Sans Regular"],
+              "symbol-placement": "point",
+            },
+            paint: {
+              "text-color": "#dcedf7",
+              "text-halo-color": "#0a1622",
+              "text-halo-width": 1.2,
+            },
+          });
+        } catch {
+          // Not fatal — worst case the physical layout stays unlabeled.
+        }
+      }
+
       // In bare mode the globe sits directly on the page's own background
       // rather than a card, so the style's "space" fill (the background
       // layer, painted across the whole canvas rectangle behind the
