@@ -300,6 +300,28 @@ export function FlightGlobe({
         }
       }
 
+      // The style's own airport name label (aerodrome_label) is normally
+      // tuned to only appear once reasonably zoomed in — sensible for a
+      // full-detail basemap where it'd otherwise compete with everything
+      // else, but since this map shows nothing else, the airport's name
+      // is the one thing worth being able to read from much further out.
+      // Widen it the same way as the fill-extrusion buildings above.
+      for (const layer of map.getStyle()?.layers ?? []) {
+        const sourceLayer = (layer as { "source-layer"?: string })[
+          "source-layer"
+        ];
+        const isAirportLabel =
+          sourceLayer === "aerodrome_label" ||
+          layer.id.includes("aerodrome") ||
+          layer.id.includes("airport");
+        if (!isAirportLabel) continue;
+        try {
+          map.setLayerZoomRange(layer.id, 0, 24);
+        } catch {
+          // Not fatal — worst case the label keeps its own zoom range.
+        }
+      }
+
       // The "aeroway" layer(s) kept above draw the physical layout
       // (runways, taxiways, aprons, terminal footprints) but — being
       // fill/line geometry, not symbol layers — carry no text of their
