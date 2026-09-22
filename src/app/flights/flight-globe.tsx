@@ -56,10 +56,6 @@ const ARC_GLOW_SELECTED: [number, number, number, number] = [
 ];
 const MARKER: [number, number, number, number] = [214, 250, 255, 255];
 const MARKER_SELECTED: [number, number, number, number] = [255, 255, 255, 255];
-const MARKER_GLOW: [number, number, number, number] = [56, 217, 255, 90];
-const MARKER_GLOW_SELECTED: [number, number, number, number] = [
-  120, 170, 255, 150,
-];
 const MARKER_RING: [number, number, number, number] = [16, 40, 70, 200];
 
 // Selecting a flight zooms and tilts the camera in on its two airports,
@@ -541,19 +537,6 @@ export function FlightGlobe({
         widthUnits: "pixels",
       });
 
-      const pointGlowLayer = new ScatterplotLayer<GlobePoint>({
-        id: "flight-points-glow",
-        data: points,
-        pickable: false,
-        // Same GlobeView back-face-culling caveat as the arcs above.
-        parameters: { cullMode: "none", depthWriteEnabled: false },
-        getPosition: (d) => [d.lng, d.lat],
-        getFillColor: (d) =>
-          highlightedCodes.has(d.code) ? MARKER_GLOW_SELECTED : MARKER_GLOW,
-        getRadius: (d) => (highlightedCodes.has(d.code) ? 15 : 9),
-        radiusUnits: "pixels",
-      });
-
       const pointLayer = new ScatterplotLayer<GlobePoint>({
         id: "flight-points",
         data: points,
@@ -570,7 +553,7 @@ export function FlightGlobe({
       });
 
       overlayRef.current.setProps({
-        layers: [arcGlowLayer, arcLayer, pointGlowLayer, pointLayer],
+        layers: [arcGlowLayer, arcLayer, pointLayer],
       });
 
       const labelSource = map.getSource("flight-point-labels") as
