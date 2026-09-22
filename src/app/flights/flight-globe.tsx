@@ -79,8 +79,12 @@ const OVERVIEW_MAX_ZOOM = 4;
 // pitch, for MapLibre's native 3D buildings (real OpenStreetMap building
 // footprints, extruded by height) to render — an actual, if only as
 // detailed as OSM's own coverage of that airport, 3D view of its
-// buildings, rather than a generic marker standing in for one.
-const AIRPORT_ZOOM = 16;
+// buildings, rather than a generic marker standing in for one. Lowered
+// from 16: the building layer's own zoom range is widened to 0-24 below,
+// so it's the underlying vector tile data's own resolution — not this
+// value — that ultimately decides how much detail is visible at a given
+// distance; this just means less of a fly-in is needed to reach it.
+const AIRPORT_ZOOM = 15;
 const AIRPORT_PITCH = 60;
 const AIRPORT_FLY_DURATION = 1800;
 
@@ -239,7 +243,18 @@ export function FlightGlobe({
       map.on("zoomend", stopInteracting);
     }
 
-    map.on("load", () => {
+    // Runs on "styledata" (fired as soon as the style JSON itself is
+    // parsed — its layer list is available even though sources/tiles
+    // haven't necessarily loaded yet) rather than "load" (fired only once
+    // the map has actually painted its first frame): reacting on "load"
+    // meant the browser had already drawn one or more frames of the
+    // upstream style at full detail — every layer, all its labels and
+    // terrain-style texture — before this code ran and hid most of it,
+    // which showed up as a visible flash of the "wrong" map right before
+    // it switched to the simplified one. Applying the same changes here
+    // instead means nothing gets painted until after they're already in
+    // effect.
+    map.once("styledata", () => {
       map.setProjection({ type: "globe" });
 
       // The style's own 3D building layer(s) are typically gated behind a
@@ -347,7 +362,9 @@ export function FlightGlobe({
           }
         }
       }
+    });
 
+    map.on("load", () => {
       // Text labels for the two airports of the selected flight only —
       // the dots themselves are drawn by the deck.gl ScatterplotLayer
       // below.
