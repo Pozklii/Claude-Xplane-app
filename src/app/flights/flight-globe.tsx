@@ -256,6 +256,39 @@ export function FlightGlobe({
         }
       }
 
+      // Strip the basemap down to just airports — their name label and
+      // physical layout (runways, taxiways, aprons/stands, terminals) —
+      // plus enough base geography (water, and the 3D buildings widened
+      // above, which is what actually draws an airport's terminals) to
+      // still read as a globe. Everything else (landcover/landuse
+      // texture, place/road/POI labels, roads, boundaries, hillshading)
+      // is real "terrain detail" that's just clutter at this scale.
+      // OpenMapTiles-schema styles (which OpenFreeMap's "liberty" style
+      // is one of) name the relevant vector source-layers consistently:
+      // "aeroway" for the physical layout, "aerodrome_label" for the
+      // airport's name.
+      for (const layer of map.getStyle()?.layers ?? []) {
+        const sourceLayer = (layer as { "source-layer"?: string })[
+          "source-layer"
+        ];
+        const isAirportDetail =
+          sourceLayer === "aeroway" ||
+          sourceLayer === "aerodrome_label" ||
+          layer.id.includes("aeroway") ||
+          layer.id.includes("aerodrome") ||
+          layer.id.includes("airport");
+        const isBaseGeography =
+          layer.type === "background" ||
+          layer.type === "fill-extrusion" ||
+          sourceLayer === "water";
+        if (isAirportDetail || isBaseGeography) continue;
+        try {
+          map.setLayoutProperty(layer.id, "visibility", "none");
+        } catch {
+          // Not fatal — worst case that layer stays visible.
+        }
+      }
+
       // In bare mode the globe sits directly on the page's own background
       // rather than a card, so the style's "space" fill (the background
       // layer, painted across the whole canvas rectangle behind the
