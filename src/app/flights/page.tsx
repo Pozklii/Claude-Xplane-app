@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { findAirport } from "@/lib/airports";
+import { distanceNm } from "@/lib/geo";
 import { deleteFlight } from "./actions";
 import { NewFlightForm } from "./new-flight-form";
 import { type GlobeArc, type GlobePoint } from "./flight-globe";
@@ -88,22 +89,6 @@ async function getFlightThumbnail(
     .from("flight-media")
     .createSignedUrl(path, 3600);
   return signed?.signedUrl ? { path, url: signed.signedUrl } : null;
-}
-
-const EARTH_RADIUS_NM = 3440.065;
-
-// Great-circle distance between two airports (haversine), in nautical miles.
-function distanceNm(
-  from: { lat: number; lon: number },
-  to: { lat: number; lon: number },
-) {
-  const rad = Math.PI / 180;
-  const dLat = (to.lat - from.lat) * rad;
-  const dLon = (to.lon - from.lon) * rad;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(from.lat * rad) * Math.cos(to.lat * rad) * Math.sin(dLon / 2) ** 2;
-  return 2 * EARTH_RADIUS_NM * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
 function buildFlightDetails(

@@ -426,8 +426,17 @@ export function FlightGlobe({
           "text-field": ["get", "label"],
           "text-size": 12,
           "text-font": ["Noto Sans Bold"],
-          "text-offset": [0.8, 0],
-          "text-anchor": "left",
+          // Each label sits on the side facing the route's other airport
+          // (see "anchor" below), keeping both inside the view — always
+          // placing them to the right pushed the eastern one off the edge,
+          // clipped outright by the bare globe's circle.
+          "text-offset": [
+            "case",
+            ["==", ["get", "anchor"], "right"],
+            ["literal", [-0.8, 0]],
+            ["literal", [0.8, 0]],
+          ],
+          "text-anchor": ["get", "anchor"],
         },
         paint: {
           "text-color": "#1f2937",
@@ -650,7 +659,17 @@ export function FlightGlobe({
             .filter((point) => highlightedCodes.has(point.code))
             .map((point) => ({
               type: "Feature",
-              properties: { label: `${point.city} (${point.code})` },
+              properties: {
+                label: `${point.city} (${point.code})`,
+                // The western airport's label reads rightward (toward the
+                // eastern one), and vice versa.
+                anchor:
+                  selectedArc &&
+                  point.lng >
+                    Math.min(selectedArc.startLng, selectedArc.endLng)
+                    ? "right"
+                    : "left",
+              },
               geometry: { type: "Point", coordinates: [point.lng, point.lat] },
             })),
         });

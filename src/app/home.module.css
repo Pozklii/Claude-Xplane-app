@@ -112,3 +112,50 @@
 .featureText {
   color: var(--on-bg-soft);
 }
+
+/* The example-flight tour strip above the landing page's summary card. */
+.showcaseLabel {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--on-bg-soft);
+}
+.showcaseToggle {
+  color: var(--accent-bright);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.showcaseToggle:hover {
+  background: rgba(143, 208, 245, 0.1);
+}
+.showcaseToggle:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+.showcaseTrack {
+  height: 2px;
+  border-radius: 1px;
+  overflow: hidden;
+  background: rgba(143, 208, 245, 0.12);
+}
+.showcaseProgress {
+  height: 100%;
+  background: var(--accent-mid);
+  transform-origin: left;
+  animation-name: showcaseProgress;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+@keyframes showcaseProgress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .showcaseProgress {
+    display: none;
+  }
+}

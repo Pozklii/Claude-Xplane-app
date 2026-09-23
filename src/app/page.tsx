@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { findAirport } from "@/lib/airports";
-import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flights/flight-globe";
-import { SelectionProvider } from "./flights/selection-context";
+import { buildExampleShowcase } from "./example-flights";
+import { LandingShowcase } from "./landing-showcase";
 import styles from "./home.module.css";
 
 const features = [
@@ -21,49 +20,6 @@ const features = [
       "Flights are stored in Supabase and tied to your account, accessible from anywhere.",
   },
 ];
-
-const EXAMPLE_ROUTE: [string, string][] = [
-  ["JFK", "LHR"],
-  ["LHR", "CDG"],
-];
-
-function buildExampleGlobeData(): { points: GlobePoint[]; arcs: GlobeArc[] } {
-  const pointsByCode = new Map<string, GlobePoint>();
-  const arcs: GlobeArc[] = [];
-
-  EXAMPLE_ROUTE.forEach(([departure, arrival], index) => {
-    const from = findAirport(departure);
-    const to = findAirport(arrival);
-    if (!from || !to) return;
-
-    pointsByCode.set(from.code, {
-      code: from.code,
-      name: from.name,
-      city: from.city,
-      lat: from.lat,
-      lng: from.lon,
-    });
-    pointsByCode.set(to.code, {
-      code: to.code,
-      name: to.name,
-      city: to.city,
-      lat: to.lat,
-      lng: to.lon,
-    });
-    arcs.push({
-      id: `example-${index}`,
-      startLat: from.lat,
-      startLng: from.lon,
-      endLat: to.lat,
-      endLng: to.lon,
-      fromCode: from.code,
-      toCode: to.code,
-      label: `${from.code} → ${to.code}`,
-    });
-  });
-
-  return { points: Array.from(pointsByCode.values()), arcs };
-}
 
 // --- Decorative SVG chrome: brushed-metal seams, HUD corners, converging
 // livery lines feeding into a turbofan engine graphic. All static/
@@ -187,7 +143,7 @@ const liveryCurves = Array.from({ length: LIVERY_CURVE_COUNT }, (_, i) => {
 });
 
 export default function Home() {
-  const { points, arcs } = buildExampleGlobeData();
+  const { points, arcs, details } = buildExampleShowcase();
 
   return (
     <div className={`${styles.page} flex flex-1 flex-col font-sans`}>
@@ -340,28 +296,27 @@ export default function Home() {
           </svg>
         </div>
 
-        <div
-          className={`${styles.content} mx-auto grid w-full max-w-5xl grid-cols-1 items-center gap-14 px-6 py-10 lg:grid-cols-[1fr_380px]`}
-        >
-          <div className="flex flex-col items-start gap-4 text-left">
-            <h1
-              className={`${styles.introHeading} text-4xl font-bold tracking-tight sm:text-5xl`}
-            >
-              Create your Flight World
-            </h1>
-            <Link
-              href="/login"
-              className={`${styles.cta} rounded-md px-5 py-2.5 text-sm font-semibold transition-colors`}
-            >
-              Sign in
-            </Link>
-          </div>
-
-          <div className="w-[380px] max-w-full justify-self-end">
-            <SelectionProvider>
-              <FlightGlobe points={points} arcs={arcs} bare />
-            </SelectionProvider>
-          </div>
+        <div className={`${styles.content} mx-auto w-full max-w-5xl px-6 py-10`}>
+          <LandingShowcase
+            points={points}
+            arcs={arcs}
+            details={details}
+            header={
+              <div className="flex flex-col items-start gap-4">
+                <h1
+                  className={`${styles.introHeading} text-4xl font-bold tracking-tight sm:text-5xl`}
+                >
+                  Create your Flight World
+                </h1>
+                <Link
+                  href="/login"
+                  className={`${styles.cta} rounded-md px-5 py-2.5 text-sm font-semibold transition-colors`}
+                >
+                  Sign in
+                </Link>
+              </div>
+            }
+          />
         </div>
       </section>
 

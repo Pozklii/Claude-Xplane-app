@@ -64,7 +64,8 @@ export function CustomizableGlobe({
   return (
     <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex w-full max-w-sm flex-col gap-6">
-        {header}
+        {/* Own wrapper: see LandingShowcase. */}
+        <div>{header}</div>
         <SelectedFlightCard
           details={details}
           arcColor={arcColor}

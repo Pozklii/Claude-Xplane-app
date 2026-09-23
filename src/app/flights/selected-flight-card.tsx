@@ -120,10 +120,17 @@ export function SelectedFlightCard({
   details,
   arcColor,
   userId,
+  showThumbnail = true,
+  closable = true,
+  emptyHint = "Select a route on the globe, or a flight below, to see its details.",
 }: {
   details: Record<string, FlightDetails>;
   arcColor: string;
-  userId: string;
+  /** The signed-in user; thumbnail editing is only offered when set. */
+  userId?: string;
+  showThumbnail?: boolean;
+  closable?: boolean;
+  emptyHint?: React.ReactNode;
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const flight = selectedFlightId ? details[selectedFlightId] : undefined;
@@ -132,11 +139,7 @@ export function SelectedFlightCard({
   const [pickerFlightId, setPickerFlightId] = useState<string | null>(null);
 
   if (!selectedFlightId || !flight) {
-    return (
-      <p className={`${styles.hint} text-sm`}>
-        Select a route on the globe, or a flight below, to see its details.
-      </p>
-    );
+    return <p className={`${styles.hint} text-sm`}>{emptyHint}</p>;
   }
 
   const distanceKm = flight.distanceNm * KM_PER_NM;
@@ -151,35 +154,37 @@ export function SelectedFlightCard({
       style={{ "--arc-color": arcColor } as React.CSSProperties}
       aria-live="polite"
     >
-      <div className={styles.thumb}>
-        {flight.thumbnailUrl ? (
-          // Keyed by URL so a newly chosen thumbnail eases in too.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={flight.thumbnailUrl}
-            src={flight.thumbnailUrl}
-            alt={`${flight.from.code} to ${flight.to.code}`}
-          />
-        ) : (
-          <RoutePlaceholder from={flight.from.code} to={flight.to.code} />
-        )}
-        {!pickerOpen && (
-          <button
-            type="button"
-            onClick={() => setPickerFlightId(selectedFlightId)}
-            className={styles.thumbButton}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
-              <circle cx="5.5" cy="6.5" r="1.3" />
-              <path d="M2 12l3.8-3.6 2.7 2.4 2.2-2 3.3 3.2" />
-            </svg>
-            {hasThumbnail ? "Change thumbnail" : "Add thumbnail"}
-          </button>
-        )}
-      </div>
+      {showThumbnail && (
+        <div className={styles.thumb}>
+          {flight.thumbnailUrl ? (
+            // Keyed by URL so a newly chosen thumbnail eases in too.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={flight.thumbnailUrl}
+              src={flight.thumbnailUrl}
+              alt={`${flight.from.code} to ${flight.to.code}`}
+            />
+          ) : (
+            <RoutePlaceholder from={flight.from.code} to={flight.to.code} />
+          )}
+          {userId && !pickerOpen && (
+            <button
+              type="button"
+              onClick={() => setPickerFlightId(selectedFlightId)}
+              className={styles.thumbButton}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+                <circle cx="5.5" cy="6.5" r="1.3" />
+                <path d="M2 12l3.8-3.6 2.7 2.4 2.2-2 3.3 3.2" />
+              </svg>
+              {hasThumbnail ? "Change thumbnail" : "Add thumbnail"}
+            </button>
+          )}
+        </div>
+      )}
 
-      {pickerOpen && (
+      {userId && pickerOpen && (
         <ThumbnailPicker
           userId={userId}
           flightId={selectedFlightId}
@@ -201,14 +206,16 @@ export function SelectedFlightCard({
             {flight.from.city} to {flight.to.city}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setSelectedFlightId(null)}
-          className={styles.close}
-          aria-label="Close flight details"
-        >
-          &times;
-        </button>
+        {closable && (
+          <button
+            type="button"
+            onClick={() => setSelectedFlightId(null)}
+            className={styles.close}
+            aria-label="Close flight details"
+          >
+            &times;
+          </button>
+        )}
       </div>
 
       <dl
