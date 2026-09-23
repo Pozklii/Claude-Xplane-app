@@ -31,11 +31,13 @@ export function CustomizableGlobe({
   arcs,
   details,
   header,
+  userId,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
   details: Record<string, FlightDetails>;
   header: React.ReactNode;
+  userId: string;
 }) {
   // Reads localStorage without a server/client hydration mismatch: this
   // resolves to null during SSR and the client's first render, then
@@ -63,7 +65,11 @@ export function CustomizableGlobe({
     <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex w-full max-w-sm flex-col gap-6">
         {header}
-        <SelectedFlightCard details={details} arcColor={arcColor} />
+        <SelectedFlightCard
+          details={details}
+          arcColor={arcColor}
+          userId={userId}
+        />
       </div>
       {/* Same bare, circular globe (and container width) as the landing page,
         so it looks the same in both places — it needs to sit on the same

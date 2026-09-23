@@ -7,6 +7,7 @@ import { NewFlightForm } from "./new-flight-form";
 import { type GlobeArc, type GlobePoint } from "./flight-globe";
 import { CustomizableGlobe } from "./customizable-globe";
 import type { FlightDetails } from "./selected-flight-card";
+import { thumbnailFolder } from "./thumbnail-picker";
 import { FlightMedia, type MediaItem } from "./flight-media";
 import { FlightRow } from "./flight-row";
 import { SelectionProvider } from "./selection-context";
@@ -65,6 +66,30 @@ async function getFlightMedia(
   );
 }
 
+type Thumbnail = { path: string; url: string };
+
+// The user's chosen thumbnail for a flight, if any (see ThumbnailPicker) —
+// the newest file in its thumbnail folder, in case a replace was
+// interrupted before the old one was removed.
+async function getFlightThumbnail(
+  supabase: SupabaseClient,
+  userId: string,
+  flightId: string,
+): Promise<Thumbnail | null> {
+  const folder = thumbnailFolder(userId, flightId);
+  const { data: files } = await supabase.storage
+    .from("flight-media")
+    .list(folder, { sortBy: { column: "name", order: "desc" }, limit: 1 });
+  const file = files?.[0];
+  if (!file) return null;
+
+  const path = `${folder}/${file.name}`;
+  const { data: signed } = await supabase.storage
+    .from("flight-media")
+    .createSignedUrl(path, 3600);
+  return signed?.signedUrl ? { path, url: signed.signedUrl } : null;
+}
+
 const EARTH_RADIUS_NM = 3440.065;
 
 // Great-circle distance between two airports (haversine), in nautical miles.
@@ -84,6 +109,7 @@ function distanceNm(
 function buildFlightDetails(
   flights: Flight[],
   mediaByFlight: Map<string, MediaItem[]>,
+  thumbnailByFlight: Map<string, Thumbnail | null>,
 ) {
   const details: Record<string, FlightDetails> = {};
   for (const flight of flights) {
@@ -91,7 +117,10 @@ function buildFlightDetails(
     const to = findAirport(flight.arrival);
     // Only flights drawn on the globe can be selected there.
     if (!from || !to) continue;
-    const media = mediaByFlight.get(flight.id) ?? [];
+    const images = (mediaByFlight.get(flight.id) ?? []).filter(
+      (item) => item.kind === "image",
+    );
+    const custom = thumbnailByFlight.get(flight.id) ?? null;
     details[flight.id] = {
       date: flight.flown_on,
       airline: flight.airline,
@@ -100,7 +129,10 @@ function buildFlightDetails(
       to: { code: to.code, city: to.city },
       hours: Number(flight.hours),
       distanceNm: distanceNm(from, to),
-      thumbnailUrl: media.find((item) => item.kind === "image")?.url ?? null,
+      notes: flight.notes,
+      thumbnailUrl: custom?.url ?? images[0]?.url ?? null,
+      customThumbnailPath: custom?.path ?? null,
+      images: images.map(({ path, name, url }) => ({ path, name, url })),
     };
   }
   return details;
@@ -193,7 +225,23 @@ export default async function FlightsPage() {
     ),
   );
 
-  const flightDetails = buildFlightDetails(flights ?? [], mediaByFlight);
+  const thumbnailByFlight = new Map(
+    await Promise.all(
+      (flights ?? []).map(
+        async (flight) =>
+          [
+            flight.id,
+            await getFlightThumbnail(supabase, user.id, flight.id),
+          ] as const,
+      ),
+    ),
+  );
+
+  const flightDetails = buildFlightDetails(
+    flights ?? [],
+    mediaByFlight,
+    thumbnailByFlight,
+  );
 
   return (
     <SelectionProvider>
@@ -205,6 +253,7 @@ export default async function FlightsPage() {
             points={points}
             arcs={arcs}
             details={flightDetails}
+            userId={user.id}
             header={
               <div className="flex flex-col gap-1">
                 <h1 className={`${styles.introHeading} text-3xl font-semibold`}>

@@ -1,7 +1,8 @@
 "use client";
 
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useSelection } from "./selection-context";
+import { ThumbnailPicker, type ThumbnailChoice } from "./thumbnail-picker";
 import styles from "./selected-flight.module.css";
 
 export type FlightDetails = {
@@ -12,8 +13,14 @@ export type FlightDetails = {
   to: { code: string; city: string };
   hours: number;
   distanceNm: number;
-  /** A signed URL for the flight's first uploaded image, if it has one. */
+  notes: string | null;
+  /** Signed URL of the thumbnail to show: the user's chosen one, else the
+   * flight's first uploaded image, else null (a drawn route instead). */
   thumbnailUrl: string | null;
+  /** Storage path of the user's chosen thumbnail, if they've picked one. */
+  customThumbnailPath: string | null;
+  /** The flight's uploaded images, offered as thumbnail choices. */
+  images: ThumbnailChoice[];
 };
 
 const KM_PER_NM = 1.852;
@@ -112,12 +119,17 @@ function RoutePlaceholder({ from, to }: { from: string; to: string }) {
 export function SelectedFlightCard({
   details,
   arcColor,
+  userId,
 }: {
   details: Record<string, FlightDetails>;
   arcColor: string;
+  userId: string;
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const flight = selectedFlightId ? details[selectedFlightId] : undefined;
+  // Which flight the thumbnail picker is open for, so it closes by itself
+  // when a different flight is selected.
+  const [pickerFlightId, setPickerFlightId] = useState<string | null>(null);
 
   if (!selectedFlightId || !flight) {
     return (
@@ -128,7 +140,8 @@ export function SelectedFlightCard({
   }
 
   const distanceKm = flight.distanceNm * KM_PER_NM;
-  const speedKts = flight.hours > 0 ? flight.distanceNm / flight.hours : null;
+  const pickerOpen = pickerFlightId === selectedFlightId;
+  const hasThumbnail = flight.thumbnailUrl !== null;
 
   return (
     // Keyed by flight so every new selection replays the entrance.
@@ -140,15 +153,41 @@ export function SelectedFlightCard({
     >
       <div className={styles.thumb}>
         {flight.thumbnailUrl ? (
+          // Keyed by URL so a newly chosen thumbnail eases in too.
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            key={flight.thumbnailUrl}
             src={flight.thumbnailUrl}
             alt={`${flight.from.code} to ${flight.to.code}`}
           />
         ) : (
           <RoutePlaceholder from={flight.from.code} to={flight.to.code} />
         )}
+        {!pickerOpen && (
+          <button
+            type="button"
+            onClick={() => setPickerFlightId(selectedFlightId)}
+            className={styles.thumbButton}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+              <circle cx="5.5" cy="6.5" r="1.3" />
+              <path d="M2 12l3.8-3.6 2.7 2.4 2.2-2 3.3 3.2" />
+            </svg>
+            {hasThumbnail ? "Change thumbnail" : "Add thumbnail"}
+          </button>
+        )}
       </div>
+
+      {pickerOpen && (
+        <ThumbnailPicker
+          userId={userId}
+          flightId={selectedFlightId}
+          images={flight.images}
+          currentThumbnailPath={flight.customThumbnailPath}
+          onDone={() => setPickerFlightId(null)}
+        />
+      )}
 
       <div
         className={`${styles.reveal} flex items-start justify-between gap-3`}
@@ -173,7 +212,7 @@ export function SelectedFlightCard({
       </div>
 
       <dl
-        className={`${styles.reveal} grid grid-cols-3 gap-3`}
+        className={`${styles.reveal} grid grid-cols-2 gap-3`}
         style={{ "--i": 1 } as React.CSSProperties}
       >
         <div className="flex flex-col gap-1">
@@ -197,19 +236,6 @@ export function SelectedFlightCard({
             <CountUp value={flight.hours} format={formatDuration} />
           </dd>
         </div>
-        <div className="flex flex-col gap-1">
-          <dt className={styles.label}>Avg speed</dt>
-          <dd className={`${styles.stat} text-base font-semibold`}>
-            {speedKts === null ? (
-              "—"
-            ) : (
-              <CountUp
-                value={speedKts}
-                format={(n) => `${formatInteger(n)} kt`}
-              />
-            )}
-          </dd>
-        </div>
       </dl>
 
       <p
@@ -219,6 +245,18 @@ export function SelectedFlightCard({
         {flight.date} &middot; {flight.aircraft}
         {flight.airline ? ` · ${flight.airline}` : ""}
       </p>
+
+      <section
+        className={`${styles.reveal} flex flex-col gap-1`}
+        style={{ "--i": 3 } as React.CSSProperties}
+      >
+        <h3 className={styles.label}>Notes</h3>
+        {flight.notes ? (
+          <p className={`${styles.notes} text-sm`}>{flight.notes}</p>
+        ) : (
+          <p className={`${styles.soft} text-sm`}>No notes for this flight.</p>
+        )}
+      </section>
     </article>
   );
 }
