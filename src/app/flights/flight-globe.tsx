@@ -193,7 +193,11 @@ export function FlightGlobe({
       style: STYLE_URL,
       center: [0, 20],
       zoom: 0.5,
-      attributionControl: { compact: true },
+      // MapLibre's own attribution control (a white bar/button over the
+      // map) is off; the same credits the style requires — OpenFreeMap,
+      // OpenMapTiles and OpenStreetMap — are given in the caption below
+      // instead, styled to sit on the page rather than over the globe.
+      attributionControl: false,
     });
     mapRef.current = map;
     // Skipped in bare mode: its container is clipped to a circle (see the
@@ -790,7 +794,16 @@ export function FlightGlobe({
         >
           OpenStreetMap
         </a>{" "}
-        contributors, tiles via{" "}
+        contributors,{" "}
+        <a
+          href="https://www.openmaptiles.org/"
+          className="underline"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          &copy; OpenMapTiles
+        </a>
+        , tiles via{" "}
         <a
           href="https://openfreemap.org/"
           className="underline"
