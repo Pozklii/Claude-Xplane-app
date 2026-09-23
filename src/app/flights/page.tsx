@@ -6,6 +6,7 @@ import { deleteFlight } from "./actions";
 import { NewFlightForm } from "./new-flight-form";
 import { type GlobeArc, type GlobePoint } from "./flight-globe";
 import { CustomizableGlobe } from "./customizable-globe";
+import type { FlightDetails } from "./selected-flight-card";
 import { FlightMedia, type MediaItem } from "./flight-media";
 import { FlightRow } from "./flight-row";
 import { SelectionProvider } from "./selection-context";
@@ -62,6 +63,47 @@ async function getFlightMedia(
         ]
       : [],
   );
+}
+
+const EARTH_RADIUS_NM = 3440.065;
+
+// Great-circle distance between two airports (haversine), in nautical miles.
+function distanceNm(
+  from: { lat: number; lon: number },
+  to: { lat: number; lon: number },
+) {
+  const rad = Math.PI / 180;
+  const dLat = (to.lat - from.lat) * rad;
+  const dLon = (to.lon - from.lon) * rad;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(from.lat * rad) * Math.cos(to.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_NM * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+function buildFlightDetails(
+  flights: Flight[],
+  mediaByFlight: Map<string, MediaItem[]>,
+) {
+  const details: Record<string, FlightDetails> = {};
+  for (const flight of flights) {
+    const from = findAirport(flight.departure);
+    const to = findAirport(flight.arrival);
+    // Only flights drawn on the globe can be selected there.
+    if (!from || !to) continue;
+    const media = mediaByFlight.get(flight.id) ?? [];
+    details[flight.id] = {
+      date: flight.flown_on,
+      airline: flight.airline,
+      aircraft: flight.aircraft,
+      from: { code: from.code, city: from.city },
+      to: { code: to.code, city: to.city },
+      hours: Number(flight.hours),
+      distanceNm: distanceNm(from, to),
+      thumbnailUrl: media.find((item) => item.kind === "image")?.url ?? null,
+    };
+  }
+  return details;
 }
 
 function buildGlobeData(flights: Flight[]) {
@@ -151,30 +193,37 @@ export default async function FlightsPage() {
     ),
   );
 
+  const flightDetails = buildFlightDetails(flights ?? [], mediaByFlight);
+
   return (
     <SelectionProvider>
       {/* The landing page's dark ground (same tokens), which the bare globe
           needs behind it to look the same as it does there. */}
       <section className={styles.page}>
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-12 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-1">
-            <h1 className={`${styles.introHeading} text-3xl font-semibold`}>
-              Your flights
-            </h1>
-            <p className={`${styles.featureText} text-sm`}>
-              {flights?.length ?? 0} flight{flights?.length === 1 ? "" : "s"}{" "}
-              logged &middot; {totalHours.toFixed(1)} total hours
-            </p>
-            {unresolvedCodes.length > 0 && (
-              <p className={`${styles.featureText} mt-3 max-w-xs text-xs`}>
-                Not shown on the globe (unrecognized airport code):{" "}
-                {unresolvedCodes.join(", ")}
-              </p>
-            )}
-          </div>
-          <div className="self-center sm:self-auto">
-            <CustomizableGlobe points={points} arcs={arcs} />
-          </div>
+        <div className="mx-auto w-full max-w-3xl px-6 py-12">
+          <CustomizableGlobe
+            points={points}
+            arcs={arcs}
+            details={flightDetails}
+            header={
+              <div className="flex flex-col gap-1">
+                <h1 className={`${styles.introHeading} text-3xl font-semibold`}>
+                  Your flights
+                </h1>
+                <p className={`${styles.featureText} text-sm`}>
+                  {flights?.length ?? 0} flight
+                  {flights?.length === 1 ? "" : "s"} logged &middot;{" "}
+                  {totalHours.toFixed(1)} total hours
+                </p>
+                {unresolvedCodes.length > 0 && (
+                  <p className={`${styles.featureText} mt-3 text-xs`}>
+                    Not shown on the globe (unrecognized airport code):{" "}
+                    {unresolvedCodes.join(", ")}
+                  </p>
+                )}
+              </div>
+            }
+          />
         </div>
       </section>
 

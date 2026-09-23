@@ -86,6 +86,7 @@ const SELECTION_PITCH = 55;
 const SELECTION_PADDING = 90;
 const SELECTION_MAX_ZOOM = 9;
 const SELECTION_FLY_DURATION = 1500;
+const SELECTION_PULSE_MS = 1800;
 const OVERVIEW_FLY_DURATION = 1200;
 // Default cap for the initial fit and the post-deselect overview — can be
 // overridden per instance (see the overviewMaxZoom prop) for containers
@@ -531,6 +532,8 @@ export function FlightGlobe({
   // selection change (e.g. picking a new route color) redraws the layers
   // without also flying the camera anywhere.
   const cameraSelectionRef = useRef<string | null>(null);
+  const pulseFrameRef = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(pulseFrameRef.current), []);
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -597,25 +600,6 @@ export function FlightGlobe({
           widthUnits: "pixels",
         }),
       ];
-      const arcLayers = [
-        ...buildArcLayers(
-          "flight-arcs",
-          arcs.filter((arc) => arc !== selectedArc),
-          arcColors.base,
-          arcColors.glow,
-          1.3,
-          5,
-        ),
-        ...buildArcLayers(
-          "flight-arcs-selected",
-          selectedArc ? [selectedArc] : [],
-          arcColors.selected,
-          arcColors.glowSelected,
-          2.5,
-          9,
-        ),
-      ];
-
       const pointLayer = new ScatterplotLayer<GlobePoint>({
         id: "flight-points",
         data: points,
@@ -627,9 +611,34 @@ export function FlightGlobe({
         radiusUnits: "pixels",
       });
 
-      overlayRef.current.setProps({
-        layers: [...arcLayers, pointLayer],
-      });
+      // pulse (0-1) swells the selected route's glow; see the selection
+      // pulse below.
+      const renderLayers = (pulse: number) => {
+        const [r, g, b, a] = arcColors.glowSelected;
+        overlayRef.current?.setProps({
+          layers: [
+            ...buildArcLayers(
+              "flight-arcs",
+              arcs.filter((arc) => arc !== selectedArc),
+              arcColors.base,
+              arcColors.glow,
+              1.3,
+              5,
+            ),
+            ...buildArcLayers(
+              "flight-arcs-selected",
+              selectedArc ? [selectedArc] : [],
+              arcColors.selected,
+              [r, g, b, Math.round(a + (230 - a) * pulse)],
+              2.5 + 1.5 * pulse,
+              9 + 16 * pulse,
+            ),
+            pointLayer,
+          ],
+        });
+      };
+      cancelAnimationFrame(pulseFrameRef.current);
+      renderLayers(0);
 
       const labelSource = map.getSource("flight-point-labels") as
         | GeoJSONSource
@@ -664,6 +673,18 @@ export function FlightGlobe({
       cameraSelectionRef.current = selectedId;
 
       if (selectedArc) {
+        // Newly selected: pulse the route's glow a couple of times while
+        // the camera flies in on it, fading out as it arrives.
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          const pulseStart = performance.now();
+          const tick = (now: number) => {
+            const t = Math.min(1, (now - pulseStart) / SELECTION_PULSE_MS);
+            renderLayers(Math.sin(Math.PI * 2 * t) ** 2 * (1 - t));
+            if (t < 1) pulseFrameRef.current = requestAnimationFrame(tick);
+          };
+          pulseFrameRef.current = requestAnimationFrame(tick);
+        }
+
         const lngs = [selectedArc.startLng, selectedArc.endLng];
         const lats = [selectedArc.startLat, selectedArc.endLat];
         const bounds = new LngLatBounds([

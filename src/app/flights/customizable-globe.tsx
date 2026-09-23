@@ -7,6 +7,7 @@ import {
   type GlobeArc,
   type GlobePoint,
 } from "./flight-globe";
+import { SelectedFlightCard, type FlightDetails } from "./selected-flight-card";
 
 const STORAGE_KEY = "flightworld:arc-color";
 
@@ -22,12 +23,19 @@ function getServerArcColor() {
   return null;
 }
 
+// The flights page's globe band: the page header, the selected flight's
+// details card and the globe itself — all here because the card and the
+// globe share the user's chosen route color.
 export function CustomizableGlobe({
   points,
   arcs,
+  details,
+  header,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
+  details: Record<string, FlightDetails>;
+  header: React.ReactNode;
 }) {
   // Reads localStorage without a server/client hydration mismatch: this
   // resolves to null during SSR and the client's first render, then
@@ -52,23 +60,30 @@ export function CustomizableGlobe({
   };
 
   return (
-    // Same bare, circular globe (and container width) as the landing page,
-    // so it looks the same in both places — it needs to sit on the same
-    // dark ground too, since bare mode leaves the globe's land transparent.
-    <div className="flex w-[380px] max-w-full flex-col gap-2">
-      <div className="flex items-center justify-end gap-2">
-        <label htmlFor="arc-color" className="text-xs text-white/60">
-          Route color
-        </label>
-        <input
-          id="arc-color"
-          type="color"
-          value={arcColor}
-          onChange={(e) => handleChange(e.target.value)}
-          className="h-6 w-10 cursor-pointer rounded border border-white/20 bg-transparent p-0"
-        />
+    <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex w-full max-w-sm flex-col gap-6">
+        {header}
+        <SelectedFlightCard details={details} arcColor={arcColor} />
       </div>
-      <FlightGlobe points={points} arcs={arcs} arcColor={arcColor} bare />
+      {/* Same bare, circular globe (and container width) as the landing page,
+        so it looks the same in both places — it needs to sit on the same
+        dark ground too, since bare mode leaves the globe's land
+        transparent. */}
+      <div className="flex w-[380px] max-w-full flex-col gap-2 self-center">
+        <div className="flex items-center justify-end gap-2">
+          <label htmlFor="arc-color" className="text-xs text-white/60">
+            Route color
+          </label>
+          <input
+            id="arc-color"
+            type="color"
+            value={arcColor}
+            onChange={(e) => handleChange(e.target.value)}
+            className="h-6 w-10 cursor-pointer rounded border border-white/20 bg-transparent p-0"
+          />
+        </div>
+        <FlightGlobe points={points} arcs={arcs} arcColor={arcColor} bare />
+      </div>
     </div>
   );
 }
