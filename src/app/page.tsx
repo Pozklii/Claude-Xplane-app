@@ -143,7 +143,7 @@ const liveryCurves = Array.from({ length: LIVERY_CURVE_COUNT }, (_, i) => {
 });
 
 export default function Home() {
-  const { points, arcs, details } = buildExampleShowcase();
+  const { airports, initial } = buildExampleShowcase();
 
   return (
     <div className={`${styles.page} flex flex-1 flex-col font-sans`}>
@@ -298,9 +298,8 @@ export default function Home() {
 
         <div className={`${styles.content} mx-auto w-full max-w-5xl px-6 py-10`}>
           <LandingShowcase
-            points={points}
-            arcs={arcs}
-            details={details}
+            airports={airports}
+            initial={initial}
             header={
               <div className="flex flex-col items-start gap-4">
                 <h1

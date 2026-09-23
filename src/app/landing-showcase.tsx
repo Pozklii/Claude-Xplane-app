@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_ARC_COLOR,
   FlightGlobe,
-  type GlobeArc,
   type GlobePoint,
 } from "./flights/flight-globe";
-import {
-  SelectedFlightCard,
-  type FlightDetails,
-} from "./flights/selected-flight-card";
+import { SelectedFlightCard } from "./flights/selected-flight-card";
 import { SelectionProvider, useSelection } from "./flights/selection-context";
+import {
+  EXAMPLE_HISTORY_SIZE,
+  generateExampleFlight,
+  usableRoutes,
+  type ExampleAirport,
+  type ExampleFlight,
+} from "@/lib/example-flights/generate";
 import styles from "./home.module.css";
 
 // How long each example flight stays up, how long to wait for the globe to
@@ -21,24 +24,15 @@ const DWELL_MS = 7000;
 const FIRST_DELAY_MS = 1500;
 const HOLD_AFTER_VISITOR_MS = 20000;
 
-function shuffle<T>(items: T[]) {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
 // The landing page hero's content: its heading/CTA and a summary card for
 // the current example flight on the left, the globe on the right. The
-// globe tours the example flights in a random order — selecting each in
-// turn, which flies the camera onto it — until the visitor pauses it.
+// globe keeps the last few generated example flights drawn and, every few
+// seconds, generates a new one (see generateExampleFlight — endless, from
+// real airline routes) and flies onto it, until the visitor pauses it.
 export function LandingShowcase(props: {
   header: React.ReactNode;
-  points: GlobePoint[];
-  arcs: GlobeArc[];
-  details: Record<string, FlightDetails>;
+  airports: Record<string, ExampleAirport>;
+  initial: ExampleFlight[];
 }) {
   return (
     <SelectionProvider>
@@ -49,47 +43,71 @@ export function LandingShowcase(props: {
 
 function Showcase({
   header,
-  points,
-  arcs,
-  details,
+  airports,
+  initial,
 }: {
   header: React.ReactNode;
-  points: GlobePoint[];
-  arcs: GlobeArc[];
-  details: Record<string, FlightDetails>;
+  airports: Record<string, ExampleAirport>;
+  initial: ExampleFlight[];
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const [paused, setPaused] = useState(false);
-  // Shuffled on the first advance (a timer callback, so never during
-  // render, which keeps the server and client renders identical).
-  const [order, setOrder] = useState<string[] | null>(null);
+  // Seeded by the server (so the first render matches it), then extended
+  // one generated flight at a time from timer callbacks, never during
+  // render.
+  const [flights, setFlights] = useState(initial);
+  const [generatedCount, setGeneratedCount] = useState(initial.length);
   // The flight the tour itself last selected — anything else selected
   // means the visitor chose it (or cleared it) themselves.
   const [tourFlightId, setTourFlightId] = useState<string | null>(null);
+  const started = generatedCount > initial.length;
+
+  const routes = useMemo(() => usableRoutes(airports), [airports]);
+  const { arcs, points, details } = useMemo(() => {
+    const pointsByCode = new Map<string, GlobePoint>();
+    for (const flight of flights) {
+      for (const point of flight.points) pointsByCode.set(point.code, point);
+    }
+    return {
+      arcs: flights.map((flight) => flight.arc),
+      points: Array.from(pointsByCode.values()),
+      details: Object.fromEntries(
+        flights.map((flight) => [flight.id, flight.details]),
+      ),
+    };
+  }, [flights]);
 
   const visitorChose = selectedFlightId !== tourFlightId;
-  const delay =
-    order === null
-      ? FIRST_DELAY_MS
-      : visitorChose
-        ? HOLD_AFTER_VISITOR_MS
-        : DWELL_MS;
+  const delay = !started
+    ? FIRST_DELAY_MS
+    : visitorChose
+      ? HOLD_AFTER_VISITOR_MS
+      : DWELL_MS;
 
   useEffect(() => {
     if (paused) return;
     const timer = window.setTimeout(() => {
-      const tour = order ?? shuffle(arcs.map((arc) => arc.id));
-      if (!order) setOrder(tour);
-      const current = selectedFlightId ? tour.indexOf(selectedFlightId) : -1;
-      const next = tour[(current + 1) % tour.length];
-      setTourFlightId(next);
-      setSelectedFlightId(next);
+      const next = generateExampleFlight({
+        id: `example-${generatedCount}`,
+        airports,
+        routes,
+        recentRouteKeys: flights.map((flight) => flight.routeKey),
+      });
+      setFlights([...flights.slice(-(EXAMPLE_HISTORY_SIZE - 1)), next]);
+      setGeneratedCount(generatedCount + 1);
+      setTourFlightId(next.id);
+      setSelectedFlightId(next.id);
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [paused, delay, order, selectedFlightId, arcs, setSelectedFlightId]);
-
-  const position =
-    order && selectedFlightId ? order.indexOf(selectedFlightId) + 1 : 0;
+  }, [
+    paused,
+    delay,
+    flights,
+    generatedCount,
+    airports,
+    routes,
+    setSelectedFlightId,
+  ]);
 
   return (
     <div className="grid w-full grid-cols-1 items-center gap-14 lg:grid-cols-[1fr_380px]">
@@ -102,8 +120,7 @@ function Showcase({
         <div className="flex w-full max-w-sm flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <p className={`${styles.showcaseLabel} tabular-nums`}>
-              Example flight
-              {position > 0 ? ` · ${position} of ${arcs.length}` : "s"}
+              {selectedFlightId ? "Example flight" : "Example flights"}
             </p>
             <button
               type="button"
@@ -127,7 +144,7 @@ function Showcase({
           </div>
           {/* A fixed minimum height so the heading above doesn't shift up
               and down as cards with different amounts of text swap in. */}
-          <div className="min-h-[248px]">
+          <div className="min-h-[290px]">
             <SelectedFlightCard
               details={details}
               arcColor={DEFAULT_ARC_COLOR}
