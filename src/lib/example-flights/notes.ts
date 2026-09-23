@@ -129,12 +129,6 @@ const PHASES: Template[][] = [
         `Step-climbed to ${flightLevel(c.altitude + 20)} as the fuel burned off.`,
     },
     {
-      key: "oat",
-      when: isJet,
-      text: (c) =>
-        `Outside air temperature dropped to −${int(48, 62, c.rng)}°C at ${flightLevel(c.altitude)}.`,
-    },
-    {
       key: "autopilot-off",
       text: () => "Hand-flew the whole cruise with the autopilot off.",
     },
