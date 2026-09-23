@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
-import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flight-globe";
+import {
+  DEFAULT_ARC_COLOR,
+  FlightGlobe,
+  type GlobeArc,
+  type GlobePoint,
+} from "./flight-globe";
 
 const STORAGE_KEY = "flightworld:arc-color";
-// Matches the default gradient's own source color — just a sensible
-// starting point for the swatch, not applied until the user picks one.
-const SWATCH_DEFAULT = "#38d9ff";
 
 function noopSubscribe() {
   return () => {};
@@ -42,7 +44,7 @@ export function CustomizableGlobe({
   const [pickedThisSession, setPickedThisSession] = useState<string | null>(
     null,
   );
-  const arcColor = pickedThisSession ?? persisted;
+  const arcColor = pickedThisSession ?? persisted ?? DEFAULT_ARC_COLOR;
 
   const handleChange = (color: string) => {
     setPickedThisSession(color);
@@ -61,12 +63,12 @@ export function CustomizableGlobe({
         <input
           id="arc-color"
           type="color"
-          value={arcColor ?? SWATCH_DEFAULT}
+          value={arcColor}
           onChange={(e) => handleChange(e.target.value)}
           className="h-6 w-10 cursor-pointer rounded border border-black/[.08] bg-transparent p-0 dark:border-white/[.145]"
         />
       </div>
-      <FlightGlobe points={points} arcs={arcs} arcColor={arcColor ?? undefined} />
+      <FlightGlobe points={points} arcs={arcs} arcColor={arcColor} />
     </div>
   );
 }

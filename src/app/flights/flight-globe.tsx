@@ -39,21 +39,7 @@ const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 const MAP_HEIGHT = 480;
 
 // deck.gl color accessors take [r, g, b, a] (0-255), not CSS strings.
-// A "space" palette for the flight paths and airport markers — electric
-// cyan-to-violet plasma arcs with a soft glow, and glowing satellite-like
-// markers — layered over the map's regular (unrecolored) basemap.
-const ARC_SOURCE: [number, number, number, number] = [56, 217, 255, 210];
-const ARC_TARGET: [number, number, number, number] = [168, 85, 247, 210];
-const ARC_SOURCE_SELECTED: [number, number, number, number] = [
-  150, 240, 255, 255,
-];
-const ARC_TARGET_SELECTED: [number, number, number, number] = [
-  200, 140, 255, 255,
-];
-const ARC_GLOW: [number, number, number, number] = [130, 170, 255, 55];
-const ARC_GLOW_SELECTED: [number, number, number, number] = [
-  170, 150, 255, 110,
-];
+export const DEFAULT_ARC_COLOR = "#38d9ff";
 const MARKER: [number, number, number, number] = [214, 250, 255, 255];
 const MARKER_SELECTED: [number, number, number, number] = [255, 255, 255, 255];
 const MARKER_RING: [number, number, number, number] = [16, 40, 70, 200];
@@ -73,22 +59,9 @@ function mixToward(rgb: Rgb, target: Rgb, amount: number): Rgb {
   ];
 }
 
-// The default look is a deliberate cyan-to-violet gradient (different
-// source/target colors per arc); a user-chosen color instead applies as
-// one flat color for the whole arc, with brighter/dimmer variants for
-// its selected and glow states derived from that same color rather than
-// needing four separate pickers.
-function resolveArcColors(arcColor: string | undefined) {
-  if (!arcColor) {
-    return {
-      source: ARC_SOURCE,
-      target: ARC_TARGET,
-      sourceSelected: ARC_SOURCE_SELECTED,
-      targetSelected: ARC_TARGET_SELECTED,
-      glow: ARC_GLOW,
-      glowSelected: ARC_GLOW_SELECTED,
-    };
-  }
+// One flat color along the whole arc (same at both ends, no gradient),
+// with the selected and glow states derived from it.
+function resolveArcColors(arcColor: string) {
   const rgb = hexToRgb(arcColor);
   const base: [number, number, number, number] = [...rgb, 210];
   const selected: [number, number, number, number] = [
@@ -100,14 +73,7 @@ function resolveArcColors(arcColor: string | undefined) {
     ...mixToward(rgb, [255, 255, 255], 0.3),
     110,
   ];
-  return {
-    source: base,
-    target: base,
-    sourceSelected: selected,
-    targetSelected: selected,
-    glow,
-    glowSelected,
-  };
+  return { base, selected, glow, glowSelected };
 }
 
 // Selecting a flight zooms and tilts the camera in on its two airports,
@@ -152,7 +118,7 @@ export function FlightGlobe({
   bare = false,
   overviewMaxZoom = OVERVIEW_MAX_ZOOM,
   height = MAP_HEIGHT,
-  arcColor,
+  arcColor = DEFAULT_ARC_COLOR,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
@@ -174,10 +140,8 @@ export function FlightGlobe({
   /** Pixel height of the map container outside bare mode (which sizes
    * itself via aspect-ratio instead). Defaults to the /flights layout. */
   height?: number;
-  /** A CSS hex color (e.g. "#38d9ff") to use for every flight route
-   * instead of the default cyan-to-violet gradient — one flat color per
-   * arc, with brighter/dimmer variants for its selected and glow states
-   * derived from it. Omit to keep the default gradient. */
+  /** CSS hex color (e.g. "#38d9ff") for every flight route, applied flat
+   * along the whole arc; selected and glow variants are derived from it. */
   arcColor?: string;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
@@ -610,9 +574,9 @@ export function FlightGlobe({
         getSourcePosition: (d) => [d.startLng, d.startLat],
         getTargetPosition: (d) => [d.endLng, d.endLat],
         getSourceColor: (d) =>
-          d.id === selectedId ? arcColors.sourceSelected : arcColors.source,
+          d.id === selectedId ? arcColors.selected : arcColors.base,
         getTargetColor: (d) =>
-          d.id === selectedId ? arcColors.targetSelected : arcColors.target,
+          d.id === selectedId ? arcColors.selected : arcColors.base,
         getWidth: (d) => (d.id === selectedId ? 2.5 : 1.3),
         getHeight: 0.35,
         widthUnits: "pixels",

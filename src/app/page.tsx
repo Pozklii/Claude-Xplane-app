@@ -347,7 +347,7 @@ export default function Home() {
         </div>
 
         <div
-          className={`${styles.content} mx-auto grid w-full max-w-5xl grid-cols-1 items-start gap-14 px-6 py-16 sm:py-24 lg:grid-cols-[1fr_380px]`}
+          className={`${styles.content} mx-auto grid w-full max-w-5xl grid-cols-1 items-center gap-14 px-6 py-10 lg:grid-cols-[1fr_380px]`}
         >
           <div className="flex flex-col items-start gap-4 text-left">
             <h1
@@ -376,7 +376,7 @@ export default function Home() {
         </div>
       </section>
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 pt-32 pb-20">
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-6 px-6 py-8">
         <div className="grid w-full grid-cols-1 gap-8 text-left sm:grid-cols-3">
           {features.map((feature) => (
             <div key={feature.title} className="flex flex-col gap-2">
