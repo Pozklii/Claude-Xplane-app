@@ -7,7 +7,7 @@ import { NewFlightForm } from "./new-flight-form";
 import { type GlobeArc, type GlobePoint } from "./flight-globe";
 import { CustomizableGlobe } from "./customizable-globe";
 import type { FlightDetails } from "./selected-flight-card";
-import { thumbnailFolder } from "./thumbnail-picker";
+import { thumbnailFolder } from "./thumbnail-path";
 import { FlightMedia, type MediaItem } from "./flight-media";
 import { FlightRow } from "./flight-row";
 import { SelectionProvider } from "./selection-context";

@@ -4,14 +4,11 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { sanitizeFilename } from "./flight-media";
+import { thumbnailFolder } from "./thumbnail-path";
 import styles from "./selected-flight.module.css";
 
 export type ThumbnailChoice = { path: string; name: string; url: string };
 
-/** Storage folder holding a flight's chosen thumbnail (at most one file). */
-export function thumbnailFolder(userId: string, flightId: string) {
-  return `${userId}/thumbnails/${flightId}`;
-}
 
 function newThumbnailPath(userId: string, flightId: string, name: string) {
   return `${thumbnailFolder(userId, flightId)}/${Date.now()}-${sanitizeFilename(name)}`;
