@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { formatDate } from "@/lib/dates";
 import { useSelection } from "./selection-context";
 import { ThumbnailPicker, type ThumbnailChoice } from "./thumbnail-picker";
 import styles from "./selected-flight.module.css";
@@ -249,7 +250,7 @@ export function SelectedFlightCard({
         className={`${styles.reveal} ${styles.soft} text-xs`}
         style={{ "--i": 2 } as React.CSSProperties}
       >
-        {flight.date} &middot; {flight.aircraft}
+        {formatDate(flight.date)} &middot; {flight.aircraft}
         {flight.airline ? ` · ${flight.airline}` : ""}
       </p>
 

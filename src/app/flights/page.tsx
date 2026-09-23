@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { findAirport } from "@/lib/airports";
 import { distanceNm } from "@/lib/geo";
+import { formatDate } from "@/lib/dates";
 import { deleteFlight } from "./actions";
 import { NewFlightForm } from "./new-flight-form";
 import { type GlobeArc, type GlobePoint } from "./flight-globe";
@@ -165,7 +166,7 @@ function buildGlobeData(flights: Flight[]) {
         endLng: to.lon,
         fromCode: from.code,
         toCode: to.code,
-        label: `${flight.aircraft} · ${from.code} → ${to.code} · ${flight.flown_on}`,
+        label: `${flight.aircraft} · ${from.code} → ${to.code} · ${formatDate(flight.flown_on)}`,
       });
     }
   }
@@ -282,7 +283,7 @@ export default async function FlightsPage() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-black dark:text-zinc-50">
-                    <span>{flight.flown_on}</span>
+                    <span>{formatDate(flight.flown_on)}</span>
                     <span className="text-zinc-400">&middot;</span>
                     {flight.airline && (
                       <>

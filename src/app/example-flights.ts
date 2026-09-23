@@ -43,6 +43,11 @@ export function buildExampleShowcase() {
         airports,
         routes,
         recentRouteKeys: initial.map((flight) => flight.routeKey),
+        recentNoteKeys: initial.flatMap((flight) => flight.noteKeys),
+        // Re-dated against the viewer's own today on the client (see
+        // LandingShowcase) — this page is prerendered, so the server's
+        // today is whenever it was built.
+        today: new Date().toISOString().slice(0, 10),
       }),
     );
   }

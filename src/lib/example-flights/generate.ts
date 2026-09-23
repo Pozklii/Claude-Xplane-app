@@ -1,6 +1,8 @@
 import { distanceNm } from "@/lib/geo";
 import type { GlobeArc, GlobePoint } from "@/app/flights/flight-globe";
 import type { FlightDetails } from "@/app/flights/selected-flight-card";
+import { isoDaysBefore } from "@/lib/dates";
+import { writeNotes } from "./notes";
 import {
   AIRCRAFT,
   AIRCRAFT_CLASSES,
@@ -18,6 +20,11 @@ export type ExampleAirport = {
 export type ExampleFlight = {
   id: string;
   routeKey: string;
+  /** Days before "today" this flight is dated — kept so the client can
+   * re-date flights seeded on the server against the viewer's own today. */
+  daysAgo: number;
+  /** Note templates used (see ./notes), so later flights can avoid them. */
+  noteKeys: string[];
   arc: GlobeArc;
   points: [GlobePoint, GlobePoint];
   details: FlightDetails;
@@ -44,62 +51,13 @@ export function usableRoutes(airports: Record<string, ExampleAirport>) {
   });
 }
 
-function randomDate(rng: Rng, now: number) {
-  // Some time in the last ~18 months.
-  const daysAgo = Math.floor(between(1, 540, rng));
-  return new Date(now - daysAgo * 86_400_000).toISOString().slice(0, 10);
-}
-
-function writeNotes(
-  from: ExampleAirport,
-  to: ExampleAirport,
-  altitude: number,
-  isShort: boolean,
-  rng: Rng,
-) {
-  const cruise =
-    altitude >= 180
-      ? `Cruised at FL${Math.round(altitude / 10) * 10} with a ${Math.round(between(10, 130, rng))} kt ${pick(["headwind", "tailwind", "crosswind"], rng)}.`
-      : `Cruised at ${(Math.round(altitude / 5) * 500).toLocaleString("en-US")} ft, ${pick(["smooth air below the cloud base", "a few bumps over the hills", "clear views of the coast"], rng)}.`;
-  const departure = pick(
-    [
-      `Early-morning departure out of ${from.city}.`,
-      `Night departure out of ${from.city}.`,
-      `Short taxi and an on-time push in ${from.city}.`,
-      `Held for ${Math.round(between(5, 25, rng))} minutes at the gate in ${from.city}.`,
-      `De-iced in ${from.city} before departure.`,
-    ],
-    rng,
-  );
-  const enroute = isShort
-    ? pick(["Light chop on the climb.", "Smooth ride the whole way."], rng)
-    : pick(
-        [
-          "Light chop for the first hour, smooth after that.",
-          "Smooth ride the whole way.",
-          "Some turbulence crossing a line of storms.",
-          `Stepped up to FL${Math.round(altitude / 10) * 10 + 20} as fuel burned off.`,
-        ],
-        rng,
-      );
-  const arrival = `${pick(["ILS", "RNAV", "Visual"], rng)} approach into ${to.city} ${pick(
-    [
-      "in clear skies",
-      "through low cloud",
-      "in light rain",
-      "with a gusty crosswind",
-      "at dusk",
-      "after a short hold",
-    ],
-    rng,
-  )}.`;
-  // Two sentences: always the arrival, plus one of the others.
-  return `${pick([departure, cruise, enroute], rng)} ${arrival}`;
-}
+// How far back generated flights go: anywhere from today to ~18 months ago.
+const MAX_DAYS_AGO = 540;
 
 /**
  * One random example flight: a route from the table (in either direction),
- * one of the aircraft that airline flies on it, a recent date, a flight
+ * one of the aircraft that airline flies on it, a date in the last ~18
+ * months (possibly `today` itself), a flight
  * time estimated from the real great-circle distance and the aircraft's
  * cruise speed, and a couple of generated notes. Endless — call it as
  * often as needed. Avoids repeating any route listed in `recentRouteKeys`
@@ -110,15 +68,19 @@ export function generateExampleFlight({
   airports,
   routes,
   recentRouteKeys = [],
+  recentNoteKeys = [],
+  today,
   rng = Math.random,
-  now = Date.now(),
 }: {
   id: string;
   airports: Record<string, ExampleAirport>;
   routes: ExampleRoute[];
   recentRouteKeys?: string[];
+  /** Note templates the flights already on screen used. */
+  recentNoteKeys?: string[];
+  /** "YYYY-MM-DD" the dates count back from (0 days ago = this day). */
+  today: string;
   rng?: Rng;
-  now?: number;
 }): ExampleFlight {
   let route = pick(routes, rng);
   for (let tries = 0; tries < 10; tries++) {
@@ -152,11 +114,27 @@ export function generateExampleFlight({
     lat: airport.lat,
     lng: airport.lon,
   });
-  const date = randomDate(rng, now);
+  const daysAgo = Math.floor(rng() * (MAX_DAYS_AGO + 1));
+  const date = isoDaysBefore(today, daysAgo);
+  const notes = writeNotes(
+    {
+      from: from.city,
+      to: to.city,
+      altitude,
+      hours,
+      highLatitude: Math.max(Math.abs(from.lat), Math.abs(to.lat)) > 55,
+      lowAndSlow: ["turboprop", "piston"].includes(AIRCRAFT[aircraft]),
+      airliner: route.airline !== null,
+      rng,
+    },
+    recentNoteKeys,
+  );
 
   return {
     id,
     routeKey,
+    daysAgo,
+    noteKeys: notes.keys,
     points: [point(from), point(to)],
     arc: {
       id,
@@ -176,7 +154,7 @@ export function generateExampleFlight({
       to: { code: to.code, city: to.city },
       hours,
       distanceNm: distance,
-      notes: writeNotes(from, to, altitude, hours < 2, rng),
+      notes: notes.text,
       thumbnailUrl: null,
       customThumbnailPath: null,
       images: [],

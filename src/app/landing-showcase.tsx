@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
   DEFAULT_ARC_COLOR,
   FlightGlobe,
@@ -15,6 +15,7 @@ import {
   type ExampleAirport,
   type ExampleFlight,
 } from "@/lib/example-flights/generate";
+import { isoDaysBefore, localToday } from "@/lib/dates";
 import styles from "./home.module.css";
 
 // How long each example flight stays up, how long to wait for the globe to
@@ -23,6 +24,8 @@ import styles from "./home.module.css";
 const DWELL_MS = 7000;
 const FIRST_DELAY_MS = 1500;
 const HOLD_AFTER_VISITOR_MS = 20000;
+
+const noopSubscribe = () => () => {};
 
 // The landing page hero's content: its heading/CTA and a summary card for
 // the current example flight on the left, the globe on the right. The
@@ -62,6 +65,11 @@ function Showcase({
   const [tourFlightId, setTourFlightId] = useState<string | null>(null);
   const started = generatedCount > initial.length;
 
+  // The viewer's own today (null during the server render and hydration,
+  // before any card is showing), which every example flight's date counts
+  // back from — so the newest can be today wherever and whenever they are.
+  const today = useSyncExternalStore(noopSubscribe, localToday, () => null);
+
   const routes = useMemo(() => usableRoutes(airports), [airports]);
   const { arcs, points, details } = useMemo(() => {
     const pointsByCode = new Map<string, GlobePoint>();
@@ -72,10 +80,15 @@ function Showcase({
       arcs: flights.map((flight) => flight.arc),
       points: Array.from(pointsByCode.values()),
       details: Object.fromEntries(
-        flights.map((flight) => [flight.id, flight.details]),
+        flights.map((flight) => [
+          flight.id,
+          today
+            ? { ...flight.details, date: isoDaysBefore(today, flight.daysAgo) }
+            : flight.details,
+        ]),
       ),
     };
-  }, [flights]);
+  }, [flights, today]);
 
   const visitorChose = selectedFlightId !== tourFlightId;
   const delay = !started
@@ -92,6 +105,8 @@ function Showcase({
         airports,
         routes,
         recentRouteKeys: flights.map((flight) => flight.routeKey),
+        recentNoteKeys: flights.flatMap((flight) => flight.noteKeys),
+        today: localToday(),
       });
       setFlights([...flights.slice(-(EXAMPLE_HISTORY_SIZE - 1)), next]);
       setGeneratedCount(generatedCount + 1);
