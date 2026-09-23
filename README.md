@@ -40,6 +40,8 @@ Import this repository in [Vercel](https://vercel.com/new), add the same two env
 
 After deploying, add your Vercel URL (and any preview URLs) to Supabase's Authentication → URL Configuration → Redirect URLs so email confirmation links work in production.
 
+Free-tier Supabase projects are paused after a period of inactivity. While paused, the auth API is unreachable and sign-in/sign-up fail with a "can't reach the sign-in service" message — restore the project from the Supabase dashboard (it takes a few minutes to come back up).
+
 ## Features
 
 - A landing page (`/`) with a dark aviation/instrument-panel look — brushed-metal panel seams, HUD-style corner brackets, converging livery lines feeding into a generatively-drawn turbofan engine (spinning blades via CSS animation) — and a live example globe using the same `FlightGlobe` component as the flights page, seeded with a sample JFK → LHR → CDG route. The artwork hero fills the top three quarters of the viewport and a plain black band with the feature blurbs the bottom quarter (a 3:1 flex split). All of the decorative SVG chrome is computed once at module load in `page.tsx` (deterministic, no client JS needed), and it's a deliberately single dark theme rather than adapting to light/dark preference.
