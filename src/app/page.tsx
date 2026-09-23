@@ -27,12 +27,6 @@ const EXAMPLE_ROUTE: [string, string][] = [
   ["LHR", "CDG"],
 ];
 
-// The demo globe's container is much smaller than the /flights page's, so
-// the default fitBounds cap (tuned for that larger layout) would zoom in
-// tight enough on this route to overflow the sphere past the container's
-// edges. This keeps the whole globe in view instead.
-const EXAMPLE_GLOBE_OVERVIEW_MAX_ZOOM = 1;
-
 function buildExampleGlobeData(): { points: GlobePoint[]; arcs: GlobeArc[] } {
   const pointsByCode = new Map<string, GlobePoint>();
   const arcs: GlobeArc[] = [];
@@ -365,12 +359,7 @@ export default function Home() {
 
           <div className="w-[380px] max-w-full justify-self-end">
             <SelectionProvider>
-              <FlightGlobe
-                points={points}
-                arcs={arcs}
-                bare
-                overviewMaxZoom={EXAMPLE_GLOBE_OVERVIEW_MAX_ZOOM}
-              />
+              <FlightGlobe points={points} arcs={arcs} bare />
             </SelectionProvider>
           </div>
         </div>

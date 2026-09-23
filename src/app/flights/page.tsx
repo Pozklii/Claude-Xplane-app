@@ -10,6 +10,7 @@ import { FlightMedia, type MediaItem } from "./flight-media";
 import { FlightRow } from "./flight-row";
 import { SelectionProvider } from "./selection-context";
 import { StopPropagation } from "./stop-propagation";
+import styles from "../home.module.css";
 
 type Flight = {
   id: string;
@@ -129,9 +130,7 @@ export default async function FlightsPage() {
 
   const { data: flights, error } = await supabase
     .from("flights")
-    .select(
-      "id, flown_on, airline, aircraft, departure, arrival, hours, notes",
-    )
+    .select("id, flown_on, airline, aircraft, departure, arrival, hours, notes")
     .order("flown_on", { ascending: false })
     .returns<Flight[]>();
 
@@ -153,28 +152,33 @@ export default async function FlightsPage() {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-6 py-16">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-3xl font-semibold text-black dark:text-zinc-50">
-          Your flights
-        </h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          {flights?.length ?? 0} flight{flights?.length === 1 ? "" : "s"}{" "}
-          logged &middot; {totalHours.toFixed(1)} total hours
-        </p>
-      </div>
-
-      <SelectionProvider>
-        <div className="flex flex-col gap-2">
-          <CustomizableGlobe points={points} arcs={arcs} />
-          {unresolvedCodes.length > 0 && (
-            <p className="text-xs text-zinc-500 dark:text-zinc-500">
-              Not shown on the globe (unrecognized airport code):{" "}
-              {unresolvedCodes.join(", ")}
+    <SelectionProvider>
+      {/* The landing page's dark ground (same tokens), which the bare globe
+          needs behind it to look the same as it does there. */}
+      <section className={styles.page}>
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-12 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-1">
+            <h1 className={`${styles.introHeading} text-3xl font-semibold`}>
+              Your flights
+            </h1>
+            <p className={`${styles.featureText} text-sm`}>
+              {flights?.length ?? 0} flight{flights?.length === 1 ? "" : "s"}{" "}
+              logged &middot; {totalHours.toFixed(1)} total hours
             </p>
-          )}
+            {unresolvedCodes.length > 0 && (
+              <p className={`${styles.featureText} mt-3 max-w-xs text-xs`}>
+                Not shown on the globe (unrecognized airport code):{" "}
+                {unresolvedCodes.join(", ")}
+              </p>
+            )}
+          </div>
+          <div className="self-center sm:self-auto">
+            <CustomizableGlobe points={points} arcs={arcs} />
+          </div>
         </div>
+      </section>
 
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-6 py-12">
         <NewFlightForm />
 
         {error && (
@@ -239,7 +243,7 @@ export default async function FlightsPage() {
             </FlightRow>
           ))}
         </div>
-      </SelectionProvider>
-    </div>
+      </div>
+    </SelectionProvider>
   );
 }

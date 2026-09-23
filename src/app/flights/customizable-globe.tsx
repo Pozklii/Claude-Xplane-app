@@ -52,12 +52,12 @@ export function CustomizableGlobe({
   };
 
   return (
-    <div className="flex flex-col gap-2">
+    // Same bare, circular globe (and container width) as the landing page,
+    // so it looks the same in both places — it needs to sit on the same
+    // dark ground too, since bare mode leaves the globe's land transparent.
+    <div className="flex w-[380px] max-w-full flex-col gap-2">
       <div className="flex items-center justify-end gap-2">
-        <label
-          htmlFor="arc-color"
-          className="text-xs text-zinc-500 dark:text-zinc-400"
-        >
+        <label htmlFor="arc-color" className="text-xs text-white/60">
           Route color
         </label>
         <input
@@ -65,10 +65,10 @@ export function CustomizableGlobe({
           type="color"
           value={arcColor}
           onChange={(e) => handleChange(e.target.value)}
-          className="h-6 w-10 cursor-pointer rounded border border-black/[.08] bg-transparent p-0 dark:border-white/[.145]"
+          className="h-6 w-10 cursor-pointer rounded border border-white/20 bg-transparent p-0"
         />
       </div>
-      <FlightGlobe points={points} arcs={arcs} arcColor={arcColor} />
+      <FlightGlobe points={points} arcs={arcs} arcColor={arcColor} bare />
     </div>
   );
 }

@@ -40,9 +40,12 @@ const MAP_HEIGHT = 480;
 
 // deck.gl color accessors take [r, g, b, a] (0-255), not CSS strings.
 export const DEFAULT_ARC_COLOR = "#38d9ff";
-const MARKER: [number, number, number, number] = [214, 250, 255, 255];
-const MARKER_SELECTED: [number, number, number, number] = [255, 255, 255, 255];
-const MARKER_RING: [number, number, number, number] = [16, 40, 70, 200];
+// Airports have no visible marker (a flat disc on the globe's surface
+// z-fights with it and flickers, especially zoomed in and pitched on a
+// selected route) — the arc endpoints already show where they are. The
+// point layer is still drawn fully transparent so airports stay clickable:
+// deck.gl's picking pass uses its own picking colors, not the fill alpha.
+const MARKER_HIT_TARGET: [number, number, number, number] = [0, 0, 0, 0];
 
 type Rgb = [number, number, number];
 
@@ -88,6 +91,9 @@ const OVERVIEW_FLY_DURATION = 1200;
 // overridden per instance (see the overviewMaxZoom prop) for containers
 // too small for this to keep the whole globe in view.
 const OVERVIEW_MAX_ZOOM = 4;
+// The bare (circular, frameless) globe is sized around a ~380px-wide
+// container; at zoom 1 the whole sphere fits inside its circular clip.
+const BARE_OVERVIEW_MAX_ZOOM = 1;
 
 // Clicking an individual airport flies in close enough, at a steep enough
 // pitch, for MapLibre's native 3D buildings (real OpenStreetMap building
@@ -116,7 +122,7 @@ export function FlightGlobe({
   points,
   arcs,
   bare = false,
-  overviewMaxZoom = OVERVIEW_MAX_ZOOM,
+  overviewMaxZoom = bare ? BARE_OVERVIEW_MAX_ZOOM : OVERVIEW_MAX_ZOOM,
   height = MAP_HEIGHT,
   arcColor = DEFAULT_ARC_COLOR,
 }: {
@@ -132,10 +138,9 @@ export function FlightGlobe({
    * otherwise sit in a corner the circular clip cuts off. */
   bare?: boolean;
   /** Caps how far the initial fit (and the post-deselect overview) zooms
-   * in. The default suits the roomier /flights layout; a small container
-   * (like the landing page's compact globe) needs a lower cap so the
-   * whole sphere stays visible instead of the fit tightening around a
-   * tight cluster of points until it overflows the container's edges. */
+   * in. Defaults to a cap that keeps the whole sphere inside the bare
+   * globe's circle, or a closer one for the boxed map; a different
+   * container size may need its own value. */
   overviewMaxZoom?: number;
   /** Pixel height of the map container outside bare mode (which sizes
    * itself via aspect-ratio instead). Defaults to the /flights layout. */
@@ -481,7 +486,7 @@ export function FlightGlobe({
           x: event.point.x,
           y: event.point.y,
           radius: 6,
-          layerIds: ["flight-arcs", "flight-points"],
+          layerIds: ["flight-arcs", "flight-arcs-selected", "flight-points"],
         });
 
         if (hit?.layer?.id === "flight-points") {
@@ -522,9 +527,12 @@ export function FlightGlobe({
   // the flight data or selection changes, and fit the view to them the
   // first time they arrive.
   const hasFitRef = useRef(false);
+  // The selection the camera was last moved for, so a change that isn't a
+  // selection change (e.g. picking a new route color) redraws the layers
+  // without also flying the camera anywhere.
+  const cameraSelectionRef = useRef<string | null>(null);
   useEffect(() => {
     const map = mapRef.current;
-    const overlay = overlayRef.current;
     if (!map) return;
 
     const apply = () => {
@@ -535,70 +543,92 @@ export function FlightGlobe({
         ? new Set([selectedArc.fromCode, selectedArc.toCode])
         : new Set<string>();
       const arcColors = resolveArcColors(arcColor);
-
       // deck.gl has no native bloom/glow — approximated here with a wide,
-      // low-opacity layer under a thin, bright one for both arcs and
-      // markers, purely via alpha blending. Both layers sit at the exact
-      // same ground position as their core counterpart, so under the
-      // globe's real depth testing they'd tie on depth and flicker
-      // (whichever fragment happened to win varying frame to frame,
-      // worse once the camera is continuously moving during idle spin) —
-      // depthWriteEnabled: false keeps the glow from contesting that tie
-      // while still letting it be occluded by real geometry like the
-      // globe itself.
-      const arcGlowLayer = new ArcLayer<GlobeArc>({
-        id: "flight-arcs-glow",
-        data: arcs,
-        pickable: false,
-        greatCircle: true,
-        // GlobeView back-face-culls by default, which hides an arc's tube
-        // geometry from most angles unless culling is disabled for it.
-        parameters: { cullMode: "none", depthWriteEnabled: false },
-        getSourcePosition: (d) => [d.startLng, d.startLat],
-        getTargetPosition: (d) => [d.endLng, d.endLat],
-        getSourceColor: (d) =>
-          d.id === selectedId ? arcColors.glowSelected : arcColors.glow,
-        getTargetColor: (d) =>
-          d.id === selectedId ? arcColors.glowSelected : arcColors.glow,
-        getWidth: (d) => (d.id === selectedId ? 9 : 5),
-        getHeight: 0.35,
-        widthUnits: "pixels",
-      });
-
-      const arcLayer = new ArcLayer<GlobeArc>({
-        id: "flight-arcs",
-        data: arcs,
-        pickable: true,
-        greatCircle: true,
-        parameters: { cullMode: "none" },
-        getSourcePosition: (d) => [d.startLng, d.startLat],
-        getTargetPosition: (d) => [d.endLng, d.endLat],
-        getSourceColor: (d) =>
-          d.id === selectedId ? arcColors.selected : arcColors.base,
-        getTargetColor: (d) =>
-          d.id === selectedId ? arcColors.selected : arcColors.base,
-        getWidth: (d) => (d.id === selectedId ? 2.5 : 1.3),
-        getHeight: 0.35,
-        widthUnits: "pixels",
-      });
+      // low-opacity layer under a thin, bright one, purely via alpha
+      // blending. The glow sits at the exact same ground position as its
+      // core counterpart, so under the globe's real depth testing they'd
+      // tie on depth and flicker (whichever fragment happened to win
+      // varying frame to frame, worse once the camera is continuously
+      // moving during idle spin) — depthWriteEnabled: false keeps the glow
+      // from contesting that tie while still letting it be occluded by
+      // real geometry like the globe itself.
+      //
+      // The selected route gets its own pair of layers rather than a
+      // per-arc accessor function: deck.gl only re-runs accessor functions
+      // when the data or an updateTriggers entry changes, so a function
+      // would silently keep drawing the old color/selection. Constant
+      // values (like these) are compared directly and always apply.
+      const buildArcLayers = (
+        id: string,
+        data: GlobeArc[],
+        coreColor: [number, number, number, number],
+        glowColor: [number, number, number, number],
+        coreWidth: number,
+        glowWidth: number,
+      ): ArcLayer<GlobeArc>[] => [
+        new ArcLayer<GlobeArc>({
+          id: `${id}-glow`,
+          data,
+          pickable: false,
+          greatCircle: true,
+          // GlobeView back-face-culls by default, which hides an arc's
+          // tube geometry from most angles unless culling is disabled.
+          parameters: { cullMode: "none", depthWriteEnabled: false },
+          getSourcePosition: (d) => [d.startLng, d.startLat],
+          getTargetPosition: (d) => [d.endLng, d.endLat],
+          getSourceColor: glowColor,
+          getTargetColor: glowColor,
+          getWidth: glowWidth,
+          getHeight: 0.35,
+          widthUnits: "pixels",
+        }),
+        new ArcLayer<GlobeArc>({
+          id,
+          data,
+          pickable: true,
+          greatCircle: true,
+          parameters: { cullMode: "none" },
+          getSourcePosition: (d) => [d.startLng, d.startLat],
+          getTargetPosition: (d) => [d.endLng, d.endLat],
+          getSourceColor: coreColor,
+          getTargetColor: coreColor,
+          getWidth: coreWidth,
+          getHeight: 0.35,
+          widthUnits: "pixels",
+        }),
+      ];
+      const arcLayers = [
+        ...buildArcLayers(
+          "flight-arcs",
+          arcs.filter((arc) => arc !== selectedArc),
+          arcColors.base,
+          arcColors.glow,
+          1.3,
+          5,
+        ),
+        ...buildArcLayers(
+          "flight-arcs-selected",
+          selectedArc ? [selectedArc] : [],
+          arcColors.selected,
+          arcColors.glowSelected,
+          2.5,
+          9,
+        ),
+      ];
 
       const pointLayer = new ScatterplotLayer<GlobePoint>({
         id: "flight-points",
         data: points,
         pickable: true,
-        parameters: { cullMode: "none" },
+        parameters: { cullMode: "none", depthWriteEnabled: false },
         getPosition: (d) => [d.lng, d.lat],
-        getFillColor: (d) =>
-          highlightedCodes.has(d.code) ? MARKER_SELECTED : MARKER,
-        getRadius: (d) => (highlightedCodes.has(d.code) ? 6 : 3.5),
+        getFillColor: MARKER_HIT_TARGET,
+        getRadius: 6,
         radiusUnits: "pixels",
-        stroked: true,
-        getLineColor: MARKER_RING,
-        lineWidthMinPixels: 1,
       });
 
       overlayRef.current.setProps({
-        layers: [arcGlowLayer, arcLayer, pointLayer],
+        layers: [...arcLayers, pointLayer],
       });
 
       const labelSource = map.getSource("flight-point-labels") as
@@ -626,8 +656,12 @@ export function FlightGlobe({
           [Math.max(...lngs), Math.max(...lats)],
         ];
         map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: overviewMaxZoom });
+        cameraSelectionRef.current = selectedId;
         return;
       }
+
+      if (selectedId === cameraSelectionRef.current) return;
+      cameraSelectionRef.current = selectedId;
 
       if (selectedArc) {
         const lngs = [selectedArc.startLng, selectedArc.endLng];
@@ -674,7 +708,11 @@ export function FlightGlobe({
       }
     };
 
-    if (overlay && map.isStyleLoaded()) apply();
+    // The overlay only exists once the map's "load" handler above has run.
+    // Not map.isStyleLoaded(): that stays false while any tiles are still
+    // loading (nearly always, mid-spin), and "load" has long since fired
+    // by then, so an update deferred to it would silently never apply.
+    if (overlayRef.current) apply();
     else map.once("load", apply);
   }, [arcs, points, selectedId, overviewMaxZoom, arcColor]);
 
