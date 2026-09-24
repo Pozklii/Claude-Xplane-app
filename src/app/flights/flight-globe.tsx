@@ -126,6 +126,7 @@ export function FlightGlobe({
   overviewMaxZoom = bare ? BARE_OVERVIEW_MAX_ZOOM : OVERVIEW_MAX_ZOOM,
   height = MAP_HEIGHT,
   arcColor = DEFAULT_ARC_COLOR,
+  interactive = true,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
@@ -149,6 +150,12 @@ export function FlightGlobe({
   /** CSS hex color (e.g. "#38d9ff") for every flight route, applied flat
    * along the whole arc; selected and glow variants are derived from it. */
   arcColor?: string;
+  /** When false, the globe is display-only: it still spins, draws its
+   * routes and flies to whatever the selection context selects (e.g. the
+   * landing page's example-flight tour), but ignores the pointer entirely
+   * — no dragging, zooming or clicking — and scrolling over it scrolls the
+   * page. Fixed for an instance's lifetime. */
+  interactive?: boolean;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -161,6 +168,7 @@ export function FlightGlobe({
   // purely so the mount-once effect below can read it without needing to
   // be in that effect's dependency array.
   const bareRef = useRef(bare);
+  const interactiveRef = useRef(interactive);
   // Set around every programmatic flyTo so the idle-spin loop below doesn't
   // fight it by nudging the center mid-animation.
   const cameraAnimatingRef = useRef(false);
@@ -198,6 +206,7 @@ export function FlightGlobe({
       // OpenMapTiles and OpenStreetMap — are given in the caption below
       // instead, styled to sit on the page rather than over the globe.
       attributionControl: false,
+      interactive: interactiveRef.current,
     });
     mapRef.current = map;
     // Skipped in bare mode: its container is clipped to a circle (see the
@@ -496,6 +505,7 @@ export function FlightGlobe({
       // events) — pick manually from MapLibre's click event instead, which
       // is proven reliable.
       map.on("click", (event) => {
+        if (!interactiveRef.current) return;
         const hit = overlay.pickObject({
           x: event.point.x,
           y: event.point.y,
@@ -772,8 +782,13 @@ export function FlightGlobe({
         ref={containerRef}
         style={
           bare
-            ? { aspectRatio: "1", borderRadius: "50%", overflow: "hidden" }
-            : { height }
+            ? {
+                aspectRatio: "1",
+                borderRadius: "50%",
+                overflow: "hidden",
+                pointerEvents: interactive ? undefined : "none",
+              }
+            : { height, pointerEvents: interactive ? undefined : "none" }
         }
       />
       <p
@@ -783,9 +798,9 @@ export function FlightGlobe({
             : "px-3 py-1.5 text-[11px] text-zinc-600"
         }
       >
-
-        Drag to rotate, scroll to zoom, click a flight for its route, click
-        an airport to fly into its real 3D buildings. Map data &copy;{" "}
+        {interactive &&
+          "Drag to rotate, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings. "}
+        Map data &copy;{" "}
         <a
           href="https://www.openstreetmap.org/copyright"
           className="underline"

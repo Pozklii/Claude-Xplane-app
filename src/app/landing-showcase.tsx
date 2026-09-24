@@ -18,12 +18,10 @@ import {
 import { isoDaysBefore, localToday } from "@/lib/dates";
 import styles from "./home.module.css";
 
-// How long each example flight stays up, how long to wait for the globe to
-// load before the first one, and how long a flight the visitor picked
-// themselves (or a deselect) holds before the tour carries on.
+// How long each example flight stays up, and how long to wait for the globe
+// to load before the first one.
 const DWELL_MS = 7000;
 const FIRST_DELAY_MS = 1500;
-const HOLD_AFTER_VISITOR_MS = 20000;
 
 const noopSubscribe = () => () => {};
 
@@ -60,9 +58,6 @@ function Showcase({
   // render.
   const [flights, setFlights] = useState(initial);
   const [generatedCount, setGeneratedCount] = useState(initial.length);
-  // The flight the tour itself last selected — anything else selected
-  // means the visitor chose it (or cleared it) themselves.
-  const [tourFlightId, setTourFlightId] = useState<string | null>(null);
   const started = generatedCount > initial.length;
 
   // The viewer's own today (null during the server render and hydration,
@@ -90,12 +85,7 @@ function Showcase({
     };
   }, [flights, today]);
 
-  const visitorChose = selectedFlightId !== tourFlightId;
-  const delay = !started
-    ? FIRST_DELAY_MS
-    : visitorChose
-      ? HOLD_AFTER_VISITOR_MS
-      : DWELL_MS;
+  const delay = started ? DWELL_MS : FIRST_DELAY_MS;
 
   useEffect(() => {
     if (paused) return;
@@ -110,7 +100,6 @@ function Showcase({
       });
       setFlights([...flights.slice(-(EXAMPLE_HISTORY_SIZE - 1)), next]);
       setGeneratedCount(generatedCount + 1);
-      setTourFlightId(next.id);
       setSelectedFlightId(next.id);
     }, delay);
     return () => window.clearTimeout(timer);
@@ -165,14 +154,15 @@ function Showcase({
               arcColor={DEFAULT_ARC_COLOR}
               showThumbnail={false}
               closable={false}
-              emptyHint="Click a route on the globe to see an example flight."
+              emptyHint="Example flights will appear here in a moment."
             />
           </div>
         </div>
       </div>
 
       <div className="w-[380px] max-w-full justify-self-center lg:justify-self-end">
-        <FlightGlobe points={points} arcs={arcs} bare />
+        {/* Display-only: the tour drives it, visitors can't drag or click it. */}
+        <FlightGlobe points={points} arcs={arcs} bare interactive={false} />
       </div>
     </div>
   );
