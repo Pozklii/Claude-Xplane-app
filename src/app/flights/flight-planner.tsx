@@ -7,7 +7,7 @@ import type { ChallengeCardData, SuggestionRoute } from "./planner-data";
 import { PLANNER_ID, usePlanner, type PlannerTab } from "./planner-context";
 
 const TABS: { id: PlannerTab; label: string }[] = [
-  { id: "airport", label: "Airports & METAR" },
+  { id: "airport", label: "Airports" },
   { id: "suggestions", label: "Real-world routes" },
   { id: "challenges", label: "Challenging flights" },
 ];

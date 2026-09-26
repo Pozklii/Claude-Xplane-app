@@ -14,7 +14,7 @@ export function AirportLink({
     <button
       type="button"
       onClick={() => openAirport(airport.code)}
-      title={`${airport.city}: live METAR and airport facts`}
+      title={`${airport.city}: look up this airport`}
       className="inline-flex items-center gap-1 rounded font-semibold text-black underline-offset-2 hover:underline dark:text-zinc-50"
     >
       <Flag country={airport.country} />

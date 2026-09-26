@@ -11,11 +11,7 @@ import { lookupAirport, type AirportLookup } from "./airport-actions";
 import { Flag } from "./flag";
 import { usePlanner } from "./planner-context";
 
-const M_PER_FT = 0.3048;
 const KM_PER_SM = 1.609344;
-
-const formatFt = (ft: number) =>
-  `${ft.toLocaleString("en-US")} ft (${Math.round(ft * M_PER_FT).toLocaleString("en-US")} m)`;
 
 const CATEGORY_STYLES: Record<FlightCategory, string> = {
   VFR: "bg-emerald-600 text-white",
@@ -142,10 +138,7 @@ function WeatherPanel({ airport }: { airport: AirportLookup }) {
   const current = weather?.key === key ? weather : null;
   const bestRunway =
     current?.status === "ok"
-      ? runwayWinds(
-          current.metar.wind,
-          airport.runways.map((runway) => runway.name),
-        )[0]
+      ? runwayWinds(current.metar.wind, airport.runwayNames)[0]
       : undefined;
 
   return (
@@ -235,9 +228,52 @@ function WeatherPanel({ airport }: { airport: AirportLookup }) {
   );
 }
 
-function AirportDetails({ airport }: { airport: AirportLookup }) {
+function hash(text: string) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  }
+  return h >>> 0;
+}
+
+/** One fact about the airport or its country, with a button for another. */
+function DidYouKnow({ airport }: { airport: AirportLookup }) {
+  const [shuffle, setShuffle] = useState(0);
+  const facts = airport.trivia;
+  if (facts.length === 0) return null;
+  const fact = facts[(hash(airport.code) + shuffle) % facts.length];
+  return (
+    <section className="flex items-start gap-3 rounded-xl border border-black/[.08] p-3 dark:border-white/[.145]">
+      <Flag country={fact.country} className="mt-0.5 text-lg" />
+      <div className="flex flex-col gap-1">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
+          Did you know? &middot; {fact.subject}
+        </p>
+        <p className="text-sm text-black dark:text-zinc-100">{fact.text}</p>
+        {facts.length > 1 && (
+          <button
+            type="button"
+            onClick={() => setShuffle((n) => n + 1)}
+            className="self-start text-xs text-blue-600 underline dark:text-blue-400"
+          >
+            Another fact
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AirportDetails({
+  airport,
+  showWeather,
+  onToggleWeather,
+}: {
+  airport: AirportLookup;
+  showWeather: boolean;
+  onToggleWeather: () => void;
+}) {
   const country = airport.country;
-  const longest = airport.runways[0];
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-start gap-3">
@@ -264,115 +300,31 @@ function AirportDetails({ airport }: { airport: AirportLookup }) {
         </p>
       )}
 
-      <WeatherPanel key={airport.code} airport={airport} />
+      <DidYouKnow key={`fact-${airport.code}`} airport={airport} />
 
-      <section className="flex flex-col gap-3">
-        <h3 className="text-sm font-semibold text-black dark:text-zinc-50">
-          Airport facts
-        </h3>
-        <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {airport.typeLabel && <Fact label="Type">{airport.typeLabel}</Fact>}
-          {airport.elevationFt !== null && (
-            <Fact label="Elevation">{formatFt(airport.elevationFt)}</Fact>
-          )}
-          <Fact label="Scheduled flights">
-            {airport.scheduledService ? "Yes" : "No"}
-          </Fact>
-          <Fact label="Runways">{airport.runways.length || "None listed"}</Fact>
-          {longest?.lengthFt && (
-            <Fact label="Longest runway">
-              {longest.name} &middot; {formatFt(longest.lengthFt)}
-            </Fact>
-          )}
-          <Fact label="Position">
-            {airport.lat.toFixed(4)}, {airport.lon.toFixed(4)}
-          </Fact>
-        </dl>
-        {airport.runways.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-[11px] uppercase tracking-wide text-zinc-500">
-                <tr>
-                  <th className="py-1 pr-4 font-medium">Runway</th>
-                  <th className="py-1 pr-4 font-medium">Length</th>
-                  <th className="py-1 pr-4 font-medium">Width</th>
-                  <th className="py-1 pr-4 font-medium">Surface</th>
-                  <th className="py-1 font-medium">Lit</th>
-                </tr>
-              </thead>
-              <tbody className="text-black dark:text-zinc-200">
-                {airport.runways.map((runway, i) => (
-                  <tr
-                    key={`${runway.name}-${i}`}
-                    className="border-t border-black/[.06] dark:border-white/[.08]"
-                  >
-                    <td className="py-1 pr-4 font-medium">{runway.name}</td>
-                    <td className="py-1 pr-4 tabular-nums">
-                      {runway.lengthFt ? formatFt(runway.lengthFt) : "—"}
-                    </td>
-                    <td className="py-1 pr-4 tabular-nums">
-                      {runway.widthFt ? `${runway.widthFt} ft` : "—"}
-                    </td>
-                    <td className="py-1 pr-4">{runway.surfaceLabel ?? "—"}</td>
-                    <td className="py-1">{runway.lighted ? "Yes" : "No"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {airport.wikipedia && (
-          <a
-            href={airport.wikipedia}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="self-start text-sm text-blue-600 underline dark:text-blue-400"
-          >
-            Read about {airport.name} on Wikipedia
-          </a>
-        )}
-      </section>
-
-      {country && (
-        <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold text-black dark:text-zinc-50">
-            About {country.name}
-          </h3>
-          <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {country.nativeName !== country.name && (
-              <Fact label="Local name">{country.nativeName}</Fact>
-            )}
-            {country.capital && <Fact label="Capital">{country.capital}</Fact>}
-            <Fact label="Continent">{country.continent}</Fact>
-            <Fact
-              label={country.currencies.length > 1 ? "Currencies" : "Currency"}
-            >
-              {country.currencies.join(", ")}
-            </Fact>
-            <Fact
-              label={country.languages.length > 1 ? "Languages" : "Language"}
-            >
-              {country.languages.join(", ")}
-            </Fact>
-            <Fact label="Calling code">{country.callingCodes.join(", ")}</Fact>
-            {airport.countryAirportCount > 0 && (
-              <Fact label="Coded airports">
-                {airport.countryAirportCount.toLocaleString("en-US")} with an
-                ICAO or IATA code
-              </Fact>
-            )}
-          </dl>
-        </section>
+      <button
+        type="button"
+        onClick={onToggleWeather}
+        aria-expanded={showWeather}
+        className="self-start rounded-full border border-black/[.08] px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-300 dark:hover:bg-[#1a1a1a]"
+      >
+        {showWeather ? "Hide live METAR" : "Show live METAR"}
+      </button>
+      {showWeather && (
+        <WeatherPanel key={`metar-${airport.code}`} airport={airport} />
       )}
     </div>
   );
 }
 
 /** Look up any airport by code (or click one on the globe / in a list):
- * live METAR, airport facts and country facts. */
+ * a fact about it or its country and, if the user wants it, its live
+ * METAR. */
 export function AirportExplorer({ quickCodes }: { quickCodes: string[] }) {
   const { airportCode, openAirport } = usePlanner();
   const [query, setQuery] = useState("");
+  // Off by default; once turned on it stays on for other airports.
+  const [showWeather, setShowWeather] = useState(false);
   const [lookup, setLookup] = useState<{
     code: string;
     airport: AirportLookup | null;
@@ -429,7 +381,7 @@ export function AirportExplorer({ quickCodes }: { quickCodes: string[] }) {
       {!airportCode && (
         <p className="text-sm text-zinc-500">
           Search for an airport, click one on the globe, or pick one of yours
-          above to see its live weather, runways and country facts.
+          above for a fact about it and, if you like, its live weather.
         </p>
       )}
       {airportCode && !current && (
@@ -441,7 +393,13 @@ export function AirportExplorer({ quickCodes }: { quickCodes: string[] }) {
           ICAO or 3-letter IATA code.
         </p>
       )}
-      {current?.airport && <AirportDetails airport={current.airport} />}
+      {current?.airport && (
+        <AirportDetails
+          airport={current.airport}
+          showWeather={showWeather}
+          onToggleWeather={() => setShowWeather((show) => !show)}
+        />
+      )}
     </div>
   );
 }

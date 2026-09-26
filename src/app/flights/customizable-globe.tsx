@@ -104,7 +104,7 @@ export function CustomizableGlobe({
             onClick={() => openAirport(airportCode)}
             className="self-center rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition-colors hover:bg-white/10"
           >
-            {airportCode}: live METAR &amp; airport facts &darr;
+            {airportCode}: airport info &amp; METAR &darr;
           </button>
         )}
       </div>

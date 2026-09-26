@@ -163,7 +163,7 @@ export const CHALLENGING_AIRPORTS: ChallengingAirport[] = [
     iata: "LYR",
     kinds: ["Weather"],
     difficulty: 3,
-    why: "The northernmost airport with scheduled flights: polar night, icy runways and strong crosswinds.",
+    why: "The northernmost airport with scheduled flights, where pilots contend with polar night, icy runways and strong crosswinds.",
     route: { from: "OSL", airline: "Norwegian", aircraft: "Boeing 737-800" },
   },
   {

@@ -805,7 +805,7 @@ export function FlightGlobe({
         }
       >
         {interactive &&
-          `Drag to rotate, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings${onAirportClick ? " and load its live weather" : ""}. `}
+          `Drag to rotate, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings${onAirportClick ? " and look it up below" : ""}. `}
         Map data &copy;{" "}
         <a
           href="https://www.openstreetmap.org/copyright"
