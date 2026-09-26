@@ -254,6 +254,32 @@ function buildGlobeData(flights: Flight[]) {
   };
 }
 
+const FLIGHT_COLUMNS =
+  "id, flown_on, airline, aircraft, departure, arrival, hours, notes";
+
+/** Loads the log, still working (without ratings) if the ratings migration
+ * hasn't been run on this database yet. */
+async function loadFlights(supabase: Awaited<ReturnType<typeof createClient>>) {
+  const result = await supabase
+    .from("flights")
+    .select(`${FLIGHT_COLUMNS}, rating`)
+    .order("flown_on", { ascending: false })
+    .returns<Flight[]>();
+  // 42703 (Postgres) / PGRST204 (PostgREST): no such column.
+  if (result.error?.code !== "42703" && result.error?.code !== "PGRST204") {
+    return result;
+  }
+  const fallback = await supabase
+    .from("flights")
+    .select(FLIGHT_COLUMNS)
+    .order("flown_on", { ascending: false })
+    .returns<Omit<Flight, "rating">[]>();
+  return {
+    data: fallback.data?.map((flight) => ({ ...flight, rating: null })) ?? null,
+    error: fallback.error,
+  };
+}
+
 export default async function FlightsPage() {
   const supabase = await createClient();
   const {
@@ -265,13 +291,8 @@ export default async function FlightsPage() {
   }
 
   const [{ data: flights, error }, { data: preferences }] = await Promise.all([
-    supabase
-      .from("flights")
-      .select(
-        "id, flown_on, airline, aircraft, departure, arrival, hours, notes, rating",
-      )
-      .order("flown_on", { ascending: false })
-      .returns<Flight[]>(),
+    loadFlights(supabase),
+    // Errors (e.g. the table not created yet) just mean no favourites.
     supabase
       .from("user_preferences")
       .select("favourite_airline, favourite_aircraft")
