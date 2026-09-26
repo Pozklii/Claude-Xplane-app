@@ -10,6 +10,7 @@ create table if not exists public.flights (
   arrival text not null,
   hours numeric(5, 1) not null check (hours > 0),
   notes text,
+  rating smallint check (rating between 1 and 10),
   created_at timestamptz not null default now()
 );
 
@@ -34,6 +35,29 @@ create policy "Users can update their own flights"
 create policy "Users can delete their own flights"
   on public.flights for delete
   using (auth.uid() = user_id);
+
+-- One row per user: their favourite airline and aircraft.
+create table if not exists public.user_preferences (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  favourite_airline text,
+  favourite_aircraft text,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_preferences enable row level security;
+
+create policy "Users can view their own preferences"
+  on public.user_preferences for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert their own preferences"
+  on public.user_preferences for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update their own preferences"
+  on public.user_preferences for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 -- Storage bucket for per-flight screenshots/videos. Files are stored under
 -- `<user_id>/<flight_id>/<filename>` and kept private; the app generates

@@ -7,6 +7,10 @@ export type Airport = {
   city: string;
   lat: number;
   lon: number;
+  /** ISO 3166-1 alpha-2 country code. */
+  country: string | null;
+  /** OurAirports ident, the key into airport-details.json. */
+  ident: string | null;
 };
 
 const airports = data as Record<

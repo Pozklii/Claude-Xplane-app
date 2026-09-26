@@ -127,6 +127,7 @@ export function FlightGlobe({
   height = MAP_HEIGHT,
   arcColor = DEFAULT_ARC_COLOR,
   interactive = true,
+  onAirportClick,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
@@ -156,6 +157,8 @@ export function FlightGlobe({
    * — no dragging, zooming or clicking — and scrolling over it scrolls the
    * page. Fixed for an instance's lifetime. */
   interactive?: boolean;
+  /** Called with an airport's code when it's clicked (after flying in). */
+  onAirportClick?: (code: string) => void;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -183,9 +186,11 @@ export function FlightGlobe({
     map.flyTo(options);
   };
 
+  const onAirportClickRef = useRef(onAirportClick);
   useEffect(() => {
     onSelectIdRef.current = onSelectId;
     selectedIdRef.current = selectedId;
+    onAirportClickRef.current = onAirportClick;
   });
 
   // Create the map (and its deck.gl overlay) once. Data (arcs/points) and
@@ -522,6 +527,7 @@ export function FlightGlobe({
               pitch: AIRPORT_PITCH,
               duration: AIRPORT_FLY_DURATION,
             });
+            onAirportClickRef.current?.(point.code);
           }
           return;
         }
@@ -799,7 +805,7 @@ export function FlightGlobe({
         }
       >
         {interactive &&
-          "Drag to rotate, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings. "}
+          `Drag to rotate, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings${onAirportClick ? " and load its live weather" : ""}. `}
         Map data &copy;{" "}
         <a
           href="https://www.openstreetmap.org/copyright"

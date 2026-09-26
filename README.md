@@ -22,7 +22,7 @@ A web app for logging and reviewing flights, built with Next.js, Supabase, and d
    cp .env.local.example .env.local
    ```
 
-3. Create the `flights` table and its row-level security policies by running [`supabase/schema.sql`](./supabase/schema.sql) in your project's SQL editor (Supabase dashboard → SQL Editor → New query).
+3. Create the `flights` and `user_preferences` tables and their row-level security policies by running [`supabase/schema.sql`](./supabase/schema.sql) in your project's SQL editor (Supabase dashboard → SQL Editor → New query). **Already set up from an earlier version?** Run [`supabase/migrations/20260926_ratings_and_favourites.sql`](./supabase/migrations/20260926_ratings_and_favourites.sql) instead — it adds the `flights.rating` column and the `user_preferences` table, and is safe to run more than once. Do this before deploying the ratings/favourites code, since the flights page selects the new column.
 
 4. In the Supabase dashboard, under Authentication → URL Configuration, set the **Site URL** to `http://localhost:3000` for local development (and add your Vercel domain once deployed). Email/password sign-up is enabled by default and requires confirming a link sent by email before a user can sign in.
 
@@ -55,6 +55,21 @@ Free-tier Supabase projects are paused after a period of inactivity. While pause
   - The fly-to camera uses MapLibre's `cameraForBounds()` to fit the two selected airports (falling back to a simple midpoint if it returns nothing, e.g. for antipodal-ish points), rather than hand-computing zoom from the coordinate spread.
   - The style's `fill-extrusion` building layer(s) have their zoom range explicitly widened on load (`map.setLayerZoomRange(id, 0, 24)`) so they're not gated behind whatever minzoom the upstream style tuned for street-level browsing — the actual level of detail still depends on how well OpenStreetMap has mapped that specific airport's buildings; some are well-mapped with individual terminal footprints and heights, others may show little more than the runway/tarmac outline.
 - Screenshots/videos per flight, uploaded to a private Supabase Storage bucket (`flight-media`) scoped to each user
+- **Flight ratings** — rate each flight out of 10, when logging it or afterwards from the log (click a segment; click it again to clear). Shown on the details card, with your average in the page header.
+- **Country flags and airline logos** — each flight's departure/arrival country flag (SVGs from [flag-icons](https://github.com/lipis/flag-icons), MIT) and its airline's logo. Airline names are matched to IATA codes (by code, normalized name, or a small table of brand names like KLM/SAS/LATAM that differ from the dataset — `src/lib/airlines.ts`), and logos load from public CDNs keyed by that code (pics.avs.io, then images.kiwi.com), falling back to a monogram. Ambiguous names get the monogram rather than a guessed logo.
+- **Your flying** — favourite airline and aircraft (saved per user in `user_preferences`), the airlines you fly with (logos and flight counts, favourite starred) and the countries your flights have touched.
+- **Plan your next flight** panel, with three tabs:
+  - **Airports & METAR** — look up any airport by ICAO/IATA code, click one on the globe (it still flies in to the 3D buildings, and a button under the globe jumps down here), or pick one of your most-used airports: its live METAR decoded (flight category, wind, visibility, cloud, weather, temperature, QNH, and the best-aligned runway's headwind/crosswind), airport facts (type, elevation, scheduled service, every runway's length/width/surface/lighting, Wikipedia link, and a note if it's a famously challenging airport) and country facts (capital, continent, currency, languages, calling code, number of coded airports). METARs come from NOAA's [Aviation Weather Center](https://aviationweather.gov/data/api/) via `/api/metar` (cached 5 minutes) and are decoded by `src/lib/metar.ts` from the raw report text.
+  - **Real-world routes** — type an aircraft (model or ICAO designator: `A20N`, `B738`, `Zibo 737-800`, `Q400`…) to see real routes airlines fly with it, from the route table in `src/lib/example-flights/routes.ts` (also used by the landing page tour), with distance, estimated block time, and badges for your favourite airline, challenging airports and routes you've already flown. Defaults to your favourite (or most-flown) aircraft.
+  - **Challenging flights** — "challenging right now": airports whose current METAR makes for a demanding arrival (gusts, crosswind on the best runway, low IFR, thunderstorms, freezing precipitation), scored by `/api/weather-challenges` over the curated airports plus a watchlist of big hubs; and a curated list of famously challenging approaches (Lukla, Paro, Saba, Courchevel, St Barths, Madeira, Gibraltar, Queenstown…) with why, difficulty, elevation and runway length, and a real route in to try. The live list is only fetched once the tab is opened.
+
+### Reference data
+
+Bundled in `src/lib/data/`, generated by the scripts in `scripts/`:
+
+- `airports.json` / `airport-details.json` — [OurAirports](https://ourairports.com/data/) (public domain). `scripts/augment-airport-data.mjs` adds each airport's country and OurAirports ident to the existing lookup (without changing its keys, names or coordinates, so logged flights keep resolving) and writes elevation, type, codes, Wikipedia link and runways to `airport-details.json`. Re-run it with a fresh `airports.csv`/`runways.csv` download to update.
+- `airlines.json` — airline names and IATA/ICAO codes from [OpenFlights](https://openflights.org/data) (Open Database License), built by `scripts/build-airline-data.mjs`.
+- Country facts come from the [countries-list](https://github.com/annexare/Countries) package (MIT).
 
 ## Roadmap
 
@@ -63,5 +78,7 @@ Free-tier Supabase projects are paused after a period of inactivity. While pause
 - [x] Flight log CRUD (create, view, delete flights)
 - [x] Flight route globe
 - [x] Per-flight media (screenshots/videos)
+- [x] Flight ratings, favourites, flags and airline logos
+- [x] Live METAR, airport/country facts, route suggestions and challenging flights
 - [ ] Editing existing flights
 - [ ] Flight history / stats view

@@ -7,6 +7,7 @@ import {
   type GlobeArc,
   type GlobePoint,
 } from "./flight-globe";
+import { usePlanner } from "./planner-context";
 import { SelectedFlightCard, type FlightDetails } from "./selected-flight-card";
 
 const STORAGE_KEY = "flightworld:arc-color";
@@ -55,6 +56,7 @@ export function CustomizableGlobe({
     null,
   );
   const arcColor = pickedThisSession ?? persisted ?? DEFAULT_ARC_COLOR;
+  const { airportCode, openAirport } = usePlanner();
 
   const handleChange = (color: string) => {
     setPickedThisSession(color);
@@ -89,7 +91,22 @@ export function CustomizableGlobe({
             className="h-6 w-10 cursor-pointer rounded border border-white/20 bg-transparent p-0"
           />
         </div>
-        <FlightGlobe points={points} arcs={arcs} arcColor={arcColor} bare />
+        <FlightGlobe
+          points={points}
+          arcs={arcs}
+          arcColor={arcColor}
+          bare
+          onAirportClick={(code) => openAirport(code, { scroll: false })}
+        />
+        {airportCode && (
+          <button
+            type="button"
+            onClick={() => openAirport(airportCode)}
+            className="self-center rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition-colors hover:bg-white/10"
+          >
+            {airportCode}: live METAR &amp; airport facts &darr;
+          </button>
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
+import { KNOWN_AIRCRAFT } from "@/lib/aircraft";
 import { addFlight } from "./actions";
 
 export function NewFlightForm() {
@@ -38,6 +39,7 @@ export function NewFlightForm() {
           name="aircraft"
           type="text"
           placeholder="Aircraft (e.g. C172)"
+          list="known-aircraft"
           required
           className="col-span-2 rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 sm:col-span-1 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
         />
@@ -67,12 +69,32 @@ export function NewFlightForm() {
           className="rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
         />
       </div>
-      <input
-        name="notes"
-        type="text"
-        placeholder="Notes (optional)"
-        className="rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
-      />
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <input
+          name="notes"
+          type="text"
+          placeholder="Notes (optional)"
+          className="flex-1 rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
+        />
+        <select
+          name="rating"
+          defaultValue=""
+          aria-label="Rating out of 10 (optional)"
+          className="rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
+        >
+          <option value="">Rating (optional)</option>
+          {Array.from({ length: 10 }, (_, i) => 10 - i).map((value) => (
+            <option key={value} value={value}>
+              {value}/10
+            </option>
+          ))}
+        </select>
+      </div>
+      <datalist id="known-aircraft">
+        {KNOWN_AIRCRAFT.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       {state?.error && (
         <p className="text-sm text-red-600 dark:text-red-400">
           {state.error}

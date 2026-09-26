@@ -2,6 +2,8 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { formatDate } from "@/lib/dates";
+import { AirlineLogo } from "./airline-logo";
+import { Flag } from "./flag";
 import { useSelection } from "./selection-context";
 import { ThumbnailPicker, type ThumbnailChoice } from "./thumbnail-picker";
 import styles from "./selected-flight.module.css";
@@ -10,8 +12,12 @@ export type FlightDetails = {
   date: string;
   airline: string | null;
   aircraft: string;
-  from: { code: string; city: string };
-  to: { code: string; city: string };
+  from: { code: string; city: string; country?: string | null };
+  to: { code: string; city: string; country?: string | null };
+  /** IATA code of the airline, for its logo. */
+  airlineIata?: string | null;
+  /** The user's 1–10 rating, if any. */
+  rating?: number | null;
   hours: number;
   distanceNm: number;
   notes: string | null;
@@ -203,8 +209,13 @@ export function SelectedFlightCard({
           <h2 className={`${styles.route} text-lg font-semibold`}>
             {flight.from.code} &rarr; {flight.to.code}
           </h2>
-          <p className={`${styles.soft} text-xs`}>
-            {flight.from.city} to {flight.to.city}
+          <p
+            className={`${styles.soft} flex flex-wrap items-center gap-1.5 text-xs`}
+          >
+            <Flag country={flight.from.country} />
+            {flight.from.city} to
+            <Flag country={flight.to.country} />
+            {flight.to.city}
           </p>
         </div>
         {closable && (
@@ -243,13 +254,24 @@ export function SelectedFlightCard({
           <dd className={`${styles.stat} text-base font-semibold`}>
             <CountUp value={flight.hours} format={formatDuration} />
           </dd>
+          {flight.rating != null && (
+            <dd className={`${styles.soft} text-[11px] tabular-nums`}>
+              Rated {flight.rating}/10
+            </dd>
+          )}
         </div>
       </dl>
 
       <p
-        className={`${styles.reveal} ${styles.soft} text-xs`}
+        className={`${styles.reveal} ${styles.soft} flex flex-wrap items-center gap-1.5 text-xs`}
         style={{ "--i": 2 } as React.CSSProperties}
       >
+        {flight.airline && (
+          <AirlineLogo
+            name={flight.airline}
+            iata={flight.airlineIata ?? null}
+          />
+        )}
         {formatDate(flight.date)} &middot; {flight.aircraft}
         {flight.airline ? ` · ${flight.airline}` : ""}
       </p>
