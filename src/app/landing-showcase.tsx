@@ -148,7 +148,7 @@ function Showcase({
           </div>
           {/* A fixed minimum height so the heading above doesn't shift up
               and down as cards with different amounts of text swap in. */}
-          <div className="min-h-[290px]">
+          <div className={`${styles.showcaseCardSlot} min-h-[290px]`}>
             <SelectedFlightCard
               details={details}
               arcColor={DEFAULT_ARC_COLOR}
