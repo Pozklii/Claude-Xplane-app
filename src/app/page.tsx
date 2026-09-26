@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { AppButtons } from "./app-links";
 import { buildExampleShowcase } from "./example-flights";
 import { EngineCanvas } from "./engine-canvas";
 import { LandingShowcase } from "./landing-showcase";
@@ -22,8 +24,12 @@ const features = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
   const { airports, initial } = buildExampleShowcase();
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   return (
     <div className={`${styles.page} ${styles.landing} flex flex-1 flex-col font-sans`}>
@@ -45,12 +51,15 @@ export default function Home() {
                 >
                   Create your Flight World
                 </h1>
-                <Link
-                  href="/login"
-                  className={`${styles.cta} rounded-md px-5 py-2.5 text-sm font-semibold transition-colors`}
-                >
-                  Sign in
-                </Link>
+                {!user && (
+                  <Link
+                    href="/login"
+                    className={`${styles.cta} rounded-md px-5 py-2.5 text-sm font-semibold transition-colors`}
+                  >
+                    Sign in
+                  </Link>
+                )}
+                <AppButtons signedIn={Boolean(user)} />
               </div>
             }
           />

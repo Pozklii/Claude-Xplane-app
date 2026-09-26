@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { APP_LINKS } from "./app-links";
 import { signOut } from "./login/actions";
 
 export async function SiteHeader() {
@@ -19,12 +20,15 @@ export async function SiteHeader() {
       <nav className="flex items-center gap-4 text-sm">
         {user ? (
           <>
-            <Link
-              href="/flights"
-              className="text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
-            >
-              Flights
-            </Link>
+            {APP_LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
+              >
+                {link.label}
+              </Link>
+            ))}
             <form action={signOut}>
               <button
                 type="submit"

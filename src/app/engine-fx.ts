@@ -1,25 +1,23 @@
 // The landing page hero's animation, drawn on a canvas covering the hero: a
-// gold wireframe cube spins near the middle, then glides to the engine's spot
-// and morphs (ring by ring, with a band of light sweeping along) into a shaded
-// low-poly turbofan. The turbofan grows its fan, spools up, and sends
-// near-straight exhaust lines off into the distance, converging on a vanishing
-// point near the middle of the hero. Plain canvas 2D, no dependencies.
+// shaded low-poly gold turbofan draws itself in place, ring by ring from the
+// intake back (a band of light sweeping along each ring as it appears), grows
+// its fan, spools up, and sends near-straight exhaust lines off into the
+// distance, converging on a vanishing point near the middle of the hero.
+// Plain canvas 2D, no dependencies.
 //
 // The engine is centred on (and sized by) an anchor element positioned with
 // CSS, so its place in the layout stays in the stylesheet.
 
 type Vec3 = [number, number, number];
 
-// A point of the shared topology: its engine form (e), its cube form (c), and
-// for points that spin with the fan, their angle and radius about the axis.
+// A point of the engine (e), and for points that spin with the fan, their
+// angle and radius about the axis.
 type Anchor = {
   e: Vec3;
-  c: Vec3;
   a: number;
   r: number;
   spin: boolean;
   grow: boolean;
-  interior?: boolean;
 };
 
 type Pose = {
@@ -42,54 +40,27 @@ const ease = (t: number) => t * t * (3 - 2 * t);
 const clamp01 = (t: number) => Math.max(0, Math.min(1, t));
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 
-// Gold on the cube, gold on the engine too (a slightly paler edge), with
-// amber exhaust lines — the golden-hour palette of the landing page.
-const CUBE_RGB = [236, 196, 104];
-const EDGE_RGB = [240, 200, 120];
-const FACE_RGB = [236, 196, 104];
+// Gold edges and faces with amber exhaust lines — the golden-hour palette of
+// the landing page.
+const EDGE_RGB = "240,200,120";
+const FACE_RGB = "236,196,104";
 const LINE_RGB = "240,170,100";
 const SPARK_RGB = "255,220,160";
 const FAN_RGB = "255,210,140";
 const GLOW_RGB = "255,200,120";
-const blend = (from: number[], to: number[], t: number) =>
-  from.map((v, k) => Math.round(mix(v, to[k], t))).join(",");
 
-// ---- Topology: every anchor has an engine form and a cube form. Rings of N
-// points are a circle on the engine and a square on the cube (corners land on
-// points 2, 7, 12 and 17). ----
+// ---- The engine: rings of N points, joined into a shaded shell ----
 const N = 20;
-const HC = 0.8; // cube half-size (side 1.6), spanning z 0.1 .. 1.7
-const CORNERS = [2, 7, 12, 17];
 
 function buildModel() {
   const A: Anchor[] = [];
   const E: [number, number, number][] = [];
   const F: [number, number, number, number, number][] = [];
-  const square = (a: number, h: number): [number, number] => {
-    const c = Math.cos(a);
-    const s = Math.sin(a);
-    const m = Math.max(Math.abs(c), Math.abs(s));
-    return [(c / m) * h, (s / m) * h];
-  };
-  const ring = (
-    n: number,
-    r: number,
-    z: number,
-    cube: { h: number; z: number } | null,
-    { spin = false, grow = false } = {},
-  ) => {
+  const ring = (n: number, r: number, z: number, { spin = false, grow = false } = {}) => {
     const start = A.length;
     for (let i = 0; i < n; i++) {
       const a = ((i + 0.5) / n) * TAU;
-      const [qx, qy] = cube ? square(a, cube.h) : [0, 0];
-      A.push({
-        e: [Math.cos(a) * r, Math.sin(a) * r, z],
-        c: [qx, qy, cube ? cube.z : 0.1],
-        a,
-        r,
-        spin,
-        grow,
-      });
+      A.push({ e: [Math.cos(a) * r, Math.sin(a) * r, z], a, r, spin, grow });
     }
     return start;
   };
@@ -111,35 +82,33 @@ function buildModel() {
   // The nacelle's shell: five rings, joined by bands with shaded faces.
   const shellZ = [0.0, 0.25, 0.8, 1.35, 1.8];
   const shellR = [1.0, 1.06, 1.04, 0.92, 0.74];
-  const cubeZ = [0.1, 0.5, 0.9, 1.3, 1.7];
-  const shell = shellZ.map((z, k) => ring(N, shellR[k], z, { h: HC, z: cubeZ[k] }));
+  const shell = shellZ.map((z, k) => ring(N, shellR[k], z));
   shell.forEach((s) => ringEdges(s, N, 0.7));
   for (let k = 0; k < shell.length - 1; k++) {
     bandEdges(shell[k], shell[k + 1], N, 0.45);
     bandFaces(shell[k], shell[k + 1], N);
   }
-  const intake = ring(N, 0.88, 0.07, { h: HC * 0.7, z: 0.1 });
+  const intake = ring(N, 0.88, 0.07);
   ringEdges(intake, N, 0.55);
   bandEdges(intake, shell[0], N, 0.4);
   bandFaces(intake, shell[0], N, 1.2);
-  const fanCase = ring(N, 0.86, 0.3, { h: HC * 0.42, z: 0.1 });
+  const fanCase = ring(N, 0.86, 0.3);
   ringEdges(fanCase, N, 0.45);
   for (let i = 0; i < N; i += 5) E.push([fanCase + i, intake + i, 0.3]);
-  const core = ring(10, 0.46, 1.98, { h: HC * 0.5, z: 1.7 });
+  const core = ring(10, 0.46, 1.98);
   ringEdges(core, 10, 0.5);
   const plugTip = A.length;
-  A.push({ e: [0, 0, 2.45], c: [0, 0, 1.7], a: 0, r: 0, spin: false, grow: false });
+  A.push({ e: [0, 0, 2.45], a: 0, r: 0, spin: false, grow: false });
   for (let i = 0; i < 10; i++) {
     E.push([plugTip, core + i, 0.4]);
     F.push([plugTip, core + i, core + ((i + 1) % 10), plugTip, 0.9]);
   }
 
-  // Spinner and fan: absent on the cube, grown out of the fan's centre once
-  // the shell has formed.
-  const spinBase = ring(8, 0.22, 0.3, null, { spin: true, grow: true });
+  // Spinner and fan: grown out of the fan's centre once the shell has formed.
+  const spinBase = ring(8, 0.22, 0.3, { spin: true, grow: true });
   ringEdges(spinBase, 8, 0.5);
   const tip = A.length;
-  A.push({ e: [0, 0, -0.12], c: [0, 0, 0.3], a: 0, r: 0, spin: true, grow: true });
+  A.push({ e: [0, 0, -0.12], a: 0, r: 0, spin: true, grow: true });
   for (let i = 0; i < 8; i++) {
     E.push([tip, spinBase + i, 0.5]);
     F.push([tip, spinBase + i, spinBase + ((i + 1) % 8), tip, 1.3]);
@@ -156,7 +125,6 @@ function buildModel() {
     ]) {
       A.push({
         e: [Math.cos(base + off) * r, Math.sin(base + off) * r, z],
-        c: [0, 0, 0.3],
         a: base + off,
         r,
         spin: true,
@@ -165,69 +133,14 @@ function buildModel() {
     }
     bladeEdges.push([s, s + 1], [s + 1, s + 2]);
   }
-  for (const a of A) if (a.grow) a.c = [0, 0, a.e[2]];
-
-  // How strongly each edge shows on the cube: its 12 outline edges fully, the
-  // front/back frames partly, and the side grid only faintly — so the
-  // interior lines below stand out.
-  const ringOf = (i: number) => shell.findIndex((s0) => i >= s0 && i < s0 + N);
-  const cubeWeight = E.map(([i, j]) => {
-    const ri = ringOf(i);
-    const rj = ringOf(j);
-    if (ri >= 0 && rj >= 0) {
-      const ii = i - shell[ri];
-      const jj = j - shell[rj];
-      if (ri === rj) return ri === 0 || ri === shell.length - 1 ? 1 : 0.14;
-      return ii === jj && CORNERS.includes(ii) ? 1 : 0.1;
-    }
-    return A[i].grow || A[j].grow ? 0 : 0.5;
-  });
-
-  // Interior lines through the cube's empty space: an inner cube joined to
-  // the outer corners (a hypercube look) and the four corner-to-corner
-  // diagonals. They exist only on the cube: during the morph they draw into
-  // the fan's centre and fade, just as the fan grows out of it.
-  const interior: [number, number][] = [];
-  const outerCorner = (r: number, k: number) => r + CORNERS[k];
-  const cornerSigns = [
-    [1, 1],
-    [-1, 1],
-    [-1, -1],
-    [1, -1],
-  ];
-  const inner: number[] = [];
-  for (const zs of [-1, 1]) {
-    for (let k = 0; k < 4; k++) {
-      const [sx, sy] = cornerSigns[k];
-      const h = HC * 0.42;
-      inner.push(A.length);
-      A.push({
-        e: [0, 0, 0.3],
-        c: [sx * h, sy * h, 0.9 + zs * h],
-        a: 0,
-        r: 0,
-        spin: false,
-        grow: false,
-        interior: true,
-      });
-    }
-  }
-  for (let k = 0; k < 4; k++) {
-    const f = inner[k];
-    const b = inner[k + 4];
-    interior.push([f, inner[(k + 1) % 4]], [b, inner[4 + ((k + 1) % 4)]], [f, b]);
-    interior.push([f, outerCorner(shell[0], k)], [b, outerCorner(shell[4], k)]);
-    interior.push([outerCorner(shell[0], k), outerCorner(shell[4], (k + 2) % 4)]);
-  }
-
-  return { A, E, F, bladeEdges, cubeWeight, interior };
+  return { A, E, F, bladeEdges };
 }
 
 // ---- Timeline (seconds) ----
-const MORPH_AT = 3.4; // the front ring starts morphing here, the back ring WAVE later
-const WAVE = 0.7;
-const MORPH = 1.6;
-const GROW_AT = MORPH_AT + WAVE + MORPH - 0.3;
+const DRAW_AT = 0.4; // the intake ring starts drawing in here, the tail WAVE later
+const WAVE = 1.0;
+const DRAW = 0.9;
+const GROW_AT = DRAW_AT + WAVE + DRAW - 0.3;
 const GROW = 0.9;
 const BUILT_AT = GROW_AT + GROW;
 const SPOOL_TIME = 2.2;
@@ -240,7 +153,7 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
   const ctx = canvas.getContext("2d");
   const host = canvas.parentElement;
   if (!ctx || !host) return () => {};
-  const { A, E, F, bladeEdges, cubeWeight, interior } = buildModel();
+  const { A, E, F, bladeEdges } = buildModel();
 
   let seed = 9;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -256,8 +169,6 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
   let CY = 0;
   let R = 0;
   let SCALE = 0;
-  let cubeDX = 0;
-  let cubeDY = 0;
   let aimPitch = 0;
   let aimYaw = 0;
   const layout = () => {
@@ -273,8 +184,6 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     CY = box.y + box.height / 2 - rect.y;
     R = box.width / 2;
     SCALE = R * 0.72;
-    cubeDX = W * 0.54 - CX;
-    cubeDY = H * 0.47 - CY;
     // The engine faces mostly towards the viewer, turned just enough that its
     // tail axis points straight at the vanishing point: a line along the axis
     // heads for screen offset scale*cam*(dx/dz, dy/dz), so solve pitch and yaw
@@ -288,39 +197,24 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
 
   let time = 0;
   let fanAngle = 0;
-  const morphOf = (an: Anchor) =>
-    an.grow
-      ? 1
-      : an.interior
-        ? ease(clamp01((time - MORPH_AT) / (MORPH * 0.9)))
-        : ease(clamp01((time - MORPH_AT - clamp01(an.e[2] / 2.45) * WAVE) / MORPH));
+  // How far each point has drawn in (0..1): the intake first, the tail last.
+  const drawnOf = (an: Anchor) =>
+    an.grow ? 1 : ease(clamp01((time - DRAW_AT - clamp01(an.e[2] / 2.45) * WAVE) / DRAW));
   const growOf = () => ease(clamp01((time - GROW_AT) / GROW));
-  const globalMorph = () => ease(clamp01((time - MORPH_AT) / (WAVE + MORPH)));
   const spool = () => ease(clamp01((time - BUILT_AT) / SPOOL_TIME));
   const rps = () => IDLE_RPS + (FULL_RPS - IDLE_RPS) * spool();
 
-  // The cube spins near the middle, then slows and settles into the engine's
-  // pose as it glides (on a gentle arc) to the engine's spot.
-  const pose = (): Pose => {
-    const g = globalMorph();
-    const sway = Math.max(0, time - BUILT_AT);
-    const engineYaw = aimYaw + 0.05 * Math.sin(sway * 0.8);
-    const enginePitch = aimPitch + 0.025 * Math.sin(sway * 0.55);
-    // Turning at a rate that decays to zero exactly as it lands on the engine's yaw.
-    const k = Math.max(0, MORPH_AT + WAVE + MORPH - time);
-    const cubeYaw = engineYaw - 0.55 * k - 0.12 * k * k;
-    const glide = ease(g);
-    return {
-      yaw: cubeYaw * (1 - g) + engineYaw * g,
-      pitch: mix(0.55 + 0.25 * Math.sin(time * 0.9), enginePitch, g),
-      roll: 0.35 * (1 - g) * Math.sin(time * 0.7),
-      pivot: mix(0.9, 0.35, g),
-      dx: cubeDX * (1 - glide),
-      dy: cubeDY * (1 - glide) - Math.sin(Math.PI * glide) * 40,
-      scale: SCALE,
-      cam: mix(3.4, CAM, glide),
-    };
-  };
+  // Aimed at the vanishing point, with a slow, gentle sway.
+  const pose = (): Pose => ({
+    yaw: aimYaw + 0.05 * Math.sin(time * 0.8),
+    pitch: aimPitch + 0.025 * Math.sin(time * 0.55),
+    roll: 0,
+    pivot: 0.35,
+    dx: 0,
+    dy: 0,
+    scale: SCALE,
+    cam: CAM,
+  });
   const view = ([x0, y0, z0]: Vec3, p: Pose): Projected => {
     const z = z0 - p.pivot;
     const cr = Math.cos(p.roll);
@@ -335,7 +229,7 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     return { x: CX + p.dx + x1 * p.scale * s, y: CY + p.dy + y2 * p.scale * s, X: x1, Y: y2, Z: z2 };
   };
   const place = (an: Anchor, spin: number, p: Pose): Placed => {
-    const m = morphOf(an);
+    const m = drawnOf(an);
     let [ex, ey, ez] = an.e;
     if (an.spin) {
       const a = an.a + spin;
@@ -348,7 +242,7 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
       ey *= g;
       ez = mix(0.3, ez, g);
     }
-    return { ...view([mix(an.c[0], ex, m), mix(an.c[1], ey, m), mix(an.c[2], ez, m)], p), m };
+    return { ...view([ex, ey, ez], p), m };
   };
 
   const step = (dt: number) => {
@@ -395,7 +289,6 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     ctx.clearRect(0, 0, W, H);
     const p = pose();
     const P = A.map((an) => place(an, fanAngle, p));
-    const appear = ease(clamp01(time / 0.9));
     const grow = growOf();
     const sp = spool();
 
@@ -404,7 +297,7 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     const reveal = ease(clamp01((time - BUILT_AT) / 1.6));
     if (reveal > 0) {
       const lines = buildLines(p);
-      const hullPts = P.filter((_, i) => !A[i].grow && !A[i].interior)
+      const hullPts = P.filter((_, i) => !A[i].grow)
         .map((q): [number, number] => [q.x, q.y])
         .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
       const cross = (o: number[], a: number[], b: number[]) =>
@@ -462,7 +355,7 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
       ctx.restore();
     }
 
-    // Shaded faces, far to near, each following its own morph.
+    // Shaded faces, far to near, each fading in as its points draw in.
     const light = [-0.45, -0.6, -0.66];
     const faces = F.map(([a, b, c, d, gain]) => {
       const q4 = [P[a], P[b], P[c], P[d]];
@@ -492,8 +385,8 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     }).sort((f1, f2) => f2.depth - f1.depth);
     for (const f of faces) {
       const lambert = Math.abs(f.nx * light[0] + f.ny * light[1] + f.nz * light[2]);
-      const alpha = appear * f.gain * (0.035 + 0.13 * lambert) * (0.5 + 0.5 * Math.abs(f.nz)) * mix(0.7, 1, f.m);
-      ctx.fillStyle = `rgba(${blend(CUBE_RGB, FACE_RGB, f.m)},${alpha.toFixed(3)})`;
+      const alpha = f.gain * (0.035 + 0.13 * lambert) * (0.5 + 0.5 * Math.abs(f.nz)) * f.m;
+      ctx.fillStyle = `rgba(${FACE_RGB},${alpha.toFixed(3)})`;
       ctx.beginPath();
       ctx.moveTo(f.q4[0].x, f.q4[0].y);
       for (const q of f.q4.slice(1)) ctx.lineTo(q.x, q.y);
@@ -518,18 +411,14 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
       ctx.fill("evenodd");
     }
 
-    // Edges, depth-cued. Where a ring is mid-morph, a bright band runs along it.
+    // Edges, depth-cued. Where a ring is drawing in, a bright band runs along it.
     ctx.lineCap = "round";
-    const drawEdge = (a: Placed, b: Placed, w: number, alphaScale: number, cubeW = 1, rgb?: string) => {
+    const drawEdge = (a: Placed, b: Placed, w: number, alphaScale: number) => {
       const m = Math.min(a.m, b.m);
       const depth = (a.Z + b.Z) / 2;
-      const near = mix(
-        Math.max(0.12, Math.min(1, 0.55 - depth * 0.55)),
-        Math.max(0.25, Math.min(1, 0.62 - depth * 0.32)),
-        m,
-      );
+      const near = Math.max(0.25, Math.min(1, 0.62 - depth * 0.32));
       const scan = Math.sin(Math.PI * clamp01(Math.max(a.m, b.m))) * (m < 1 ? 1 : 0);
-      const alpha = alphaScale * appear * mix((0.25 + 0.75 * near) * cubeW, (0.3 + 0.6 * w) * near, m);
+      const alpha = alphaScale * (0.3 + 0.6 * w) * near * m;
       if (scan > 0.05) {
         ctx.strokeStyle = `rgba(255,236,190,${(0.35 * scan).toFixed(3)})`;
         ctx.lineWidth = 5 * scan;
@@ -538,19 +427,15 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
         ctx.lineTo(b.x, b.y);
         ctx.stroke();
       }
-      ctx.strokeStyle = `rgba(${rgb ?? blend(CUBE_RGB, EDGE_RGB, m)},${alpha.toFixed(3)})`;
-      ctx.lineWidth = mix((0.4 + 2.2 * near) * (0.5 + 0.5 * cubeW), (0.6 + w * 0.9) * (0.7 + near * 0.5), m);
+      if (alpha < 0.004) return;
+      ctx.strokeStyle = `rgba(${EDGE_RGB},${alpha.toFixed(3)})`;
+      ctx.lineWidth = (0.6 + w * 0.9) * (0.7 + near * 0.5);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
     };
-    E.forEach(([i, j, w], k) => drawEdge(P[i], P[j], w, A[i].grow ? grow : 1, cubeWeight[k]));
-    for (const [i, j] of interior) {
-      const fade = Math.pow(1 - morphOf(A[i].interior ? A[i] : A[j]), 1.5);
-      if (fade <= 0.01) continue;
-      drawEdge({ ...P[i], m: 0 }, { ...P[j], m: 0 }, 0.6, fade, 0.95, "255,228,160");
-    }
+    for (const [i, j, w] of E) drawEdge(P[i], P[j], w, A[i].grow ? grow : 1);
     // Fan blades, with a few fading motion ghosts once they're spinning.
     const SHUTTER = 1 / 30;
     const GHOSTS = 5;
@@ -566,20 +451,18 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
       }
     }
 
-    // A flash as the fan grows, then a warm core glow as it spools up.
-    const c = view([0, 0, mix(0.9, 0.3, globalMorph())], p);
-    const glow = (r: number, rgb: string, a: number) => {
-      if (a <= 0.005) return;
-      const gr = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r);
-      gr.addColorStop(0, `rgba(${rgb},${a.toFixed(3)})`);
-      gr.addColorStop(1, `rgba(${rgb},0)`);
+    // A warm core glow as it spools up.
+    const glowA = 0.16 * sp;
+    if (glowA > 0.005) {
+      const c = view([0, 0, 0.3], p);
+      const gr = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, R * 0.75);
+      gr.addColorStop(0, `rgba(${GLOW_RGB},${glowA.toFixed(3)})`);
+      gr.addColorStop(1, `rgba(${GLOW_RGB},0)`);
       ctx.fillStyle = gr;
       ctx.beginPath();
-      ctx.arc(c.x, c.y, r, 0, TAU);
+      ctx.arc(c.x, c.y, R * 0.75, 0, TAU);
       ctx.fill();
-    };
-    glow(R * 0.9, "255,244,225", 0.35 * Math.sin(Math.PI * grow));
-    glow(R * 0.75, GLOW_RGB, 0.16 * sp);
+    }
   };
 
   layout();

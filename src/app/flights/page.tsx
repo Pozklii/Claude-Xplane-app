@@ -519,7 +519,7 @@ export default async function FlightsPage() {
             </p>
           )}
 
-          <div className="flex flex-col gap-3">
+          <div id="log" className="flex scroll-mt-6 flex-col gap-3">
             {flights?.length === 0 && (
               <p className="text-sm text-zinc-500 dark:text-zinc-500">
                 No flights logged yet. Add your first one above.
