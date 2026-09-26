@@ -1,8 +1,9 @@
-/* This is a deliberately single, committed dark theme (an instrument
-   panel at night) for the whole page, not adapted to the viewer's
-   light/dark preference — these tokens live on the page wrapper so both
-   the hero and the plain content below it share one continuous
-   background instead of handing off to a separate light/dark section. */
+/* A deliberately single, committed dark theme for the whole page, not
+   adapted to the viewer's light/dark preference — these tokens live on the
+   page wrapper so both the hero and the plain content below it share one
+   continuous background instead of handing off to a separate light/dark
+   section. The flights page uses these; the landing page swaps in its
+   golden-hour ones (.landing). */
 .page {
   --bg: #020304;
   --on-bg-strong: #f1f6fa;
@@ -17,8 +18,8 @@
 
 /* Splits the page's height 3:1 with the feature-text band below (which
    gets flex: 1 1 0%), so the hero fills the top three quarters of the
-   viewport and the plain black band the bottom quarter — growing past
-   that only if its own content needs more room. */
+   viewport and the feature band the bottom quarter — growing past that
+   only if its own content needs more room. */
 .hero {
   position: relative;
   overflow: hidden;
@@ -28,67 +29,118 @@
   justify-content: center;
 }
 
-.mechBg,
-.liveryFx {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-.mechBg > svg,
-.liveryFx > svg {
-  position: absolute;
-  width: 100%;
-  height: 100%;
+/* The landing page's golden-hour theme, layered on .page (whose tokens the
+   flights page keeps): a steel-blue sky warmed by a low sun just off the
+   top-left corner, sun-lit cumulus, soft light shafts, and a gold engine.
+   The sky is pre-rendered (public/sky/, drawn by the same procedural cloud
+   code the design was mocked up with) rather than generated in the browser,
+   which would cost a noticeable pause on slower devices; only the light
+   shafts animate, gently, on top of it. */
+.landing {
+  --bg: #2a2638;
+  --on-bg-strong: #f6f4f8;
+  --on-bg: #e6e2ec;
+  --on-bg-soft: #c2bccd;
+  --accent: #e8b96a;
+  --accent-mid: #f3d29a;
+  --accent-bright: #fbeccd;
+  position: relative;
+  isolation: isolate;
+  /* The sky image's own bottom edge fades to this, so a page taller than
+     the image (a phone, say) carries on seamlessly below it. */
+  background: #3c303c;
 }
 
-/* Positioned independently of the (non-uniformly stretched) background
-   SVGs, with a genuinely square CSS box, so the engine's circles render
-   as true circles regardless of the hero's own aspect ratio. min() with
-   both a vw and a vh term keeps it reasonably sized on both very wide and
-   very narrow/tall (mobile) viewports. left/top are set inline (see
-   page.tsx) to the same fractional position the livery curves converge
-   to; translate(-50%, -50%) centers the box on that point regardless of
-   its own size. */
+/* Both layers are the same size as the rendered page they were drawn for
+   and anchored at the top left, so they stay aligned with each other and
+   the sun stays in its corner at any viewport size. */
+.sky,
+.skyRays {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: left top;
+}
+.sky {
+  background-image: url("/sky/golden-hour.webp");
+}
+/* On portrait screens, covering the whole (tall) page would zoom right into
+   the sun and wash out the hero; show the sky across the top instead, at
+   close to its designed scale, and let it fade into the base colour. */
+@media (orientation: portrait) {
+  .sky,
+  .skyRays {
+    background-size: max(100%, 900px) auto;
+  }
+}
+.skyRays {
+  background-image: url("/sky/golden-hour-rays.webp");
+  mix-blend-mode: screen;
+  opacity: 0.42;
+  animation: raysBreathe 7s ease-in-out infinite alternate;
+}
+@keyframes raysBreathe {
+  from {
+    opacity: 0.34;
+  }
+  to {
+    opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skyRays {
+    animation: none;
+  }
+}
+
+/* Soft shadows keep the hero's text readable where it crosses the sun's
+   glow and the brighter clouds. */
+.landing .hero h1,
+.landing .hero a,
+.landing .hero p,
+.landing .hero span {
+  text-shadow: 0 1px 14px rgba(40, 20, 30, 0.5);
+}
+
+/* The engine animation's canvas covers the hero (see engine-fx.ts); the
+   engine itself is centred on .engineBox, positioned where the old engine
+   graphic sat and sized to suit wide and narrow/tall (mobile) viewports. */
+.engineCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+}
 .engineBox {
   position: absolute;
+  left: 88.9%;
+  top: 84.4%;
   transform: translate(-50%, -50%);
   width: min(260px, 24vw, 40vh);
   aspect-ratio: 1;
   z-index: 0;
   pointer-events: none;
+  visibility: hidden;
 }
 
-.curve {
-  fill: none;
-  stroke-dasharray: 2600;
-  stroke-dashoffset: 2600;
-  animation: draw 2.4s cubic-bezier(0.16, 0.84, 0.44, 1) forwards;
+/* The example flight's card, as warm dark glass on the landing page. */
+.showcaseCardSlot article {
+  background: rgba(40, 30, 50, 0.4);
+  border-color: rgba(240, 190, 120, 0.35);
+  backdrop-filter: blur(4px);
 }
-@keyframes draw {
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-@keyframes engineSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.engineBlades {
-  animation: engineSpin 4s linear infinite;
-  transform-box: view-box;
-  transform-origin: 130px 130px;
-}
-@media (prefers-reduced-motion: reduce) {
-  .curve {
-    animation: none;
-    stroke-dashoffset: 0;
-  }
-  .engineBlades {
-    animation: none;
-  }
+.showcaseCardSlot article::after {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(240, 200, 140, 0.16) 50%,
+    transparent 70%
+  );
 }
 
 .content {
@@ -126,7 +178,7 @@
   padding: 2px 8px;
 }
 .showcaseToggle:hover {
-  background: rgba(143, 208, 245, 0.1);
+  background: rgba(240, 200, 140, 0.12);
 }
 .showcaseToggle:focus-visible {
   outline: 2px solid var(--accent-bright);
@@ -136,11 +188,11 @@
   height: 2px;
   border-radius: 1px;
   overflow: hidden;
-  background: rgba(143, 208, 245, 0.12);
+  background: rgba(240, 200, 140, 0.2);
 }
 .showcaseProgress {
   height: 100%;
-  background: var(--accent-mid);
+  background: #f0c070;
   transform-origin: left;
   animation-name: showcaseProgress;
   animation-timing-function: linear;
