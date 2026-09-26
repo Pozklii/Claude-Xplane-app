@@ -1,0 +1,161 @@
+/* This is a deliberately single, committed dark theme (an instrument
+   panel at night) for the whole page, not adapted to the viewer's
+   light/dark preference — these tokens live on the page wrapper so both
+   the hero and the plain content below it share one continuous
+   background instead of handing off to a separate light/dark section. */
+.page {
+  --bg: #020304;
+  --on-bg-strong: #f1f6fa;
+  --on-bg: #e7eef5;
+  --on-bg-soft: #93aec2;
+  --accent: #3f7fb5;
+  --accent-mid: #5a9fd4;
+  --accent-bright: #8fd0f5;
+  background: var(--bg);
+  color: var(--on-bg);
+}
+
+/* Splits the page's height 3:1 with the feature-text band below (which
+   gets flex: 1 1 0%), so the hero fills the top three quarters of the
+   viewport and the plain black band the bottom quarter — growing past
+   that only if its own content needs more room. */
+.hero {
+  position: relative;
+  overflow: hidden;
+  flex: 3 1 0%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.mechBg,
+.liveryFx {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.mechBg > svg,
+.liveryFx > svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+/* Positioned independently of the (non-uniformly stretched) background
+   SVGs, with a genuinely square CSS box, so the engine's circles render
+   as true circles regardless of the hero's own aspect ratio. min() with
+   both a vw and a vh term keeps it reasonably sized on both very wide and
+   very narrow/tall (mobile) viewports. left/top are set inline (see
+   page.tsx) to the same fractional position the livery curves converge
+   to; translate(-50%, -50%) centers the box on that point regardless of
+   its own size. */
+.engineBox {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: min(260px, 24vw, 40vh);
+  aspect-ratio: 1;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.curve {
+  fill: none;
+  stroke-dasharray: 2600;
+  stroke-dashoffset: 2600;
+  animation: draw 2.4s cubic-bezier(0.16, 0.84, 0.44, 1) forwards;
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes engineSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.engineBlades {
+  animation: engineSpin 4s linear infinite;
+  transform-box: view-box;
+  transform-origin: 130px 130px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .curve {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .engineBlades {
+    animation: none;
+  }
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+}
+
+.introHeading {
+  color: var(--on-bg-strong);
+}
+
+.cta {
+  color: var(--accent-mid);
+  border: 1.5px solid var(--accent-mid);
+}
+.cta:hover {
+  background: var(--accent-mid);
+  color: var(--bg);
+}
+
+.featureText {
+  color: var(--on-bg-soft);
+}
+
+/* The example-flight tour strip above the landing page's summary card. */
+.showcaseLabel {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--on-bg-soft);
+}
+.showcaseToggle {
+  color: var(--accent-bright);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.showcaseToggle:hover {
+  background: rgba(143, 208, 245, 0.1);
+}
+.showcaseToggle:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 2px;
+}
+.showcaseTrack {
+  height: 2px;
+  border-radius: 1px;
+  overflow: hidden;
+  background: rgba(143, 208, 245, 0.12);
+}
+.showcaseProgress {
+  height: 100%;
+  background: var(--accent-mid);
+  transform-origin: left;
+  animation-name: showcaseProgress;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+@keyframes showcaseProgress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .showcaseProgress {
+    display: none;
+  }
+}

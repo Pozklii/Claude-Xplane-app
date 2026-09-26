@@ -15,9 +15,10 @@ const airports = data as Record<
 >;
 
 /**
- * Looks up an airport by ICAO or IATA code. The bundled dataset (derived
- * from OpenFlights via the `airport-data` npm package, Unlicense) is keyed
- * by both, uppercased.
+ * Looks up an airport by ICAO or IATA code. The bundled dataset is derived
+ * from OurAirports (ourairports.com/data, public domain) — ~19k airports
+ * with a usable ICAO and/or IATA code, closed airports excluded — keyed by
+ * both codes, uppercased.
  */
 export function findAirport(code: string): Airport | null {
   const key = code.trim().toUpperCase();

@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { geoEquirectangular, geoGraticule10, geoPath } from "d3-geo";
-import { drag as d3drag, type D3DragEvent } from "d3-drag";
-import { select } from "d3-selection";
-import { feature } from "topojson-client";
-import type { Topology } from "topojson-specification";
-import type { Feature, Geometry } from "geojson";
+import { useEffect, useRef } from "react";
+import { ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { MapboxOverlay } from "@deck.gl/mapbox";
+import {
+  LngLatBounds,
+  Map as MapLibreMap,
+  NavigationControl,
+  type GeoJSONSource,
+  type LngLatBoundsLike,
+} from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { useSelection } from "./selection-context";
 
 export type GlobePoint = {
@@ -28,554 +32,800 @@ export type GlobeArc = {
   label: string;
 };
 
-type CityDatum = {
-  name: string;
-  lat: number;
-  lon: number;
-  pop: number;
-};
+// A free, no-API-key vector style — good detail (roads, place labels,
+// land/water) without needing a MapTiler (or similar) key. Swap for a
+// MapTiler satellite style once a key is available.
+const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
+const MAP_HEIGHT = 480;
 
-const COUNTRIES_URL = "/data/countries-50m.json";
-const CITIES_URL = "/data/cities.json";
+// deck.gl color accessors take [r, g, b, a] (0-255), not CSS strings.
+export const DEFAULT_ARC_COLOR = "#38d9ff";
+// Airports have no visible marker (a flat disc on the globe's surface
+// z-fights with it and flickers, especially zoomed in and pitched on a
+// selected route) — the arc endpoints already show where they are. The
+// point layer is still drawn fully transparent so airports stay clickable:
+// deck.gl's picking pass uses its own picking colors, not the fill alpha.
+const MARKER_HIT_TARGET: [number, number, number, number] = [0, 0, 0, 0];
 
-const OCEAN = "#cfe8f5";
-const GRATICULE = "#8fbfd9";
-const LAND = "#d9e8d3";
-const BORDER = "#93b884";
-const CITY_DOT = "#7a8a70";
-const CITY_LABEL = "#4b5563";
-const ARC_COLOR = "rgba(37, 99, 235, 0.45)";
-const ARC_COLOR_SELECTED = "#2563eb";
-const POINT_COLOR = "#facc15";
-const POINT_COLOR_SELECTED = "#ffffff";
-const CLICK_TOLERANCE_PX = 6;
-const DRAG_THRESHOLD_PX = 2;
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 24;
-// At zoom 1, only cities above this population are shown; zooming in
-// reveals progressively smaller cities (down to the ~20,000 floor of the
-// bundled dataset by MAX_ZOOM).
-const CITY_POPULATION_AT_DEFAULT_ZOOM = 3_000_000;
-const CITY_ZOOM_EXPONENT = 1.6;
-// The rendered base-map bitmap covers up to this many viewports in each
-// dimension, centered on the current pan position, rather than the whole
-// world — so its size (and memory) stays bounded even at high zoom, instead
-// of growing with mapWidth/mapHeight. Panning re-renders it only when the
-// viewport would drift outside this cached area.
-const TILE_ZOOM_FACTOR = 2.5;
+type Rgb = [number, number, number];
 
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
+function hexToRgb(hex: string): Rgb {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
+
+function mixToward(rgb: Rgb, target: Rgb, amount: number): Rgb {
+  return [
+    Math.round(rgb[0] + (target[0] - rgb[0]) * amount),
+    Math.round(rgb[1] + (target[1] - rgb[1]) * amount),
+    Math.round(rgb[2] + (target[2] - rgb[2]) * amount),
+  ];
+}
+
+// One flat color along the whole arc (same at both ends, no gradient),
+// with the selected and glow states derived from it.
+function resolveArcColors(arcColor: string) {
+  const rgb = hexToRgb(arcColor);
+  const base: [number, number, number, number] = [...rgb, 210];
+  const selected: [number, number, number, number] = [
+    ...mixToward(rgb, [255, 255, 255], 0.55),
+    255,
+  ];
+  const glow: [number, number, number, number] = [...rgb, 55];
+  const glowSelected: [number, number, number, number] = [
+    ...mixToward(rgb, [255, 255, 255], 0.3),
+    110,
+  ];
+  return { base, selected, glow, glowSelected };
+}
+
+// Selecting a flight zooms and tilts the camera in on its two airports,
+// giving a pitched view of the route. Deselecting eases back out to the
+// full overview.
+const SELECTION_PITCH = 55;
+const SELECTION_PADDING = 90;
+const SELECTION_MAX_ZOOM = 9;
+const SELECTION_FLY_DURATION = 1500;
+const SELECTION_PULSE_MS = 1800;
+const OVERVIEW_FLY_DURATION = 1200;
+// Default cap for the initial fit and the post-deselect overview — can be
+// overridden per instance (see the overviewMaxZoom prop) for containers
+// too small for this to keep the whole globe in view.
+const OVERVIEW_MAX_ZOOM = 4;
+// The bare (circular, frameless) globe is sized around a ~380px-wide
+// container; at zoom 1 the whole sphere fits inside its circular clip.
+const BARE_OVERVIEW_MAX_ZOOM = 1;
+
+// Clicking an individual airport flies in close enough, at a steep enough
+// pitch, for MapLibre's native 3D buildings (real OpenStreetMap building
+// footprints, extruded by height) to render — an actual, if only as
+// detailed as OSM's own coverage of that airport, 3D view of its
+// buildings, rather than a generic marker standing in for one. Lowered
+// from 16: the building layer's own zoom range is widened to 0-24 below,
+// so it's the underlying vector tile data's own resolution — not this
+// value — that ultimately decides how much detail is visible at a given
+// distance; this just means less of a fly-in is needed to reach it.
+const AIRPORT_ZOOM = 15;
+const AIRPORT_PITCH = 60;
+const AIRPORT_FLY_DURATION = 1800;
+
+// Idle auto-rotation, paused during any drag/rotate/pitch gesture and once
+// zoomed in past the overview (selecting a flight or an airport both push
+// zoom well above this, so it also naturally stays off while either is
+// active, and resumes once the camera eases back out to the overview).
+const SPIN_DEGREES_PER_SECOND = 4;
+// Comfortably above the fitBounds zoom for most flight-log spans (even a
+// fairly tight regional cluster lands around 3-4), so idle spin actually
+// engages for realistic data rather than only for globe-spanning ones.
+const SPIN_MAX_ZOOM = 5;
 
 export function FlightGlobe({
   points,
   arcs,
+  bare = false,
+  overviewMaxZoom = bare ? BARE_OVERVIEW_MAX_ZOOM : OVERVIEW_MAX_ZOOM,
+  height = MAP_HEIGHT,
+  arcColor = DEFAULT_ARC_COLOR,
+  interactive = true,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
+  /** Skip the bordered/rounded card wrapper and caption styling meant for
+   * a standalone card, for use where the globe should sit directly on its
+   * own background instead of looking like a boxed widget. In bare mode
+   * the map container is also a square (aspect-ratio: 1, tracking
+   * whatever width its parent gives it) clipped to a circle, so it always
+   * reads as a floating globe rather than a rectangular map, whatever the
+   * zoom level — the navigation control is skipped too, since it would
+   * otherwise sit in a corner the circular clip cuts off. */
+  bare?: boolean;
+  /** Caps how far the initial fit (and the post-deselect overview) zooms
+   * in. Defaults to a cap that keeps the whole sphere inside the bare
+   * globe's circle, or a closer one for the boxed map; a different
+   * container size may need its own value. */
+  overviewMaxZoom?: number;
+  /** Pixel height of the map container outside bare mode (which sizes
+   * itself via aspect-ratio instead). Defaults to the /flights layout. */
+  height?: number;
+  /** CSS hex color (e.g. "#38d9ff") for every flight route, applied flat
+   * along the whole arc; selected and glow variants are derived from it. */
+  arcColor?: string;
+  /** When false, the globe is display-only: it still spins, draws its
+   * routes and flies to whatever the selection context selects (e.g. the
+   * landing page's example-flight tour), but ignores the pointer entirely
+   * — no dragging, zooming or clicking — and scrolling over it scrolls the
+   * page. Fixed for an instance's lifetime. */
+  interactive?: boolean;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const tileCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [width, setWidth] = useState(0);
-  const [countries, setCountries] = useState<Geometry[] | null>(null);
-  const [cities, setCities] = useState<CityDatum[]>([]);
-  const [zoom, setZoom] = useState(1);
-  // The lon/lat currently centered in the viewport. Panning only ever
-  // updates this — it never touches the projection itself, so dragging
-  // never re-projects the map's geometry (see the draw effect below).
-  const [center, setCenter] = useState<[number, number]>(() => {
-    if (points.length === 0) return [0, 20];
-    const avgLng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
-    const avgLat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
-    return [avgLng, avgLat];
-  });
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(COUNTRIES_URL)
-      .then((res) => res.json())
-      .then((topology: Topology) => {
-        if (cancelled) return;
-        const collection = feature(topology, topology.objects.countries);
-        const features =
-          "features" in collection ? collection.features : [collection];
-        setCountries((features as Feature<Geometry>[]).map((f) => f.geometry));
-      })
-      .catch(() => {
-        if (!cancelled) setCountries([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(CITIES_URL)
-      .then((res) => res.json())
-      .then((data: CityDatum[]) => {
-        if (!cancelled) setCities(data);
-      })
-      .catch(() => {
-        if (!cancelled) setCities([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => {
-      setWidth(entry.contentRect.width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // A flat world map is naturally 2:1 (width:height); match the viewport to
-  // that so the whole world fits with no blank margins at the default zoom.
-  const height = Math.max(Math.round(width / 2), 1);
-  // The whole world, at the current zoom, rendered at mapWidth x mapHeight
-  // pixels (2:1 aspect, standard for an equirectangular map). This is
-  // independent of pan — only zoom (and container width) change it — so
-  // panning never needs to touch the projection or re-render the map.
-  const mapWidth = Math.max(width, 1) * zoom;
-  const mapHeight = mapWidth / 2;
-  const scale = mapWidth / (2 * Math.PI);
-
-  // Fixed projection: prime meridian at the center of the rendered map,
-  // never rotated or re-translated by panning.
-  const projection = useMemo(
-    () =>
-      geoEquirectangular()
-        .translate([mapWidth / 2, mapHeight / 2])
-        .scale(scale),
-    [mapWidth, mapHeight, scale],
-  );
-
-  const graticule = useMemo(() => geoGraticule10(), []);
-
-  const selectedArc = arcs.find((arc) => arc.id === selectedId) ?? null;
-  const highlightedCodes = useMemo(() => {
-    if (!selectedArc) return new Set<string>();
-    return new Set([selectedArc.fromCode, selectedArc.toCode]);
-  }, [selectedArc]);
-
-  // Pixel pan offset for the current center — recomputed cheaply from the
-  // (stable) projection each render, rather than stored directly, so
-  // zooming keeps the same lon/lat centered for free.
-  const panX = width / 2 - (projection([center[0], 0])?.[0] ?? 0);
-  const rawPanY = height / 2 - (projection([0, center[1]])?.[1] ?? 0);
-  const panY =
-    mapHeight <= height
-      ? (height - mapHeight) / 2
-      : clamp(rawPanY, height - mapHeight, 0);
-
-  // The base map (ocean, graticule, countries, city labels) is rendered to
-  // an off-DOM "tile" canvas covering an area a few viewports wide/tall
-  // around the current pan position — not the whole world — so its size
-  // (and memory) stays bounded even at very high zoom. It's only
-  // re-rendered when zoom/data changes or panning drifts near its edge, so
-  // ordinary dragging costs just a couple of drawImage blits plus
-  // redrawing the handful of arcs/points on top.
-  const tileOriginRef = useRef<{ x: number; y: number } | null>(null);
-  const tileSizeRef = useRef({ w: 0, h: 0 });
-  const tileSourceRef = useRef<{
-    projection: typeof projection;
-    countries: typeof countries;
-    cities: typeof cities;
-  } | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || width === 0) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-
-    const tileWidth = Math.min(mapWidth, width * TILE_ZOOM_FACTOR);
-    const tileHeight = Math.min(mapHeight, height * TILE_ZOOM_FACTOR);
-    // When the tile already spans the full world in a dimension, panning
-    // along it never needs a re-render — it's just modular wraparound
-    // within content that's already fully cached. Checking containment
-    // there instead would be a no-margin, exactly-equal comparison, which
-    // floating-point rounding (mapHeight vs height, computed slightly
-    // differently) can fail spuriously on every single frame.
-    const tileCoversFullWidth = tileWidth >= mapWidth;
-    const tileCoversFullHeight = tileHeight >= mapHeight;
-    const viewLeft = -panX;
-    const viewTop = -panY;
-
-    const sourceChanged =
-      !tileSourceRef.current ||
-      tileSourceRef.current.projection !== projection ||
-      tileSourceRef.current.countries !== countries ||
-      tileSourceRef.current.cities !== cities;
-    const origin = tileOriginRef.current;
-    const horizontalOk =
-      tileCoversFullWidth ||
-      (!!origin &&
-        viewLeft >= origin.x &&
-        viewLeft + width <= origin.x + tileWidth);
-    const verticalOk =
-      tileCoversFullHeight ||
-      (!!origin &&
-        viewTop >= origin.y &&
-        viewTop + height <= origin.y + tileHeight);
-    const needsRender =
-      sourceChanged ||
-      !origin ||
-      tileSizeRef.current.w !== tileWidth ||
-      tileSizeRef.current.h !== tileHeight ||
-      !horizontalOk ||
-      !verticalOk;
-
-    if (needsRender) {
-      const originX = viewLeft - (tileWidth - width) / 2;
-      const originY = clamp(
-        viewTop - (tileHeight - height) / 2,
-        0,
-        Math.max(0, mapHeight - tileHeight),
-      );
-
-      let tileCanvas = tileCanvasRef.current;
-      if (!tileCanvas) {
-        tileCanvas = document.createElement("canvas");
-        tileCanvasRef.current = tileCanvas;
-      }
-      tileCanvas.width = Math.max(1, Math.ceil(tileWidth * dpr));
-      tileCanvas.height = Math.max(1, Math.ceil(tileHeight * dpr));
-      const tctx = tileCanvas.getContext("2d");
-      if (tctx) {
-        tctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        tctx.clearRect(0, 0, tileWidth, tileHeight);
-
-        const tilePath = geoPath(projection, tctx);
-        // The world content lives in x ∈ [0, mapWidth); draw it at three
-        // horizontal offsets so it correctly fills the tile regardless of
-        // where the tile's origin falls relative to that range (origin is
-        // a continuous coordinate, not wrapped, so it can land slightly
-        // outside it).
-        const worldOffsets = [0, -mapWidth, mapWidth];
-
-        let countryShape: Path2D | null = null;
-        if (countries) {
-          // One combined geometry + a single geoPath/Path2D call, rather
-          // than looping and calling geoPath per country: constructing
-          // d3's projection/clip pipeline has a real fixed cost per call,
-          // and with ~240 countries that per-call overhead dominates.
-          const d = geoPath(projection)({
-            type: "GeometryCollection",
-            geometries: countries,
-          });
-          if (d) countryShape = new Path2D(d);
-        }
-
-        const cityPopulationCutoff =
-          CITY_POPULATION_AT_DEFAULT_ZOOM / Math.pow(zoom, CITY_ZOOM_EXPONENT);
-        tctx.font = "10px ui-sans-serif, system-ui, -apple-system, sans-serif";
-        tctx.textBaseline = "middle";
-
-        for (const wx of worldOffsets) {
-          tctx.save();
-          tctx.translate(wx - originX, -originY);
-
-          tctx.beginPath();
-          tilePath({ type: "Sphere" });
-          tctx.fillStyle = OCEAN;
-          tctx.fill();
-
-          tctx.beginPath();
-          tilePath(graticule);
-          tctx.strokeStyle = GRATICULE;
-          tctx.globalAlpha = 0.5;
-          tctx.lineWidth = 0.5;
-          tctx.stroke();
-          tctx.globalAlpha = 1;
-
-          if (countryShape) {
-            tctx.fillStyle = LAND;
-            tctx.fill(countryShape);
-            tctx.strokeStyle = BORDER;
-            tctx.lineWidth = 0.5;
-            tctx.stroke(countryShape);
-          }
-
-          for (const city of cities) {
-            if (city.pop < cityPopulationCutoff) continue;
-            const coords = projection([city.lon, city.lat]);
-            if (!coords) continue;
-            const [x, y] = coords;
-
-            tctx.beginPath();
-            tctx.arc(x, y, 1.5, 0, 2 * Math.PI);
-            tctx.fillStyle = CITY_DOT;
-            tctx.fill();
-
-            tctx.fillStyle = CITY_LABEL;
-            tctx.fillText(city.name, x + 4, y);
-          }
-
-          tctx.restore();
-        }
-      }
-
-      tileOriginRef.current = { x: originX, y: originY };
-      tileSizeRef.current = { w: tileWidth, h: tileHeight };
-      tileSourceRef.current = { projection, countries, cities };
-    }
-
-    const tile = tileOriginRef.current;
-    const tileSize = tileSizeRef.current;
-    const tileCanvas = tileCanvasRef.current;
-    if (!tile || !tileCanvas) return;
-
-    // At low zoom the tile covers the entire world width, so blitting it
-    // once isn't enough — the viewport can fall anywhere along that
-    // wrapped content, same as the arcs/points below. At higher zoom the
-    // tile is a genuine crop that needsRender already guarantees covers
-    // the viewport, so a single blit suffices.
-    const blitOffsets = tileCoversFullWidth ? [-mapWidth, 0, mapWidth] : [0];
-    for (const blitOffset of blitOffsets) {
-      ctx.drawImage(
-        tileCanvas,
-        tile.x + panX + blitOffset,
-        tile.y + panY,
-        tileSize.w,
-        tileSize.h,
-      );
-    }
-
-    // The tile itself already covers the full viewport (that's what
-    // needsRender guarantees), so unlike the tile's own content the arcs
-    // and points below only need the same three world-wrap copies used
-    // everywhere else for horizontal wraparound — not the tile's offset.
-    const wrappedX = ((panX % mapWidth) + mapWidth) % mapWidth;
-    const wrapOffsets = [-mapWidth, 0, mapWidth];
-
-    const path = geoPath(projection, ctx);
-
-    for (const offset of wrapOffsets) {
-      ctx.save();
-      ctx.translate(wrappedX + offset, panY);
-
-      for (const arc of arcs) {
-        const selected = arc.id === selectedId;
-        ctx.beginPath();
-        path({
-          type: "LineString",
-          coordinates: [
-            [arc.startLng, arc.startLat],
-            [arc.endLng, arc.endLat],
-          ],
-        });
-        ctx.strokeStyle = selected ? ARC_COLOR_SELECTED : ARC_COLOR;
-        ctx.lineWidth = selected ? 2 : 1.2;
-        ctx.stroke();
-      }
-
-      for (const point of points) {
-        const coords = projection([point.lng, point.lat]);
-        if (!coords) continue;
-        const [x, y] = coords;
-        const highlighted = highlightedCodes.has(point.code);
-
-        ctx.beginPath();
-        ctx.arc(x, y, highlighted ? 5 : 3, 0, 2 * Math.PI);
-        ctx.fillStyle = highlighted ? POINT_COLOR_SELECTED : POINT_COLOR;
-        ctx.fill();
-        ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        if (highlighted) {
-          const label = `${point.city} (${point.code})`;
-          ctx.font =
-            "600 11px ui-sans-serif, system-ui, -apple-system, sans-serif";
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
-          ctx.fillStyle = "#1f2937";
-          ctx.textBaseline = "middle";
-          ctx.strokeText(label, x + 7, y);
-          ctx.fillText(label, x + 7, y);
-        }
-      }
-
-      ctx.restore();
-    }
-  }, [
-    panX,
-    panY,
-    mapWidth,
-    mapHeight,
-    projection,
-    width,
-    height,
-    zoom,
-    countries,
-    cities,
-    graticule,
-    arcs,
-    points,
-    selectedId,
-    highlightedCodes,
-  ]);
-
-  // Kept in refs (rather than effect deps) so the drag/click listener below
-  // is bound once per size change and never mid-gesture, while still always
-  // seeing the latest arcs/selection/pan when a click is finally resolved.
-  const arcsRef = useRef(arcs);
-  const selectedIdRef = useRef(selectedId);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const overlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectIdRef = useRef(onSelectId);
-  const projectionRef = useRef(projection);
-  const panRef = useRef({ x: panX, y: panY, mapWidth });
+  const selectedIdRef = useRef(selectedId);
+  // bare doesn't change over an instance's lifetime; captured in a ref
+  // purely so the mount-once effect below can read it without needing to
+  // be in that effect's dependency array.
+  const bareRef = useRef(bare);
+  const interactiveRef = useRef(interactive);
+  // Set around every programmatic flyTo so the idle-spin loop below doesn't
+  // fight it by nudging the center mid-animation.
+  const cameraAnimatingRef = useRef(false);
+  const flyToTracked = (
+    map: MapLibreMap,
+    options: Parameters<MapLibreMap["flyTo"]>[0],
+  ) => {
+    cameraAnimatingRef.current = true;
+    map.once("moveend", () => {
+      cameraAnimatingRef.current = false;
+    });
+    map.flyTo(options);
+  };
+
   useEffect(() => {
-    arcsRef.current = arcs;
-    selectedIdRef.current = selectedId;
     onSelectIdRef.current = onSelectId;
-    projectionRef.current = projection;
-    panRef.current = { x: panX, y: panY, mapWidth };
+    selectedIdRef.current = selectedId;
   });
 
+  // Create the map (and its deck.gl overlay) once. Data (arcs/points) and
+  // selection are pushed into it imperatively via the effect below rather
+  // than by recreating the map, so panning/zoom state isn't lost on every
+  // flight-log change.
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || width === 0) return;
+    const container = containerRef.current;
+    if (!container) return;
 
-    let pendingDelta: { dx: number; dy: number } | null = null;
-    let frame: number | null = null;
-    let moved = 0;
+    const map = new MapLibreMap({
+      container,
+      style: STYLE_URL,
+      center: [0, 20],
+      zoom: 0.5,
+      // MapLibre's own attribution control (a white bar/button over the
+      // map) is off; the same credits the style requires — OpenFreeMap,
+      // OpenMapTiles and OpenStreetMap — are given in the caption below
+      // instead, styled to sit on the page rather than over the globe.
+      attributionControl: false,
+      interactive: interactiveRef.current,
+    });
+    mapRef.current = map;
+    // Skipped in bare mode: its container is clipped to a circle (see the
+    // render below), and this control sits in a screen corner that a
+    // circular clip would cut off.
+    if (!bareRef.current) {
+      map.addControl(new NavigationControl(), "top-right");
+    }
 
-    const flush = () => {
-      frame = null;
-      if (!pendingDelta) return;
-      const { dx, dy } = pendingDelta;
-      pendingDelta = null;
-      const degreesPerPixel = 360 / mapWidth;
-      setCenter(([lng, lat]) => {
-        const nextLng = ((lng - dx * degreesPerPixel + 540) % 360) - 180;
-        const nextLat = clamp(lat + dy * degreesPerPixel, -85, 85);
-        return [nextLng, nextLat];
-      });
+    // Slowly spin the globe on its axis (moving the center longitude, not
+    // the bearing, so it reads as the Earth turning rather than the camera
+    // orbiting) whenever it's idle at the overview zoom — paused for the
+    // duration of any user gesture, and skipped entirely for
+    // prefers-reduced-motion.
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    let userInteracting = false;
+    let spinFrame = 0;
+    let lastFrameTime = 0;
+    const spinGlobe = (time: number) => {
+      const deltaSeconds = lastFrameTime ? (time - lastFrameTime) / 1000 : 0;
+      lastFrameTime = time;
+      if (
+        !userInteracting &&
+        !cameraAnimatingRef.current &&
+        !selectedIdRef.current &&
+        !document.hidden &&
+        map.getZoom() < SPIN_MAX_ZOOM
+      ) {
+        const center = map.getCenter();
+        center.lng -= SPIN_DEGREES_PER_SECOND * deltaSeconds;
+        map.setCenter(center);
+      }
+      spinFrame = requestAnimationFrame(spinGlobe);
     };
+    if (!prefersReducedMotion) {
+      spinFrame = requestAnimationFrame(spinGlobe);
+      const startInteracting = () => (userInteracting = true);
+      const stopInteracting = () => (userInteracting = false);
+      // MapLibre only fires dragstart/rotatestart/pitchstart once it has
+      // recognized real gesture movement past its own threshold — in the
+      // gap between the initial mousedown/touchstart and that recognition,
+      // spin's per-frame setCenter() was still running, and could shift
+      // the center out from under the drag handler's own reference point
+      // for "how far has the pointer moved," making the drag it was about
+      // to start feel like it didn't register. Pausing on the raw
+      // press/release closes that gap; the gesture-specific events stay as
+      // a fallback (e.g. a drag released outside the canvas).
+      map.on("mousedown", startInteracting);
+      map.on("touchstart", startInteracting);
+      map.on("mouseup", stopInteracting);
+      map.on("touchend", stopInteracting);
+      map.on("dragstart", startInteracting);
+      map.on("rotatestart", startInteracting);
+      map.on("pitchstart", startInteracting);
+      map.on("dragend", stopInteracting);
+      map.on("rotateend", stopInteracting);
+      map.on("pitchend", stopInteracting);
+      // Scroll-wheel and pinch zooming go through MapLibre's own eased
+      // zoomTo, not a drag — without pausing spin for it too, the spin
+      // loop's per-frame setCenter() fights that animation every frame,
+      // which is what made zooming feel broken/stuck. And like
+      // dragstart, zoomstart only fires once MapLibre has recognized the
+      // gesture (accumulated a few wheel ticks) — pause on the raw wheel
+      // event too so a spin frame can't land in that gap and throw off
+      // the "zoom around the point under the cursor" reference, the same
+      // class of race fixed above for drag.
+      map.on("wheel", startInteracting);
+      map.on("zoomstart", startInteracting);
+      map.on("zoomend", stopInteracting);
+    }
 
-    const handleClick = (x: number, y: number) => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.lineWidth = CLICK_TOLERANCE_PX;
-      const { x: px, y: py, mapWidth: mw } = panRef.current;
-      const wrappedX = ((px % mw) + mw) % mw;
-      const localY = y - py;
-      const svgPath = geoPath(projectionRef.current);
-      for (const arc of arcsRef.current) {
-        const d = svgPath({
-          type: "LineString",
-          coordinates: [
-            [arc.startLng, arc.startLat],
-            [arc.endLng, arc.endLat],
+    // Runs on "styledata" (fired as soon as the style JSON itself is
+    // parsed — its layer list is available even though sources/tiles
+    // haven't necessarily loaded yet) rather than "load" (fired only once
+    // the map has actually painted its first frame): reacting on "load"
+    // meant the browser had already drawn one or more frames of the
+    // upstream style at full detail — every layer, all its labels and
+    // terrain-style texture — before this code ran and hid most of it,
+    // which showed up as a visible flash of the "wrong" map right before
+    // it switched to the simplified one. Applying the same changes here
+    // instead means nothing gets painted until after they're already in
+    // effect.
+    map.once("styledata", () => {
+      map.setProjection({ type: "globe" });
+
+      // The style's own 3D building layer(s) are typically gated behind a
+      // minzoom tuned for street-level browsing; clear that so they're
+      // free to render as soon as we fly in close on an airport, whatever
+      // the upstream style's default turns out to be.
+      for (const layer of map.getStyle()?.layers ?? []) {
+        if (layer.type === "fill-extrusion") {
+          try {
+            map.setLayerZoomRange(layer.id, 0, 24);
+          } catch {
+            // Not fatal — worst case the layer keeps its own zoom range.
+          }
+        }
+      }
+
+      // Strip the basemap down to just airports — their name label and
+      // physical layout (runways, taxiways, aprons/stands, terminals) —
+      // plus enough base geography (water, and the 3D buildings widened
+      // above, which is what actually draws an airport's terminals) to
+      // still read as a globe. Everything else (landcover/landuse
+      // texture, place/road/POI labels, roads, boundaries, hillshading)
+      // is real "terrain detail" that's just clutter at this scale.
+      // OpenMapTiles-schema styles (which OpenFreeMap's "liberty" style
+      // is one of) name the relevant vector source-layers consistently:
+      // "aeroway" for the physical layout, "aerodrome_label" for the
+      // airport's name.
+      for (const layer of map.getStyle()?.layers ?? []) {
+        const sourceLayer = (layer as { "source-layer"?: string })[
+          "source-layer"
+        ];
+        const isAirportDetail =
+          sourceLayer === "aeroway" ||
+          sourceLayer === "aerodrome_label" ||
+          layer.id.includes("aeroway") ||
+          layer.id.includes("aerodrome") ||
+          layer.id.includes("airport");
+        const isBaseGeography =
+          layer.type === "background" ||
+          layer.type === "fill-extrusion" ||
+          sourceLayer === "water";
+        if (isAirportDetail || isBaseGeography) continue;
+        try {
+          map.setLayoutProperty(layer.id, "visibility", "none");
+        } catch {
+          // Not fatal — worst case that layer stays visible.
+        }
+      }
+
+      // The style's own airport name label (aerodrome_label) is normally
+      // tuned to only appear once reasonably zoomed in — sensible for a
+      // full-detail basemap where it'd otherwise compete with everything
+      // else, but since this map shows nothing else, the airport's name
+      // is the one thing worth being able to read from much further out.
+      // Widen it the same way as the fill-extrusion buildings above.
+      for (const layer of map.getStyle()?.layers ?? []) {
+        const sourceLayer = (layer as { "source-layer"?: string })[
+          "source-layer"
+        ];
+        const isAirportLabel =
+          sourceLayer === "aerodrome_label" ||
+          layer.id.includes("aerodrome") ||
+          layer.id.includes("airport");
+        if (!isAirportLabel) continue;
+        try {
+          map.setLayerZoomRange(layer.id, 0, 24);
+        } catch {
+          // Not fatal — worst case the label keeps its own zoom range.
+        }
+      }
+
+      // The "aeroway" layer(s) kept above draw the physical layout
+      // (runways, taxiways, aprons, terminal footprints) but — being
+      // fill/line geometry, not symbol layers — carry no text of their
+      // own. Label whichever of those features actually have a name (most
+      // named ones are terminals) or a ref (most stands/gates use this
+      // instead of a name), sourced from that exact same vector source/
+      // source-layer rather than guessing the source id, so it stays
+      // correct even if OpenFreeMap changes which style/source backs it.
+      const aerowayLayer = map
+        .getStyle()
+        ?.layers?.find(
+          (layer) =>
+            (layer as { "source-layer"?: string })["source-layer"] ===
+            "aeroway",
+        ) as { source?: string } | undefined;
+      if (aerowayLayer?.source) {
+        try {
+          map.addLayer({
+            id: "aeroway-detail-label",
+            type: "symbol",
+            source: aerowayLayer.source,
+            "source-layer": "aeroway",
+            minzoom: 12,
+            filter: ["any", ["has", "name"], ["has", "ref"]],
+            layout: {
+              "text-field": ["coalesce", ["get", "name"], ["get", "ref"]],
+              "text-size": 11,
+              "text-font": ["Noto Sans Regular"],
+              "symbol-placement": "point",
+            },
+            paint: {
+              "text-color": "#dcedf7",
+              "text-halo-color": "#0a1622",
+              "text-halo-width": 1.2,
+            },
+          });
+        } catch {
+          // Not fatal — worst case the physical layout stays unlabeled.
+        }
+      }
+
+      // In bare mode the globe sits directly on the page's own background
+      // rather than a card, so the style's "space" fill (the background
+      // layer, painted across the whole canvas rectangle behind the
+      // sphere) would otherwise show up as a visible box around the
+      // circular globe. Make it transparent so only the sphere itself —
+      // real map content — is visible, at any zoom.
+      if (bareRef.current) {
+        for (const layer of map.getStyle()?.layers ?? []) {
+          if (layer.type === "background") {
+            try {
+              map.setPaintProperty(layer.id, "background-opacity", 0);
+            } catch {
+              // Not fatal — worst case that layer keeps its own fill.
+            }
+          }
+        }
+      }
+    });
+
+    map.on("load", () => {
+      // Text labels for the two airports of the selected flight only —
+      // the dots themselves are drawn by the deck.gl ScatterplotLayer
+      // below.
+      map.addSource("flight-point-labels", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      map.addLayer({
+        id: "flight-point-labels",
+        type: "symbol",
+        source: "flight-point-labels",
+        layout: {
+          "text-field": ["get", "label"],
+          "text-size": 12,
+          "text-font": ["Noto Sans Bold"],
+          // Each label sits on the side facing the route's other airport
+          // (see "anchor" below), keeping both inside the view — always
+          // placing them to the right pushed the eastern one off the edge,
+          // clipped outright by the bare globe's circle.
+          "text-offset": [
+            "case",
+            ["==", ["get", "anchor"], "right"],
+            ["literal", [-0.8, 0]],
+            ["literal", [0.8, 0]],
           ],
+          "text-anchor": ["get", "anchor"],
+        },
+        paint: {
+          "text-color": "#1f2937",
+          "text-halo-color": "rgba(255, 255, 255, 0.9)",
+          "text-halo-width": 2,
+        },
+      });
+
+      const overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+      map.addControl(overlay);
+      overlayRef.current = overlay;
+
+      // MapboxOverlay's own camera sync (for its interleaved picking
+      // viewport, as opposed to the separately-and-correctly-synced
+      // rendering path) only takes effect once its underlying Deck
+      // instance finishes its own async init, which can land after our
+      // initial fitBounds below — leaving pickObject() permanently
+      // testing against the *construction-time* camera (here, the
+      // placeholder center/zoom passed to `new MapLibreMap` above) rather
+      // than wherever the map actually ends up, so a click would never
+      // find anything under the cursor. Keeping it in sync ourselves on
+      // every "move" closes that gap.
+      // viewState is deliberately excluded from MapboxOverlayProps (the
+      // library expects to own it via that same internal sync), so this
+      // needs a narrow cast to set it directly.
+      const setOverlayViewState = overlay.setProps.bind(overlay) as (props: {
+        viewState: {
+          longitude: number;
+          latitude: number;
+          zoom: number;
+          bearing: number;
+          pitch: number;
+        };
+      }) => void;
+      const syncOverlayViewState = () => {
+        const center = map.getCenter();
+        setOverlayViewState({
+          viewState: {
+            longitude: ((center.lng + 540) % 360) - 180,
+            latitude: center.lat,
+            zoom: map.getZoom(),
+            bearing: map.getBearing(),
+            pitch: map.getPitch(),
+          },
         });
-        if (!d) continue;
-        const arcPath = new Path2D(d);
-        const hit = [wrappedX - mw, wrappedX, wrappedX + mw].some((offsetX) =>
-          ctx.isPointInStroke(arcPath, x - offsetX, localY),
-        );
-        if (hit) {
-          onSelectIdRef.current(
-            selectedIdRef.current === arc.id ? null : arc.id,
-          );
+      };
+      map.on("move", syncOverlayViewState);
+      syncOverlayViewState();
+
+      // deck.gl's own onClick prop on a layer doesn't reliably fire from
+      // real MapLibre-driven clicks in interleaved mode (interaction
+      // handling is delegated to MapLibre, which only forwards a subset of
+      // events) — pick manually from MapLibre's click event instead, which
+      // is proven reliable.
+      map.on("click", (event) => {
+        if (!interactiveRef.current) return;
+        const hit = overlay.pickObject({
+          x: event.point.x,
+          y: event.point.y,
+          radius: 6,
+          layerIds: ["flight-arcs", "flight-arcs-selected", "flight-points"],
+        });
+
+        if (hit?.layer?.id === "flight-points") {
+          const point = hit.object as GlobePoint | undefined;
+          if (point) {
+            flyToTracked(map, {
+              center: [point.lng, point.lat],
+              zoom: AIRPORT_ZOOM,
+              pitch: AIRPORT_PITCH,
+              duration: AIRPORT_FLY_DURATION,
+            });
+          }
           return;
         }
-      }
-      onSelectIdRef.current(null);
-    };
 
-    const dragBehavior = d3drag<HTMLCanvasElement, unknown>()
-      .on("start", () => {
-        moved = 0;
-      })
-      .on("drag", (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
-        moved += Math.abs(event.dx) + Math.abs(event.dy);
-        pendingDelta = pendingDelta
-          ? {
-              dx: pendingDelta.dx + event.dx,
-              dy: pendingDelta.dy + event.dy,
-            }
-          : { dx: event.dx, dy: event.dy };
-        if (frame === null) frame = requestAnimationFrame(flush);
-      })
-      .on("end", (event: D3DragEvent<HTMLCanvasElement, unknown, unknown>) => {
-        if (moved <= DRAG_THRESHOLD_PX) {
-          handleClick(event.x, event.y);
-        }
+        const hitId = (hit?.object as GlobeArc | undefined)?.id ?? null;
+        onSelectIdRef.current(
+          hitId && selectedIdRef.current !== hitId ? hitId : null,
+        );
+      });
+    });
+
+    const resizeObserver = new ResizeObserver(() => map.resize());
+    resizeObserver.observe(container);
+
+    return () => {
+      cancelAnimationFrame(spinFrame);
+      resizeObserver.disconnect();
+      map.remove();
+      mapRef.current = null;
+      overlayRef.current = null;
+    };
+    // Intentionally created once; see the effect below for how
+    // points/arcs/selection stay in sync afterward.
+  }, []);
+
+  // Push arcs/points into the deck.gl overlay and the label source whenever
+  // the flight data or selection changes, and fit the view to them the
+  // first time they arrive.
+  const hasFitRef = useRef(false);
+  // The selection the camera was last moved for, so a change that isn't a
+  // selection change (e.g. picking a new route color) redraws the layers
+  // without also flying the camera anywhere.
+  const cameraSelectionRef = useRef<string | null>(null);
+  const pulseFrameRef = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(pulseFrameRef.current), []);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const apply = () => {
+      if (!overlayRef.current) return;
+
+      const selectedArc = arcs.find((arc) => arc.id === selectedId) ?? null;
+      const highlightedCodes = selectedArc
+        ? new Set([selectedArc.fromCode, selectedArc.toCode])
+        : new Set<string>();
+      const arcColors = resolveArcColors(arcColor);
+      // deck.gl has no native bloom/glow — approximated here with a wide,
+      // low-opacity layer under a thin, bright one, purely via alpha
+      // blending. The glow sits at the exact same ground position as its
+      // core counterpart, so under the globe's real depth testing they'd
+      // tie on depth and flicker (whichever fragment happened to win
+      // varying frame to frame, worse once the camera is continuously
+      // moving during idle spin) — depthWriteEnabled: false keeps the glow
+      // from contesting that tie while still letting it be occluded by
+      // real geometry like the globe itself.
+      //
+      // The selected route gets its own pair of layers rather than a
+      // per-arc accessor function: deck.gl only re-runs accessor functions
+      // when the data or an updateTriggers entry changes, so a function
+      // would silently keep drawing the old color/selection. Constant
+      // values (like these) are compared directly and always apply.
+      const buildArcLayers = (
+        id: string,
+        data: GlobeArc[],
+        coreColor: [number, number, number, number],
+        glowColor: [number, number, number, number],
+        coreWidth: number,
+        glowWidth: number,
+      ): ArcLayer<GlobeArc>[] => [
+        new ArcLayer<GlobeArc>({
+          id: `${id}-glow`,
+          data,
+          pickable: false,
+          greatCircle: true,
+          // GlobeView back-face-culls by default, which hides an arc's
+          // tube geometry from most angles unless culling is disabled.
+          parameters: { cullMode: "none", depthWriteEnabled: false },
+          getSourcePosition: (d) => [d.startLng, d.startLat],
+          getTargetPosition: (d) => [d.endLng, d.endLat],
+          getSourceColor: glowColor,
+          getTargetColor: glowColor,
+          getWidth: glowWidth,
+          getHeight: 0.35,
+          widthUnits: "pixels",
+        }),
+        new ArcLayer<GlobeArc>({
+          id,
+          data,
+          pickable: true,
+          greatCircle: true,
+          parameters: { cullMode: "none" },
+          getSourcePosition: (d) => [d.startLng, d.startLat],
+          getTargetPosition: (d) => [d.endLng, d.endLat],
+          getSourceColor: coreColor,
+          getTargetColor: coreColor,
+          getWidth: coreWidth,
+          getHeight: 0.35,
+          widthUnits: "pixels",
+        }),
+      ];
+      const pointLayer = new ScatterplotLayer<GlobePoint>({
+        id: "flight-points",
+        data: points,
+        pickable: true,
+        parameters: { cullMode: "none", depthWriteEnabled: false },
+        getPosition: (d) => [d.lng, d.lat],
+        getFillColor: MARKER_HIT_TARGET,
+        getRadius: 6,
+        radiusUnits: "pixels",
       });
 
-    select(canvas).call(dragBehavior);
-    return () => {
-      if (frame !== null) cancelAnimationFrame(frame);
+      // pulse (0-1) swells the selected route's glow; see the selection
+      // pulse below.
+      const renderLayers = (pulse: number) => {
+        const [r, g, b, a] = arcColors.glowSelected;
+        overlayRef.current?.setProps({
+          layers: [
+            ...buildArcLayers(
+              "flight-arcs",
+              arcs.filter((arc) => arc !== selectedArc),
+              arcColors.base,
+              arcColors.glow,
+              1.3,
+              5,
+            ),
+            ...buildArcLayers(
+              "flight-arcs-selected",
+              selectedArc ? [selectedArc] : [],
+              arcColors.selected,
+              [r, g, b, Math.round(a + (230 - a) * pulse)],
+              2.5 + 1.5 * pulse,
+              9 + 16 * pulse,
+            ),
+            pointLayer,
+          ],
+        });
+      };
+      cancelAnimationFrame(pulseFrameRef.current);
+      renderLayers(0);
+
+      const labelSource = map.getSource("flight-point-labels") as
+        | GeoJSONSource
+        | undefined;
+      if (labelSource) {
+        labelSource.setData({
+          type: "FeatureCollection",
+          features: points
+            .filter((point) => highlightedCodes.has(point.code))
+            .map((point) => ({
+              type: "Feature",
+              properties: {
+                label: `${point.city} (${point.code})`,
+                // The western airport's label reads rightward (toward the
+                // eastern one), and vice versa.
+                anchor:
+                  selectedArc &&
+                  point.lng >
+                    Math.min(selectedArc.startLng, selectedArc.endLng)
+                    ? "right"
+                    : "left",
+              },
+              geometry: { type: "Point", coordinates: [point.lng, point.lat] },
+            })),
+        });
+      }
+
+      if (!hasFitRef.current && points.length > 0) {
+        hasFitRef.current = true;
+        const lngs = points.map((p) => p.lng);
+        const lats = points.map((p) => p.lat);
+        const bounds: LngLatBoundsLike = [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ];
+        map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: overviewMaxZoom });
+        cameraSelectionRef.current = selectedId;
+        return;
+      }
+
+      if (selectedId === cameraSelectionRef.current) return;
+      cameraSelectionRef.current = selectedId;
+
+      if (selectedArc) {
+        // Newly selected: pulse the route's glow a couple of times while
+        // the camera flies in on it, fading out as it arrives.
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          const pulseStart = performance.now();
+          const tick = (now: number) => {
+            const t = Math.min(1, (now - pulseStart) / SELECTION_PULSE_MS);
+            renderLayers(Math.sin(Math.PI * 2 * t) ** 2 * (1 - t));
+            if (t < 1) pulseFrameRef.current = requestAnimationFrame(tick);
+          };
+          pulseFrameRef.current = requestAnimationFrame(tick);
+        }
+
+        const lngs = [selectedArc.startLng, selectedArc.endLng];
+        const lats = [selectedArc.startLat, selectedArc.endLat];
+        const bounds = new LngLatBounds([
+          Math.min(...lngs),
+          Math.min(...lats),
+          Math.max(...lngs),
+          Math.max(...lats),
+        ]);
+        const camera = map.cameraForBounds(bounds, {
+          padding: SELECTION_PADDING,
+          pitch: SELECTION_PITCH,
+          maxZoom: SELECTION_MAX_ZOOM,
+        });
+        flyToTracked(map, {
+          center: camera?.center ?? [
+            (selectedArc.startLng + selectedArc.endLng) / 2,
+            (selectedArc.startLat + selectedArc.endLat) / 2,
+          ],
+          zoom: camera?.zoom ?? SELECTION_MAX_ZOOM,
+          bearing: camera?.bearing ?? 0,
+          pitch: SELECTION_PITCH,
+          duration: SELECTION_FLY_DURATION,
+        });
+      } else if (points.length > 0) {
+        const lngs = points.map((p) => p.lng);
+        const lats = points.map((p) => p.lat);
+        const overviewBounds: LngLatBoundsLike = [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ];
+        const camera = map.cameraForBounds(overviewBounds, {
+          padding: 60,
+          maxZoom: overviewMaxZoom,
+        });
+        if (camera) {
+          flyToTracked(map, {
+            ...camera,
+            pitch: 0,
+            duration: OVERVIEW_FLY_DURATION,
+          });
+        }
+      }
     };
-  }, [width, mapWidth]);
 
-  // Scroll/pinch to zoom. Kept in its own effect (rather than folded into
-  // the drag effect above) so rapid wheel events don't repeatedly tear down
-  // and rebind the drag/click listeners.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || width === 0) return;
-
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const delta = -event.deltaY * 0.0015;
-      setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * (1 + delta))));
-    };
-
-    canvas.addEventListener("wheel", handleWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [width]);
+    // The overlay only exists once the map's "load" handler above has run.
+    // Not map.isStyleLoaded(): that stays false while any tiles are still
+    // loading (nearly always, mid-spin), and "load" has long since fired
+    // by then, so an update deferred to it would silently never apply.
+    if (overlayRef.current) apply();
+    else map.once("load", apply);
+  }, [arcs, points, selectedId, overviewMaxZoom, arcColor]);
 
   return (
     <div
-      ref={containerRef}
-      className="overflow-hidden rounded-2xl border border-black/[.08] bg-[#cfe8f5] dark:border-white/[.145]"
+      className={
+        bare
+          ? ""
+          : "overflow-hidden rounded-2xl border border-black/[.08] dark:border-white/[.145]"
+      }
     >
-      {width > 0 && (
-        <canvas
-          ref={canvasRef}
-          className="cursor-grab touch-none active:cursor-grabbing"
-        />
-      )}
-      <p className="px-3 py-1.5 text-[11px] text-zinc-600">
-        Drag to pan, scroll to zoom, click a flight to see its airports. Map
-        data &copy;{" "}
+      <div
+        ref={containerRef}
+        style={
+          bare
+            ? {
+                aspectRatio: "1",
+                borderRadius: "50%",
+                overflow: "hidden",
+                pointerEvents: interactive ? undefined : "none",
+              }
+            : { height, pointerEvents: interactive ? undefined : "none" }
+        }
+      />
+      <p
+        className={
+          bare
+            ? "px-1 py-1.5 text-[11px] text-white/40"
+            : "px-3 py-1.5 text-[11px] text-zinc-600"
+        }
+      >
+        {interactive &&
+          "Drag to rotate, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings. "}
+        Map data &copy;{" "}
         <a
-          href="https://www.naturalearthdata.com/"
+          href="https://www.openstreetmap.org/copyright"
           className="underline"
           target="_blank"
           rel="noopener noreferrer"
         >
-          Natural Earth
+          OpenStreetMap
+        </a>{" "}
+        contributors,{" "}
+        <a
+          href="https://www.openmaptiles.org/"
+          className="underline"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          &copy; OpenMapTiles
         </a>
-        , city data &copy;{" "}
+        , tiles via{" "}
         <a
-          href="https://www.geonames.org/"
+          href="https://openfreemap.org/"
           className="underline"
           target="_blank"
           rel="noopener noreferrer"
         >
-          GeoNames
+          OpenFreeMap
         </a>
         .
       </p>

@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Flight Tracker",
-  description: "Log and review your flights.",
+  title: "Flight World",
+  description: "Log your flights and watch your own flight map take shape.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -11,7 +11,7 @@ export type MediaItem = {
   kind: "image" | "video" | "other";
 };
 
-function sanitizeFilename(name: string) {
+export function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
