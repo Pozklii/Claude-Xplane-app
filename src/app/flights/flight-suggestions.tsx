@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { estimateHours, KNOWN_AIRCRAFT, matchAircraft } from "@/lib/aircraft";
+import { formatDuration } from "@/lib/dates";
 import { AirlineLogo } from "./airline-logo";
 import { AirportLink } from "./airport-link";
 import type { SuggestionRoute } from "./planner-data";
@@ -17,11 +18,6 @@ const QUICK_TYPES = [
   "Twin Otter",
 ];
 const PAGE_SIZE = 12;
-
-function formatHours(hours: number) {
-  const minutes = Math.round(hours * 60);
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
-}
 
 /** Real-world routes flown with a given aircraft type, from the route
  * table, favouring the user's favourite airline and routes they haven't
@@ -165,7 +161,7 @@ export function FlightSuggestions({
                 <div className="flex flex-wrap items-center gap-1.5 text-xs sm:justify-end">
                   <span className="tabular-nums text-zinc-600 dark:text-zinc-400">
                     {route.distanceNm.toLocaleString("en-US")} nm &middot; ~
-                    {formatHours(
+                    {formatDuration(
                       estimateHours(
                         types[0] as Parameters<typeof estimateHours>[0],
                         route.distanceNm,

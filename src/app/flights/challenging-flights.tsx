@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatDuration } from "@/lib/dates";
 import type { WeatherChallengeEntry } from "@/lib/challenging-airports";
 import { AirlineLogo } from "./airline-logo";
 import { AirportLink } from "./airport-link";
@@ -9,11 +10,6 @@ import type { ChallengeCardData } from "./planner-data";
 import { usePlanner } from "./planner-context";
 
 const M_PER_FT = 0.3048;
-
-function formatHours(hours: number) {
-  const minutes = Math.round(hours * 60);
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
-}
 
 function Difficulty({ value }: { value: number }) {
   return (
@@ -198,14 +194,21 @@ export function ChallengingFlights({
                     name={challenge.route.airline ?? "Private"}
                     iata={challenge.route.airlineIata}
                   />
-                  <span className="flex flex-wrap items-center gap-1">
-                    Try it:
-                    <AirportLink airport={challenge.route.from} />
-                    &rarr; {challenge.iata} &middot;{" "}
-                    {challenge.route.airline ?? "Private"} &middot;{" "}
-                    {challenge.route.aircraft} &middot;{" "}
-                    {challenge.route.distanceNm.toLocaleString("en-US")} nm, ~
-                    {formatHours(challenge.route.hours)}
+                  <span className="flex flex-col gap-0.5">
+                    <span className="flex flex-wrap items-center gap-1">
+                      Try it:
+                      <AirportLink airport={challenge.route.from} />
+                      &rarr; {challenge.iata}
+                      <span className="tabular-nums">
+                        &middot;{" "}
+                        {challenge.route.distanceNm.toLocaleString("en-US")} nm,
+                        ~{formatDuration(challenge.route.hours)}
+                      </span>
+                    </span>
+                    <span>
+                      {challenge.route.airline ?? "Private"} &middot;{" "}
+                      {challenge.route.aircraft}
+                    </span>
                   </span>
                 </div>
               )}

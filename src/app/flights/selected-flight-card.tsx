@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDuration } from "@/lib/dates";
 import { AirlineLogo } from "./airline-logo";
 import { Flag } from "./flag";
 import { useSelection } from "./selection-context";
@@ -34,13 +34,6 @@ const KM_PER_NM = 1.852;
 const COUNT_UP_MS = 900;
 
 const formatInteger = (n: number) => Math.round(n).toLocaleString("en-US");
-
-function formatDuration(hours: number) {
-  const totalMinutes = Math.round(hours * 60);
-  const h = Math.floor(totalMinutes / 60);
-  const m = totalMinutes % 60;
-  return h > 0 ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
-}
 
 // Counts up from 0 to `value` once on mount by writing straight to the
 // DOM node, so it doesn't re-render the card every frame. The server/first
@@ -210,12 +203,17 @@ export function SelectedFlightCard({
             {flight.from.code} &rarr; {flight.to.code}
           </h2>
           <p
-            className={`${styles.soft} flex flex-wrap items-center gap-1.5 text-xs`}
+            className={`${styles.soft} flex flex-wrap items-center gap-1 text-xs`}
           >
-            <Flag country={flight.from.country} />
-            {flight.from.city} to
-            <Flag country={flight.to.country} />
-            {flight.to.city}
+            <span className="inline-flex items-center gap-1.5">
+              <Flag country={flight.from.country} />
+              {flight.from.city}
+            </span>
+            <span>to</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Flag country={flight.to.country} />
+              {flight.to.city}
+            </span>
           </p>
         </div>
         {closable && (
@@ -266,11 +264,10 @@ export function SelectedFlightCard({
         className={`${styles.reveal} ${styles.soft} flex flex-wrap items-center gap-1.5 text-xs`}
         style={{ "--i": 2 } as React.CSSProperties}
       >
-        {flight.airline && (
-          <AirlineLogo
-            name={flight.airline}
-            iata={flight.airlineIata ?? null}
-          />
+        {/* Only a real logo here, not the monogram fallback, which would
+            read as clutter on the card (e.g. the landing page's examples). */}
+        {flight.airline && flight.airlineIata && (
+          <AirlineLogo name={flight.airline} iata={flight.airlineIata} />
         )}
         {formatDate(flight.date)} &middot; {flight.aircraft}
         {flight.airline ? ` · ${flight.airline}` : ""}

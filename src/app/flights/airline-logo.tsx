@@ -54,6 +54,13 @@ export function AirlineLogo({
       alt={name}
       title={name}
       loading="lazy"
+      // A server-rendered image can fail before hydration attaches
+      // onError, so also check whether it had already failed on attach.
+      ref={(img) => {
+        if (img?.complete && img.naturalWidth === 0) {
+          setSourceIndex((i) => i + 1);
+        }
+      }}
       onError={() => setSourceIndex((i) => i + 1)}
       className={`${box} shrink-0 rounded bg-white object-contain p-0.5`}
     />
