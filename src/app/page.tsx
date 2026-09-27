@@ -24,7 +24,10 @@ const features = [
   },
 ];
 
-export default async function Home() {
+export default async function Home(props: PageProps<"/">) {
+  // ?map=2d previews the example flights on a flat map instead of the globe.
+  const { map } = await props.searchParams;
+  const flat = map === "2d";
   const { airports, initial } = buildExampleShowcase();
   const supabase = await createClient();
   const {
@@ -43,7 +46,7 @@ export default async function Home() {
         <div
           className={`${styles.content} ${styles.heroGrid} mx-auto w-full max-w-6xl px-6 py-10`}
         >
-          <div className="flex flex-col items-start gap-4">
+          <div className="flex flex-col items-center gap-4">
             <h1
               className={`${styles.introHeading} text-4xl font-bold tracking-tight sm:text-5xl`}
             >
@@ -72,9 +75,10 @@ export default async function Home() {
         <LandingShowcase
           airports={airports}
           initial={initial}
+          flat={flat}
           header={
             <h2 className={`${styles.introHeading} text-2xl font-semibold tracking-tight`}>
-              Every flight, on your globe
+              Every flight, on your {flat ? "map" : "globe"}
             </h2>
           }
         />

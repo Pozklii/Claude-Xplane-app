@@ -34,6 +34,8 @@ export function LandingShowcase(props: {
   header: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
+  /** Show the flights on a flat map instead of the globe. */
+  flat?: boolean;
 }) {
   return (
     <SelectionProvider>
@@ -46,10 +48,12 @@ function Showcase({
   header,
   airports,
   initial,
+  flat = false,
 }: {
   header: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
+  flat?: boolean;
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const [paused, setPaused] = useState(false);
@@ -114,7 +118,9 @@ function Showcase({
   ]);
 
   return (
-    <div className="grid w-full grid-cols-1 items-center gap-14 lg:grid-cols-[1fr_380px]">
+    <div
+      className={`grid w-full grid-cols-1 items-center gap-14 ${flat ? "lg:grid-cols-[1fr_520px]" : "lg:grid-cols-[1fr_380px]"}`}
+    >
       <div className="flex flex-col items-start gap-6 text-left">
         {/* Its own wrapper: an element passed in from a server component
             that sits beside siblings here otherwise trips React's
@@ -160,9 +166,11 @@ function Showcase({
         </div>
       </div>
 
-      <div className="w-[380px] max-w-full justify-self-center lg:justify-self-end">
+      <div
+        className={`${flat ? "w-[520px]" : "w-[380px]"} max-w-full justify-self-center lg:justify-self-end`}
+      >
         {/* Display-only: the tour drives it, visitors can't drag or click it. */}
-        <FlightGlobe points={points} arcs={arcs} bare interactive={false} />
+        <FlightGlobe points={points} arcs={arcs} bare flat={flat} interactive={false} />
       </div>
     </div>
   );

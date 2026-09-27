@@ -222,7 +222,10 @@ async function loadFlights(supabase: Awaited<ReturnType<typeof createClient>>) {
   };
 }
 
-export default async function FlightsPage() {
+export default async function FlightsPage(props: PageProps<"/flights">) {
+  // ?map=2d previews the flights on a flat map instead of the globe.
+  const { map } = await props.searchParams;
+  const flat = map === "2d";
   const supabase = await createClient();
   const {
     data: { user },
@@ -306,6 +309,7 @@ export default async function FlightsPage() {
               arcs={arcs}
               details={flightDetails}
               userId={user.id}
+              flat={flat}
               header={
                 <div className="flex flex-col gap-1">
                   <h1

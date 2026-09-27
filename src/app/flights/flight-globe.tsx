@@ -80,7 +80,7 @@ function resolveArcColors(arcColor: string) {
 }
 
 // Selecting a flight zooms and tilts the camera in on its two airports,
-// giving a pitched view of the route. Deselecting eases back out to the
+// giving a pitched view of the route (the flat map zooms without tilting). Deselecting eases back out to the
 // full overview.
 const SELECTION_PITCH = 55;
 const SELECTION_PADDING = 90;
@@ -95,6 +95,12 @@ const OVERVIEW_MAX_ZOOM = 4;
 // The bare (circular, frameless) globe is sized around a ~380px-wide
 // container; at zoom 1 the whole sphere fits inside its circular clip.
 const BARE_OVERVIEW_MAX_ZOOM = 1;
+
+// The bare flat map's edge fade (see the flat prop): two gradients, one
+// across and one down, intersected.
+const FLAT_EDGE_FADE =
+  "linear-gradient(to right, transparent, #000 10%, #000 90%, transparent), " +
+  "linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent)";
 
 // Clicking an individual airport flies in close enough, at a steep enough
 // pitch, for MapLibre's native 3D buildings (real OpenStreetMap building
@@ -127,6 +133,7 @@ export function FlightGlobe({
   height = MAP_HEIGHT,
   arcColor = DEFAULT_ARC_COLOR,
   interactive = true,
+  flat = false,
   onAirportClick,
 }: {
   points: GlobePoint[];
@@ -157,6 +164,10 @@ export function FlightGlobe({
    * — no dragging, zooming or clicking — and scrolling over it scrolls the
    * page. Fixed for an instance's lifetime. */
   interactive?: boolean;
+  /** Draw a flat (Web Mercator) map instead of the globe: no idle spin,
+   * and in bare mode a wide rectangle whose edges fade into the page
+   * rather than a circle. Fixed for an instance's lifetime. */
+  flat?: boolean;
   /** Called with an airport's code when it's clicked (after flying in). */
   onAirportClick?: (code: string) => void;
 }) {
@@ -172,6 +183,7 @@ export function FlightGlobe({
   // be in that effect's dependency array.
   const bareRef = useRef(bare);
   const interactiveRef = useRef(interactive);
+  const flatRef = useRef(flat);
   // Set around every programmatic flyTo so the idle-spin loop below doesn't
   // fight it by nudging the center mid-animation.
   const cameraAnimatingRef = useRef(false);
@@ -206,6 +218,9 @@ export function FlightGlobe({
       style: STYLE_URL,
       center: [0, 20],
       zoom: 0.5,
+      // A flat map zoomed out past a single world width would just show
+      // repeated copies of it side by side.
+      minZoom: flatRef.current ? 0 : undefined,
       // MapLibre's own attribution control (a white bar/button over the
       // map) is off; the same credits the style requires — OpenFreeMap,
       // OpenMapTiles and OpenStreetMap — are given in the caption below
@@ -248,7 +263,7 @@ export function FlightGlobe({
       }
       spinFrame = requestAnimationFrame(spinGlobe);
     };
-    if (!prefersReducedMotion) {
+    if (!prefersReducedMotion && !flatRef.current) {
       spinFrame = requestAnimationFrame(spinGlobe);
       const startInteracting = () => (userInteracting = true);
       const stopInteracting = () => (userInteracting = false);
@@ -297,7 +312,7 @@ export function FlightGlobe({
     // instead means nothing gets painted until after they're already in
     // effect.
     map.once("styledata", () => {
-      map.setProjection({ type: "globe" });
+      map.setProjection({ type: flatRef.current ? "mercator" : "globe" });
 
       // The style's own 3D building layer(s) are typically gated behind a
       // minzoom tuned for street-level browsing; clear that so they're
@@ -734,7 +749,7 @@ export function FlightGlobe({
         ]);
         const camera = map.cameraForBounds(bounds, {
           padding: SELECTION_PADDING,
-          pitch: SELECTION_PITCH,
+          pitch: flatRef.current ? 0 : SELECTION_PITCH,
           maxZoom: SELECTION_MAX_ZOOM,
         });
         flyToTracked(map, {
@@ -744,7 +759,7 @@ export function FlightGlobe({
           ],
           zoom: camera?.zoom ?? SELECTION_MAX_ZOOM,
           bearing: camera?.bearing ?? 0,
-          pitch: SELECTION_PITCH,
+          pitch: flatRef.current ? 0 : SELECTION_PITCH,
           duration: SELECTION_FLY_DURATION,
         });
       } else if (points.length > 0) {
@@ -787,14 +802,26 @@ export function FlightGlobe({
       <div
         ref={containerRef}
         style={
-          bare
+          bare && flat
             ? {
-                aspectRatio: "1",
-                borderRadius: "50%",
+                aspectRatio: "16 / 10",
                 overflow: "hidden",
+                // Fades out towards every edge, so the map's rectangle
+                // melts into the page rather than reading as a box.
+                maskImage: FLAT_EDGE_FADE,
+                WebkitMaskImage: FLAT_EDGE_FADE,
+                maskComposite: "intersect",
+                WebkitMaskComposite: "source-in",
                 pointerEvents: interactive ? undefined : "none",
               }
-            : { height, pointerEvents: interactive ? undefined : "none" }
+            : bare
+              ? {
+                  aspectRatio: "1",
+                  borderRadius: "50%",
+                  overflow: "hidden",
+                  pointerEvents: interactive ? undefined : "none",
+                }
+              : { height, pointerEvents: interactive ? undefined : "none" }
         }
       />
       <p
@@ -805,7 +832,7 @@ export function FlightGlobe({
         }
       >
         {interactive &&
-          `Drag to rotate, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings${onAirportClick ? " and look it up below" : ""}. `}
+          `Drag to ${flat ? "move" : "rotate"}, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings${onAirportClick ? " and look it up below" : ""}. `}
         Map data &copy;{" "}
         <a
           href="https://www.openstreetmap.org/copyright"

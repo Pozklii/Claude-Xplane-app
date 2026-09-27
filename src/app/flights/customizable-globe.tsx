@@ -34,12 +34,15 @@ export function CustomizableGlobe({
   details,
   header,
   userId,
+  flat = false,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
   details: Record<string, FlightDetails>;
   header: React.ReactNode;
   userId: string;
+  /** Show the flights on a flat map instead of the globe. */
+  flat?: boolean;
 }) {
   // Reads localStorage without a server/client hydration mismatch: this
   // resolves to null during SSR and the client's first render, then
@@ -79,7 +82,9 @@ export function CustomizableGlobe({
         so it looks the same in both places — it needs to sit on the same
         dark ground too, since bare mode leaves the globe's land
         transparent. */}
-      <div className="flex w-[380px] max-w-full flex-col gap-2 self-center">
+      <div
+        className={`flex ${flat ? "w-[560px]" : "w-[380px]"} max-w-full flex-col gap-2 self-center`}
+      >
         <div className="flex items-center justify-end gap-2">
           <label htmlFor="arc-color" className="text-xs text-white/60">
             Route color
@@ -97,6 +102,7 @@ export function CustomizableGlobe({
           arcs={arcs}
           arcColor={arcColor}
           bare
+          flat={flat}
           onAirportClick={(code) => openAirport(code, { scroll: false })}
         />
         {airportCode && (

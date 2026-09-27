@@ -105,8 +105,8 @@
 }
 
 /* The engine animation's canvas covers the hero (see engine-fx.ts); the
-   engine itself is centred on .engineBox, the hero's right-hand column on
-   wide screens and a centred block under the heading on narrow ones. */
+   engine itself is centred on .engineBox, centred in the hero under the
+   heading. */
 .engineCanvas {
   position: absolute;
   inset: 0;
@@ -116,14 +116,11 @@
   pointer-events: none;
 }
 .heroGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-items: center;
   gap: 1.5rem;
-}
-.heroGrid > :first-child {
-  justify-self: start;
+  text-align: center;
 }
 .engineBox {
   width: min(88vw, 420px);
@@ -131,12 +128,8 @@
   pointer-events: none;
 }
 @media (min-width: 1024px) {
-  .heroGrid {
-    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-    gap: 2rem;
-  }
   .engineBox {
-    width: min(560px, 42vw, 70vh);
+    width: min(560px, 60vh);
   }
 }
 
@@ -145,6 +138,7 @@
 .appLinks {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }
 .appLink {
