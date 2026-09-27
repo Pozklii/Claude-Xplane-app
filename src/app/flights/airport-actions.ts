@@ -27,6 +27,8 @@ export async function lookupAirport(code: string) {
       ? { code: facts.country.code, name: facts.country.name }
       : null,
     runwayNames: facts.runways.map((runway) => runway.name),
+    lat: facts.lat,
+    lon: facts.lon,
     challenge: challenge?.why ?? null,
   };
 }

@@ -5,6 +5,7 @@ import { ChallengingFlights } from "./challenging-flights";
 import { FlightSuggestions } from "./flight-suggestions";
 import type { ChallengeCardData, SuggestionRoute } from "./planner-data";
 import { PLANNER_ID, usePlanner, type PlannerTab } from "./planner-context";
+import { RoutePlanner } from "./route-planner";
 
 const TABS: { id: PlannerTab; label: string }[] = [
   { id: "airport", label: "Airports" },
@@ -34,10 +35,13 @@ export function FlightPlanner({
       id={PLANNER_ID}
       className="flex scroll-mt-6 flex-col gap-4 rounded-2xl border border-black/[.08] p-4 dark:border-white/[.145]"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-lg font-semibold text-black dark:text-zinc-50">
-          Plan your next flight
-        </h2>
+      <h2 className="text-lg font-semibold text-black dark:text-zinc-50">
+        Plan your next flight
+      </h2>
+
+      <RoutePlanner />
+
+      <div className="flex">
         <div
           role="tablist"
           aria-label="Flight planning tools"
