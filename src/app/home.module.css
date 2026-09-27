@@ -119,6 +119,16 @@
   --flame: url("/sky/flame-vortex.webp");
   --flame-glow: url("/sky/flame-vortex-glow.webp");
 }
+/* ?sharp=1: the sharper stills (and, in page.tsx, no glow layer). */
+.flameVeil .flameSharp {
+  --flame: url("/sky/flame-veil-sharp.webp");
+}
+.flameEmber .flameSharp {
+  --flame: url("/sky/flame-ember-sharp.webp");
+}
+.flameVortex .flameSharp {
+  --flame: url("/sky/flame-vortex-sharp.webp");
+}
 .flameSky {
   position: absolute;
   inset: 0;

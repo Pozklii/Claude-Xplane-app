@@ -9,7 +9,13 @@ import styles from "./home.module.css";
 // faded in over the still once it has built up. The still stays under it,
 // and is all there is under prefers-reduced-motion, without WebGL2, or on
 // a device too slow to keep it running.
-export function FlameLive({ flame }: { flame: keyof typeof FLAME_PARAMS }) {
+export function FlameLive({
+  flame,
+  sharp = false,
+}: {
+  flame: keyof typeof FLAME_PARAMS;
+  sharp?: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [live, setLive] = useState(false);
 
@@ -20,8 +26,9 @@ export function FlameLive({ flame }: { flame: keyof typeof FLAME_PARAMS }) {
     return startFlame(canvas, FLAME_PARAMS[flame], {
       onReady: () => setLive(true),
       onFail: () => setLive(false),
+      sharp,
     });
-  }, [flame]);
+  }, [flame, sharp]);
 
   return (
     <canvas

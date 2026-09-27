@@ -156,14 +156,20 @@ uniform float uRefLog;
 uniform vec3 uBg;
 uniform float uDim;
 uniform vec2 uTexel;
+uniform bool uBlur;
 in vec2 vUv;
 out vec4 outColor;
 void main() {
-  // A light 3x3 blur, like the stills' density-estimation blur.
+  // A light 3x3 blur, like the stills' density-estimation blur (skipped
+  // when sharp).
   vec4 a = vec4(0.0);
-  for (int y = -1; y <= 1; y++)
-    for (int x = -1; x <= 1; x++)
-      a += texture(uAcc, vUv + vec2(x, y) * uTexel) * (x == 0 && y == 0 ? 0.25 : (x == 0 || y == 0 ? 0.125 : 0.0625));
+  if (uBlur) {
+    for (int y = -1; y <= 1; y++)
+      for (int x = -1; x <= 1; x++)
+        a += texture(uAcc, vUv + vec2(x, y) * uTexel) * (x == 0 && y == 0 ? 0.25 : (x == 0 || y == 0 ? 0.125 : 0.0625));
+  } else {
+    a = texture(uAcc, vUv);
+  }
   float dens = a.a;
   vec3 avg = dens > 0.0 ? a.rgb / dens : vec3(0.0);
   float alpha = clamp(log(1.0 + dens) / max(uRefLog, 1e-3), 0.0, 1.0);
@@ -205,7 +211,17 @@ function compile(gl: WebGL2RenderingContext, vs: string, fs: string) {
 export function startFlame(
   canvas: HTMLCanvasElement,
   flame: FlameParams,
-  { onReady, onFail }: { onReady: () => void; onFail: () => void },
+  {
+    onReady,
+    onFail,
+    sharp = false,
+  }: {
+    onReady: () => void;
+    onFail: () => void;
+    /** Crisper: full resolution (up to the screen's pixel density), more
+     * points, no blur and a shorter trail; costs more. */
+    sharp?: boolean;
+  },
 ): () => void {
   const gl = canvas.getContext("webgl2", {
     alpha: false,
@@ -218,14 +234,18 @@ export function startFlame(
     return () => {};
   }
 
-  let points: WebGLProgram, fade: WebGLProgram, probe: WebGLProgram, tone: WebGLProgram;
+  let points: WebGLProgram,
+    fade: WebGLProgram,
+    probe: WebGLProgram,
+    tone: WebGLProgram;
   try {
     points = compile(gl, POINTS_VS, POINTS_FS);
     fade = compile(gl, QUAD_VS, FADE_FS);
     probe = compile(gl, QUAD_VS, PROBE_FS);
     tone = compile(gl, QUAD_VS, TONE_FS);
   } catch (error) {
-    if (process.env.NODE_ENV !== "production") console.warn("Live flame shaders failed:", error);
+    if (process.env.NODE_ENV !== "production")
+      console.warn("Live flame shaders failed:", error);
     onFail();
     return () => {};
   }
@@ -269,28 +289,75 @@ export function startFlame(
   );
   gl.uniform2f(loc(points, "uCenter"), 0, 0);
   gl.useProgram(tone);
-  gl.uniform3f(loc(tone, "uBg"), flame.bg[0] / 255, flame.bg[1] / 255, flame.bg[2] / 255);
+  gl.uniform3f(
+    loc(tone, "uBg"),
+    flame.bg[0] / 255,
+    flame.bg[1] / 255,
+    flame.bg[2] / 255,
+  );
   gl.uniform1f(loc(tone, "uDim"), flame.dim);
+  gl.uniform1i(loc(tone, "uBlur"), sharp ? 0 : 1);
+  const resolution = sharp
+    ? Math.min(1.5, window.devicePixelRatio || 1)
+    : RESOLUTION;
+  const maxWidth = sharp ? 2600 : MAX_WIDTH;
+  const decay = sharp ? 0.9 : DECAY;
 
   // Two float accumulation buffers, ping-ponged, and a small probe buffer.
   let W = 0;
   let H = 0;
   let count = 0;
-  const targets = [0, 1].map(() => ({ tex: gl.createTexture(), fb: gl.createFramebuffer() }));
+  const targets = [0, 1].map(() => ({
+    tex: gl.createTexture(),
+    fb: gl.createFramebuffer(),
+  }));
   const probeTarget = { tex: gl.createTexture(), fb: gl.createFramebuffer() };
   const PROBE_W = 128;
   const PROBE_H = 80;
   const probePixels = new Uint8Array(PROBE_W * PROBE_H * 4);
-  const setup = (t: { tex: WebGLTexture; fb: WebGLFramebuffer }, w: number, h: number, float: boolean) => {
+  const setup = (
+    t: { tex: WebGLTexture; fb: WebGLFramebuffer },
+    w: number,
+    h: number,
+    float: boolean,
+  ) => {
     gl.bindTexture(gl.TEXTURE_2D, t.tex);
-    if (float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (float)
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA16F,
+        w,
+        h,
+        0,
+        gl.RGBA,
+        gl.HALF_FLOAT,
+        null,
+      );
+    else
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        w,
+        h,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      t.tex,
+      0,
+    );
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
   };
@@ -299,7 +366,7 @@ export function startFlame(
   const resize = () => {
     const cssW = canvas.clientWidth;
     const cssH = canvas.clientHeight;
-    const scale = Math.min(RESOLUTION, MAX_WIDTH / Math.max(1, cssW));
+    const scale = Math.min(resolution, maxWidth / Math.max(1, cssW));
     const w = Math.max(64, Math.round(cssW * scale));
     const h = Math.max(64, Math.round(cssH * scale));
     if (w === W && h === H) return;
@@ -310,11 +377,17 @@ export function startFlame(
     for (const t of targets) setup(t, W, H, true);
     // Points per frame scale with the area, within bounds that keep
     // phones light.
-    count = Math.round(Math.min(360_000, Math.max(90_000, W * H * 0.55)));
+    count = sharp
+      ? Math.round(Math.min(900_000, Math.max(150_000, W * H * 0.5)))
+      : Math.round(Math.min(360_000, Math.max(90_000, W * H * 0.55)));
     // Frame it like the still: covering the canvas at the still's aspect.
     const effW = Math.max(W, H * STILL_ASPECT);
     gl.useProgram(points);
-    gl.uniform2f(loc(points, "uClipScale"), (flame.scale / 2) * (effW / W), (flame.scale / 2) * (effW / H));
+    gl.uniform2f(
+      loc(points, "uClipScale"),
+      (flame.scale / 2) * (effW / W),
+      (flame.scale / 2) * (effW / H),
+    );
     gl.useProgram(tone);
     gl.uniform2f(loc(tone, "uTexel"), 1 / W, 1 / H);
   };
@@ -352,8 +425,22 @@ export function startFlame(
       const ang = s.turn * Math.sin(t * s.turnSpeed);
       const cs = Math.cos(ang);
       const sn = Math.sin(ang);
-      rowA.set([a * cs - d * sn, b * cs - e * sn, c + s.drift * Math.sin(t * s.driftSpeed)], i * 3);
-      rowB.set([a * sn + d * cs, b * sn + e * cs, f + s.drift * Math.cos(t * s.driftSpeed * 0.8)], i * 3);
+      rowA.set(
+        [
+          a * cs - d * sn,
+          b * cs - e * sn,
+          c + s.drift * Math.sin(t * s.driftSpeed),
+        ],
+        i * 3,
+      );
+      rowB.set(
+        [
+          a * sn + d * cs,
+          b * sn + e * cs,
+          f + s.drift * Math.cos(t * s.driftSpeed * 0.8),
+        ],
+        i * 3,
+      );
     }
     const prev = targets[current];
     const next = targets[1 - current];
@@ -366,7 +453,7 @@ export function startFlame(
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, prev.tex);
     gl.uniform1i(loc(fade, "uPrev"), 0);
-    gl.uniform1f(loc(fade, "uDecay"), DECAY);
+    gl.uniform1f(loc(fade, "uDecay"), decay);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     // ...then add this frame's points.
@@ -376,7 +463,10 @@ export function startFlame(
     gl.uniform3fv(loc(points, "uRowA"), rowA);
     gl.uniform3fv(loc(points, "uRowB"), rowB);
     gl.uniform1ui(loc(points, "uSeed"), (seed = (seed * 16807) % 2147483647));
-    gl.uniform1f(loc(points, "uRot"), ((flame.rotate + 6 * Math.sin((t * Math.PI * 2) / 96)) * Math.PI) / 180);
+    gl.uniform1f(
+      loc(points, "uRot"),
+      ((flame.rotate + 6 * Math.sin((t * Math.PI * 2) / 96)) * Math.PI) / 180,
+    );
     gl.drawArrays(gl.POINTS, 0, count);
     gl.disable(gl.BLEND);
     current = 1 - current;
@@ -390,9 +480,18 @@ export function startFlame(
       gl.bindTexture(gl.TEXTURE_2D, next.tex);
       gl.uniform1i(loc(probe, "uAcc"), 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.readPixels(0, 0, PROBE_W, PROBE_H, gl.RGBA, gl.UNSIGNED_BYTE, probePixels);
+      gl.readPixels(
+        0,
+        0,
+        PROBE_W,
+        PROBE_H,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        probePixels,
+      );
       const lit: number[] = [];
-      for (let i = 0; i < probePixels.length; i += 4) if (probePixels[i] > 0) lit.push(probePixels[i]);
+      for (let i = 0; i < probePixels.length; i += 4)
+        if (probePixels[i] > 0) lit.push(probePixels[i]);
       if (lit.length > 50) {
         lit.sort((x, y) => x - y);
         const measured = (lit[Math.floor(lit.length * 0.999) - 1] / 255) * 16;

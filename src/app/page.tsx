@@ -46,7 +46,10 @@ function randomFlame(): FlameName {
 
 export default async function Home(props: PageProps<"/">) {
   // ?map=2d previews the example flights on a flat map instead of the globe.
-  const { map, bg } = await props.searchParams;
+  const { map, bg, sharp: sharpParam } = await props.searchParams;
+  // ?sharp=1 previews crisper backgrounds: sharper stills, the live flame
+  // at full resolution without blur, and no soft glow over them.
+  const sharp = sharpParam === "1";
   const flat = map === "2d";
   const flame: FlameName | null =
     bg === "golden"
@@ -70,10 +73,13 @@ export default async function Home(props: PageProps<"/">) {
         // wherever the live one can't run, gently drifting), under a soft
         // glow pulsing and turning, with twinkling motes orbiting its
         // middle (see .flameSky).
-        <div className={styles.flameSky} aria-hidden="true">
+        <div
+          className={`${styles.flameSky} ${sharp ? styles.flameSharp : ""}`}
+          aria-hidden="true"
+        >
           <div className={styles.flameBase} />
-          <FlameLive flame={flame} />
-          <div className={styles.flameGlow} />
+          <FlameLive flame={flame} sharp={sharp} />
+          {!sharp && <div className={styles.flameGlow} />}
           <FlameMotes colors={FLAMES[flame].motes} />
         </div>
       ) : (
