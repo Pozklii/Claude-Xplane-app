@@ -24,10 +24,24 @@ const features = [
   },
 ];
 
+// Fractal-flame alternatives to the golden-hour sky, for previewing (see
+// .flameVeil and co. in home.module.css).
+const FLAME_BACKGROUNDS = {
+  veil: styles.flameVeil,
+  ember: styles.flameEmber,
+  vortex: styles.flameVortex,
+};
+
 export default async function Home(props: PageProps<"/">) {
   // ?map=2d previews the example flights on a flat map instead of the globe.
-  const { map } = await props.searchParams;
+  const { map, bg } = await props.searchParams;
   const flat = map === "2d";
+  // ?bg=veil|ember|vortex previews a fractal-flame background in place of
+  // the golden-hour sky.
+  const flameBackground =
+    typeof bg === "string" && Object.hasOwn(FLAME_BACKGROUNDS, bg)
+      ? FLAME_BACKGROUNDS[bg as keyof typeof FLAME_BACKGROUNDS]
+      : "";
   const { airports, initial } = buildExampleShowcase();
   const supabase = await createClient();
   const {
@@ -35,7 +49,9 @@ export default async function Home(props: PageProps<"/">) {
   } = await supabase.auth.getUser();
 
   return (
-    <div className={`${styles.page} ${styles.landing} flex flex-1 flex-col font-sans`}>
+    <div
+      className={`${styles.page} ${styles.landing} ${flameBackground} flex flex-1 flex-col font-sans`}
+    >
       {/* The golden-hour sky behind the whole page, and its light shafts
           (pre-rendered; see .sky in home.module.css). */}
       <div className={styles.sky} aria-hidden="true" />

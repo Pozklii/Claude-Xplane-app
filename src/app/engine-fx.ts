@@ -189,15 +189,15 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     // heads for screen offset scale*cam*(dx/dz, dy/dz), so solve pitch and yaw
     // for that offset. The exhaust lines, drawn along the same axis, then
     // always meet there.
-    // On a wide screen, where the engine sits between the heading and the
-    // globe, the vanishing point is up towards the sun (top left), high
-    // enough for the exhaust to pass above the heading, so the engine faces
-    // right and seems to fly out of the sun; on a narrow one, where it sits
-    // under the heading, below it instead. Either way the exhaust stays
-    // clear of the text.
+    // The engine faces right and flies nearly level: the vanishing point
+    // is off to the left, just above the engine's own height. On a wide
+    // screen, where the engine sits between the heading and the globe, its
+    // exhaust streams back behind the heading and example-flight card; on a
+    // narrow one, where it has its own row under the heading, across that
+    // row.
     const wide = W >= 1100;
-    const vpX = wide ? W * 0.1 : CX + W * 0.25;
-    const vpY = wide ? -H * 0.3 : H * 1.25;
+    const vpX = wide ? -W * 0.05 : -W * 0.6;
+    const vpY = CY - H * (wide ? 0.1 : 0.03);
     aimPitch = Math.atan(-(vpY - CY) / (SCALE * CAM));
     aimYaw = Math.atan(((vpX - CX) / (SCALE * CAM)) * Math.cos(aimPitch));
   };

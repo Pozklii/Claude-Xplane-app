@@ -95,6 +95,45 @@
   }
 }
 
+/* Fractal-flame alternatives to the sky, previewed with ?bg= on the landing
+   page: each a pre-rendered flame (drawn with a fractal flame renderer, the
+   chaos-game algorithm behind Apophysis-style art) on a dark ground, over a
+   base colour matching that ground. The light shafts belong to the sky, so
+   they go. */
+.flameVeil {
+  background: #1e1624;
+}
+.flameEmber {
+  background: #0e1226;
+}
+.flameVortex {
+  background: #080a18;
+}
+.flameVeil .sky,
+.flameEmber .sky,
+.flameVortex .sky {
+  background-size: cover;
+  background-position: center;
+}
+/* Each dimmed to taste, so the gold engine and the text stay the stars. */
+.flameVeil .sky {
+  background-image: url("/sky/flame-veil.webp");
+  filter: brightness(0.72);
+}
+.flameEmber .sky {
+  background-image: url("/sky/flame-ember.webp");
+  filter: brightness(0.5);
+}
+.flameVortex .sky {
+  background-image: url("/sky/flame-vortex.webp");
+  filter: brightness(0.66);
+}
+.flameVeil .skyRays,
+.flameEmber .skyRays,
+.flameVortex .skyRays {
+  display: none;
+}
+
 /* Soft shadows keep the hero's text readable where it crosses the sun's
    glow and the brighter clouds. */
 .landing .hero h1,
