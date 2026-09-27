@@ -3,11 +3,20 @@
 import { useState } from "react";
 
 // Public airline-logo CDNs keyed by IATA code, tried in order; if both
-// fail (or there's no code) a monogram badge stands in.
+// fail (or there's no code) a monogram badge stands in. The large size asks
+// for bigger images, so it stays sharp.
 const LOGO_SOURCES = [
-  (iata: string) => `https://pics.avs.io/120/40/${iata}.png`,
-  (iata: string) => `https://images.kiwi.com/airlines/64/${iata}.png`,
+  (iata: string, large: boolean) =>
+    large ? `https://pics.avs.io/240/80/${iata}.png` : `https://pics.avs.io/120/40/${iata}.png`,
+  (iata: string, large: boolean) =>
+    `https://images.kiwi.com/airlines/${large ? 128 : 64}/${iata}.png`,
 ];
+
+const BOXES = {
+  sm: "h-5 w-10",
+  md: "h-8 w-16",
+  lg: "h-12 w-32",
+};
 
 function monogram(name: string) {
   const words = name
@@ -26,10 +35,10 @@ export function AirlineLogo({
 }: {
   name: string;
   iata: string | null;
-  size?: "sm" | "md";
+  size?: keyof typeof BOXES;
 }) {
   const [sourceIndex, setSourceIndex] = useState(0);
-  const box = size === "md" ? "h-8 w-16" : "h-5 w-10";
+  const box = BOXES[size];
 
   if (!iata || sourceIndex >= LOGO_SOURCES.length) {
     return (
@@ -37,7 +46,7 @@ export function AirlineLogo({
         title={name}
         aria-label={name}
         role="img"
-        className={`${box} inline-flex shrink-0 items-center justify-center rounded bg-zinc-200 text-[10px] font-semibold tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`}
+        className={`${box} inline-flex shrink-0 items-center justify-center rounded bg-zinc-200 ${size === "lg" ? "text-sm" : "text-[10px]"} font-semibold tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300`}
       >
         {monogram(name)}
       </span>
@@ -50,7 +59,7 @@ export function AirlineLogo({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       key={sourceIndex}
-      src={LOGO_SOURCES[sourceIndex](iata)}
+      src={LOGO_SOURCES[sourceIndex](iata, size === "lg")}
       alt={name}
       title={name}
       loading="lazy"
@@ -62,7 +71,7 @@ export function AirlineLogo({
         }
       }}
       onError={() => setSourceIndex((i) => i + 1)}
-      className={`${box} shrink-0 rounded bg-white object-contain p-0.5`}
+      className={`${box} shrink-0 rounded bg-white object-contain ${size === "lg" ? "p-1.5" : "p-0.5"}`}
     />
   );
 }

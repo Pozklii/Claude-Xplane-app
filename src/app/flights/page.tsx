@@ -303,7 +303,9 @@ export default async function FlightsPage(props: PageProps<"/flights">) {
         {/* The landing page's dark ground (same tokens), which the bare globe
           needs behind it to look the same as it does there. */}
         <section className={styles.page}>
-          <div className="mx-auto w-full max-w-3xl px-6 py-12">
+          {/* Wider than the list below, to give the selected flight's card
+              room beside the globe. */}
+          <div className="mx-auto w-full max-w-5xl px-6 py-12">
             <CustomizableGlobe
               points={points}
               arcs={arcs}

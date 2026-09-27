@@ -68,14 +68,15 @@ export function CustomizableGlobe({
   };
 
   return (
-    <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex w-full max-w-sm flex-col gap-6">
+    <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex w-full max-w-md flex-col gap-6">
         {/* Own wrapper: see LandingShowcase. */}
         <div>{header}</div>
         <SelectedFlightCard
           details={details}
           arcColor={arcColor}
           userId={userId}
+          prominent
         />
       </div>
       {/* Same bare, circular globe (and container width) as the landing page,

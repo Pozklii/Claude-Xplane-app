@@ -123,6 +123,7 @@ export function SelectedFlightCard({
   showThumbnail = true,
   closable = true,
   emptyHint = "Select a route on the globe, or a flight below, to see its details.",
+  prominent = false,
 }: {
   details: Record<string, FlightDetails>;
   arcColor: string;
@@ -131,6 +132,10 @@ export function SelectedFlightCard({
   showThumbnail?: boolean;
   closable?: boolean;
   emptyHint?: React.ReactNode;
+  /** The flights page's version: bigger, with the airline (its logo large)
+   * heading the card and a glow in the route colour, so the selected
+   * flight is the focus. */
+  prominent?: boolean;
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const flight = selectedFlightId ? details[selectedFlightId] : undefined;
@@ -150,10 +155,25 @@ export function SelectedFlightCard({
     // Keyed by flight so every new selection replays the entrance.
     <article
       key={selectedFlightId}
-      className={styles.card}
+      className={`${styles.card} ${prominent ? styles.prominent : ""}`}
       style={{ "--arc-color": arcColor } as React.CSSProperties}
       aria-live="polite"
     >
+      {prominent && flight.airline && (
+        <div
+          className={`${styles.reveal} ${styles.airlineHeader} flex items-center gap-3`}
+          style={{ "--i": 0 } as React.CSSProperties}
+        >
+          <AirlineLogo name={flight.airline} iata={flight.airlineIata ?? null} size="lg" />
+          <div className="flex min-w-0 flex-col">
+            <span className={`${styles.route} text-base font-semibold`}>
+              {flight.airline}
+            </span>
+            <span className={`${styles.soft} text-xs`}>{flight.aircraft}</span>
+          </div>
+        </div>
+      )}
+
       {showThumbnail && (
         <div className={styles.thumb}>
           {flight.thumbnailUrl ? (
@@ -199,11 +219,13 @@ export function SelectedFlightCard({
         style={{ "--i": 0 } as React.CSSProperties}
       >
         <div className="flex flex-col gap-0.5">
-          <h2 className={`${styles.route} text-lg font-semibold`}>
+          <h2
+            className={`${styles.route} ${prominent ? "text-2xl" : "text-lg"} font-semibold`}
+          >
             {flight.from.code} &rarr; {flight.to.code}
           </h2>
           <p
-            className={`${styles.soft} flex flex-wrap items-center gap-1 text-xs`}
+            className={`${styles.soft} flex flex-wrap items-center gap-1 ${prominent ? "text-sm" : "text-xs"}`}
           >
             <span className="inline-flex items-center gap-1.5">
               <Flag country={flight.from.country} />
@@ -234,7 +256,9 @@ export function SelectedFlightCard({
       >
         <div className="flex flex-col gap-1">
           <dt className={styles.label}>Distance</dt>
-          <dd className={`${styles.stat} text-base font-semibold`}>
+          <dd
+            className={`${styles.stat} ${prominent ? "text-xl" : "text-base"} font-semibold`}
+          >
             <CountUp
               value={flight.distanceNm}
               format={(n) => `${formatInteger(n)} nm`}
@@ -249,7 +273,9 @@ export function SelectedFlightCard({
         </div>
         <div className="flex flex-col gap-1">
           <dt className={styles.label}>Flight time</dt>
-          <dd className={`${styles.stat} text-base font-semibold`}>
+          <dd
+            className={`${styles.stat} ${prominent ? "text-xl" : "text-base"} font-semibold`}
+          >
             <CountUp value={flight.hours} format={formatDuration} />
           </dd>
           {flight.rating != null && (
@@ -264,13 +290,21 @@ export function SelectedFlightCard({
         className={`${styles.reveal} ${styles.soft} flex flex-wrap items-center gap-1.5 text-xs`}
         style={{ "--i": 2 } as React.CSSProperties}
       >
-        {/* Only a real logo here, not the monogram fallback, which would
-            read as clutter on the card (e.g. the landing page's examples). */}
-        {flight.airline && flight.airlineIata && (
-          <AirlineLogo name={flight.airline} iata={flight.airlineIata} />
+        {prominent && flight.airline ? (
+          // The airline and aircraft already head the prominent card.
+          formatDate(flight.date)
+        ) : (
+          <>
+            {/* Only a real logo here, not the monogram fallback, which
+                would read as clutter on the card (e.g. the landing page's
+                examples). */}
+            {flight.airline && flight.airlineIata && (
+              <AirlineLogo name={flight.airline} iata={flight.airlineIata} />
+            )}
+            {formatDate(flight.date)} &middot; {flight.aircraft}
+            {flight.airline ? ` · ${flight.airline}` : ""}
+          </>
         )}
-        {formatDate(flight.date)} &middot; {flight.aircraft}
-        {flight.airline ? ` · ${flight.airline}` : ""}
       </p>
 
       <section

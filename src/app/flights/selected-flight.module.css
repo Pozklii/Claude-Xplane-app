@@ -33,6 +33,23 @@
   animation: sweep 1100ms 180ms ease-out both;
 }
 
+/* The flights page's selected flight: roomier, lifted off the page by a
+   glow in its route colour, with the airline heading it. */
+.prominent {
+  gap: 18px;
+  padding: 20px;
+  border-radius: 16px;
+  background: rgba(143, 208, 245, 0.06);
+  border-color: color-mix(in srgb, var(--arc-color) 45%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--arc-color) 18%, transparent),
+    0 18px 50px -18px color-mix(in srgb, var(--arc-color) 55%, transparent);
+}
+.airlineHeader {
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(143, 208, 245, 0.14);
+}
+
 .thumb {
   position: relative;
   overflow: hidden;
