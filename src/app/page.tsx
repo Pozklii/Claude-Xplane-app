@@ -4,6 +4,7 @@ import { AppButtons } from "./app-links";
 import { buildExampleShowcase } from "./example-flights";
 import { EngineCanvas } from "./engine-canvas";
 import { FlameMotes } from "./flame-motes";
+import { FlameLive } from "./flame-live";
 import { LandingShowcase } from "./landing-showcase";
 import styles from "./home.module.css";
 
@@ -64,11 +65,14 @@ export default async function Home(props: PageProps<"/">) {
       className={`${styles.page} ${styles.landing} ${flame ? FLAMES[flame].className : ""} flex flex-1 flex-col font-sans`}
     >
       {flame ? (
-        // A fractal flame behind the whole page: the image slowly drifting,
-        // a soft glow copy of it turning the other way and pulsing, and
-        // twinkling motes orbiting its middle (see .flameSky).
+        // A fractal flame behind the whole page: rendered live, its shapes
+        // slowly morphing (over the still, which shows first and stands in
+        // wherever the live one can't run, gently drifting), under a soft
+        // glow pulsing and turning, with twinkling motes orbiting its
+        // middle (see .flameSky).
         <div className={styles.flameSky} aria-hidden="true">
           <div className={styles.flameBase} />
+          <FlameLive flame={flame} />
           <div className={styles.flameGlow} />
           <FlameMotes colors={FLAMES[flame].motes} />
         </div>

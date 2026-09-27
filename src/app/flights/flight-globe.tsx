@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
@@ -37,6 +37,23 @@ export type GlobeArc = {
 // MapTiler satellite style once a key is available.
 const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 const MAP_HEIGHT = 480;
+
+// MapLibre needs WebGL2, and throws when it can't get it (some browsers
+// and managed PCs have WebGL switched off), which would otherwise take the
+// whole page down with it. Checked once, on the client; the server assumes
+// it's there.
+let webgl2Supported: boolean | undefined;
+function supportsWebGL2() {
+  if (webgl2Supported === undefined) {
+    try {
+      webgl2Supported = !!document.createElement("canvas").getContext("webgl2");
+    } catch {
+      webgl2Supported = false;
+    }
+  }
+  return webgl2Supported;
+}
+const noopSubscribe = () => () => {};
 
 // deck.gl color accessors take [r, g, b, a] (0-255), not CSS strings.
 export const DEFAULT_ARC_COLOR = "#38d9ff";
@@ -223,6 +240,7 @@ export function FlightGlobe({
     useSelection();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const canDraw = useSyncExternalStore(noopSubscribe, supportsWebGL2, () => true);
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectIdRef = useRef(onSelectId);
   const selectedIdRef = useRef(selectedId);
@@ -260,9 +278,11 @@ export function FlightGlobe({
   // flight-log change.
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || !canDraw) return;
 
-    const map = new MapLibreMap({
+    let map: MapLibreMap;
+    try {
+      map = new MapLibreMap({
       container,
       style: STYLE_URL,
       center: [0, 20],
@@ -276,7 +296,11 @@ export function FlightGlobe({
       // instead, styled to sit on the page rather than over the globe.
       attributionControl: false,
       interactive: interactiveRef.current,
-    });
+      });
+    } catch {
+      // Not fatal: the rest of the page carries on without the globe.
+      return;
+    }
     mapRef.current = map;
     // Skipped in bare mode: its container is clipped to a circle (see the
     // render below), and this control sits in a screen corner that a
@@ -615,7 +639,7 @@ export function FlightGlobe({
     };
     // Intentionally created once; see the effect below for how
     // points/arcs/selection stay in sync afterward.
-  }, []);
+  }, [canDraw]);
 
   // Push arcs/points into the deck.gl overlay and the label source whenever
   // the flight data or selection changes, and fit the view to them the
@@ -913,7 +937,13 @@ export function FlightGlobe({
                 }
               : { height, pointerEvents: interactive ? undefined : "none" }
         }
-      />
+      >
+        {!canDraw && (
+          <p className="flex h-full items-center justify-center p-8 text-center text-xs text-white/50">
+            The globe needs WebGL, which is switched off in this browser.
+          </p>
+        )}
+      </div>
       <p
         className={
           bare
