@@ -27,14 +27,16 @@ const noopSubscribe = () => () => {};
 
 // The landing page hero's layout and example-flight tour: the heading (and
 // under it, a summary card for the current example flight) on the left, the
-// engine animation's anchor in the middle, and the globe on the right; on a
-// narrow screen, stacked in that order but with the engine second. The
+// engine animation's anchor in the middle, the globe on the right, and the
+// feature blurbs under those two; on a narrow screen, stacked in that order
+// but with the engine second. The
 // globe keeps the last few generated example flights drawn and, every few
 // seconds, generates a new one (see generateExampleFlight — endless, from
 // real airline routes) and flies onto it, until the visitor pauses it.
 export function LandingShowcase(props: {
   header: React.ReactNode;
   engine: React.ReactNode;
+  features: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
   /** Show the flights on a flat map instead of the globe. */
@@ -50,12 +52,14 @@ export function LandingShowcase(props: {
 function Showcase({
   header,
   engine,
+  features,
   airports,
   initial,
   flat = false,
 }: {
   header: React.ReactNode;
   engine: React.ReactNode;
+  features: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
   flat?: boolean;
@@ -157,7 +161,7 @@ function Showcase({
         </div>
         {/* A fixed minimum height so the layout doesn't shift as cards
             with different amounts of text swap in. */}
-        <div className={`${styles.showcaseCardSlot} min-h-[290px]`}>
+        <div className={`${styles.showcaseCardSlot} min-h-[270px]`}>
           <SelectedFlightCard
             details={details}
             arcColor={DEFAULT_ARC_COLOR}
@@ -180,6 +184,7 @@ function Showcase({
           interactive={false}
         />
       </div>
+      <div className={styles.heroFeatures}>{features}</div>
     </div>
   );
 }

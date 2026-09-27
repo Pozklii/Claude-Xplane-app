@@ -40,10 +40,10 @@ export default async function Home(props: PageProps<"/">) {
           (pre-rendered; see .sky in home.module.css). */}
       <div className={styles.sky} aria-hidden="true" />
       <div className={styles.skyRays} aria-hidden="true" />
-      <section className={styles.hero}>
+      <main className={styles.hero}>
         <EngineCanvas />
 
-        <div className={`${styles.content} mx-auto w-full max-w-[1400px] px-6 py-8`}>
+        <div className={`${styles.content} mx-auto w-full max-w-[1400px] px-6 py-8 min-[1100px]:py-4`}>
           <LandingShowcase
             airports={airports}
             initial={initial}
@@ -66,6 +66,20 @@ export default async function Home(props: PageProps<"/">) {
                 <AppButtons signedIn={Boolean(user)} />
               </div>
             }
+            features={
+              <div className="grid w-full grid-cols-1 gap-6 text-left sm:grid-cols-3">
+                {features.map((feature) => (
+                  <div key={feature.title} className="flex flex-col gap-1.5">
+                    <h2 className={`${styles.introHeading} font-semibold`}>
+                      {feature.title}
+                    </h2>
+                    <p className={`${styles.featureText} text-sm leading-6`}>
+                      {feature.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            }
             engine={
               // Where the engine animation sits; it's drawn on the canvas
               // above, which covers the whole hero so its exhaust can
@@ -74,22 +88,8 @@ export default async function Home(props: PageProps<"/">) {
             }
           />
         </div>
-      </section>
-
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-6 px-6 py-8">
-        <div className="grid w-full grid-cols-1 gap-8 text-left sm:grid-cols-3">
-          {features.map((feature) => (
-            <div key={feature.title} className="flex flex-col gap-2">
-              <h2 className={`${styles.introHeading} font-semibold`}>
-                {feature.title}
-              </h2>
-              <p className={`${styles.featureText} text-sm leading-6`}>
-                {feature.description}
-              </p>
-            </div>
-          ))}
-        </div>
       </main>
+
     </div>
   );
 }
