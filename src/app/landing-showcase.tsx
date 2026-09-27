@@ -25,7 +25,7 @@ const FIRST_DELAY_MS = 1500;
 
 const noopSubscribe = () => () => {};
 
-// The landing page hero's content: its heading/CTA and a summary card for
+// The landing page's example-flight band, under the hero: a heading and a summary card for
 // the current example flight on the left, the globe on the right. The
 // globe keeps the last few generated example flights drawn and, every few
 // seconds, generates a new one (see generateExampleFlight — endless, from

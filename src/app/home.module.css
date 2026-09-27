@@ -16,10 +16,9 @@
   color: var(--on-bg);
 }
 
-/* Splits the page's height 3:1 with the feature-text band below (which
-   gets flex: 1 1 0%), so the hero fills the top three quarters of the
-   viewport and the feature band the bottom quarter — growing past that
-   only if its own content needs more room. */
+/* Takes spare height 3:1 with the feature-text band (which gets
+   flex: 1 1 0%) on a screen tall enough to show the whole page; otherwise
+   each is just as tall as its content. */
 .hero {
   position: relative;
   overflow: hidden;
@@ -106,8 +105,8 @@
 }
 
 /* The engine animation's canvas covers the hero (see engine-fx.ts); the
-   engine itself is centred on .engineBox, positioned where the old engine
-   graphic sat and sized to suit wide and narrow/tall (mobile) viewports. */
+   engine itself is centred on .engineBox, the hero's right-hand column on
+   wide screens and a centred block under the heading on narrow ones. */
 .engineCanvas {
   position: absolute;
   inset: 0;
@@ -116,16 +115,29 @@
   z-index: 0;
   pointer-events: none;
 }
+.heroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  justify-items: center;
+  gap: 1.5rem;
+}
+.heroGrid > :first-child {
+  justify-self: start;
+}
 .engineBox {
-  position: absolute;
-  left: 88.9%;
-  top: 84.4%;
-  transform: translate(-50%, -50%);
-  width: min(260px, 24vw, 40vh);
+  width: min(88vw, 420px);
   aspect-ratio: 1;
-  z-index: 0;
   pointer-events: none;
-  visibility: hidden;
+}
+@media (min-width: 1024px) {
+  .heroGrid {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 2rem;
+  }
+  .engineBox {
+    width: min(560px, 42vw, 70vh);
+  }
 }
 
 /* The app's sections on the landing page (see app-links.tsx): gold glass

@@ -2,7 +2,7 @@
 // shaded low-poly gold turbofan draws itself in place, ring by ring from the
 // intake back (a band of light sweeping along each ring as it appears), grows
 // its fan, spools up, and sends near-straight exhaust lines off into the
-// distance, converging on a vanishing point near the middle of the hero.
+// distance, converging on a vanishing point up towards the sun.
 // Plain canvas 2D, no dependencies.
 //
 // The engine is centred on (and sized by) an anchor element positioned with
@@ -189,8 +189,12 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     // heads for screen offset scale*cam*(dx/dz, dy/dz), so solve pitch and yaw
     // for that offset. The exhaust lines, drawn along the same axis, then
     // always meet there.
-    const vpX = W * 0.5;
-    const vpY = H * 0.4;
+    // The vanishing point is up towards the sun (top left), so the engine
+    // seems to fly out of it; on a narrow screen, where the engine sits
+    // under the heading, below it instead, clear of the text.
+    const wide = W >= 1024;
+    const vpX = wide ? W * 0.12 : CX + W * 0.25;
+    const vpY = wide ? -H * 0.06 : H * 1.25;
     aimPitch = Math.atan(-(vpY - CY) / (SCALE * CAM));
     aimYaw = Math.atan(((vpX - CX) / (SCALE * CAM)) * Math.cos(aimPitch));
   };
@@ -488,6 +492,7 @@ export function startEngineFx(canvas: HTMLCanvasElement, anchor: HTMLElement): (
     draw();
   });
   resize.observe(host);
+  resize.observe(anchor);
   return () => {
     cancelAnimationFrame(frame);
     resize.disconnect();

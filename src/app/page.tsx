@@ -40,30 +40,44 @@ export default async function Home() {
       <section className={styles.hero}>
         <EngineCanvas />
 
-        <div className={`${styles.content} mx-auto w-full max-w-5xl px-6 py-10`}>
-          <LandingShowcase
-            airports={airports}
-            initial={initial}
-            header={
-              <div className="flex flex-col items-start gap-4">
-                <h1
-                  className={`${styles.introHeading} text-4xl font-bold tracking-tight sm:text-5xl`}
-                >
-                  Create your Flight World
-                </h1>
-                {!user && (
-                  <Link
-                    href="/login"
-                    className={`${styles.cta} rounded-md px-5 py-2.5 text-sm font-semibold transition-colors`}
-                  >
-                    Sign in
-                  </Link>
-                )}
-                <AppButtons signedIn={Boolean(user)} />
-              </div>
-            }
-          />
+        <div
+          className={`${styles.content} ${styles.heroGrid} mx-auto w-full max-w-6xl px-6 py-10`}
+        >
+          <div className="flex flex-col items-start gap-4">
+            <h1
+              className={`${styles.introHeading} text-4xl font-bold tracking-tight sm:text-5xl`}
+            >
+              Create your Flight World
+            </h1>
+            {!user && (
+              <Link
+                href="/login"
+                className={`${styles.cta} rounded-md px-5 py-2.5 text-sm font-semibold transition-colors`}
+              >
+                Sign in
+              </Link>
+            )}
+            <AppButtons signedIn={Boolean(user)} />
+          </div>
+          {/* Where the engine animation sits; it's drawn on the canvas above,
+              which covers the whole hero so its exhaust can stream across. */}
+          <div className={styles.engineBox} data-engine-anchor aria-hidden="true" />
         </div>
+      </section>
+
+      <section
+        aria-label="Example flights"
+        className={`${styles.content} mx-auto w-full max-w-5xl px-6 py-10`}
+      >
+        <LandingShowcase
+          airports={airports}
+          initial={initial}
+          header={
+            <h2 className={`${styles.introHeading} text-2xl font-semibold tracking-tight`}>
+              Every flight, on your globe
+            </h2>
+          }
+        />
       </section>
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-6 px-6 py-8">
