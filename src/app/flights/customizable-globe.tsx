@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import {
   DEFAULT_ARC_COLOR,
@@ -99,13 +100,12 @@ export function CustomizableGlobe({
           onAirportClick={(code) => openAirport(code, { scroll: false })}
         />
         {airportCode && (
-          <button
-            type="button"
-            onClick={() => openAirport(airportCode)}
+          <Link
+            href={`/plan?airport=${encodeURIComponent(airportCode)}`}
             className="self-center rounded-full border border-white/20 px-3 py-1 text-xs text-white/80 transition-colors hover:bg-white/10"
           >
-            {airportCode}: airport info &amp; METAR &darr;
-          </button>
+            {airportCode}: airport info &amp; METAR &rarr;
+          </Link>
         )}
       </div>
     </div>

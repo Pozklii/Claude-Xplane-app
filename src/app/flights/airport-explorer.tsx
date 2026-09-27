@@ -279,9 +279,9 @@ function AirportDetails({
   );
 }
 
-/** Look up any airport by code (or click one on the globe / in a list):
- * a fact about it or its country and, if the user wants it, its live
- * METAR. */
+/** Look up any airport by code (or click one in a list, or arrive from an
+ * airport clicked on the flights page's globe): its details and, if the
+ * user wants it, its live METAR. */
 export function AirportExplorer({ quickCodes }: { quickCodes: string[] }) {
   const { airportCode, openAirport } = usePlanner();
   const [query, setQuery] = useState("");

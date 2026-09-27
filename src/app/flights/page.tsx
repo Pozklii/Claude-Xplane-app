@@ -12,7 +12,6 @@ import { deleteFlight } from "./actions";
 import { AirlineLogo } from "./airline-logo";
 import { FavouritesForm } from "./favourites-form";
 import { Flag } from "./flag";
-import { FlightPlanner } from "./flight-planner";
 import { NewFlightForm } from "./new-flight-form";
 import { type GlobeArc, type GlobePoint } from "./flight-globe";
 import { CustomizableGlobe } from "./customizable-globe";
@@ -20,12 +19,8 @@ import type { FlightDetails } from "./selected-flight-card";
 import { thumbnailFolder } from "./thumbnail-path";
 import { FlightMedia, type MediaItem } from "./flight-media";
 import { FlightRow } from "./flight-row";
+import { summarizeFlying } from "./flying-summary";
 import { PlannerProvider } from "./planner-context";
-import {
-  buildChallenges,
-  buildSuggestionRoutes,
-  routePairKey,
-} from "./planner-data";
 import { RatingControl } from "./rating-control";
 import { SelectionProvider } from "./selection-context";
 import { StopPropagation } from "./stop-propagation";
@@ -47,57 +42,6 @@ type Preferences = {
   favourite_airline: string | null;
   favourite_aircraft: string | null;
 };
-
-// How often each value occurs, most frequent first.
-function rankByCount(values: string[]) {
-  const counts = new Map<string, number>();
-  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-}
-
-// The user's airlines (with logo codes and flight counts), the countries
-// their flights touched, the airports they use most and the routes they've
-// flown — for the profile strip and the planner.
-function summarizeFlying(flights: Flight[]) {
-  const airlines = rankByCount(
-    flights.flatMap((flight) => (flight.airline ? [flight.airline] : [])),
-  ).map(([name, count]) => ({
-    name,
-    count,
-    iata: findAirline(name)?.iata ?? null,
-  }));
-
-  const countries = new Map<string, number>();
-  const airportCodes: string[] = [];
-  const flownPairs = new Set<string>();
-  for (const flight of flights) {
-    const from = findAirport(flight.departure);
-    const to = findAirport(flight.arrival);
-    for (const airport of [from, to]) {
-      if (!airport) continue;
-      airportCodes.push(airport.code);
-      if (airport.country) {
-        countries.set(
-          airport.country,
-          (countries.get(airport.country) ?? 0) + 1,
-        );
-      }
-    }
-    if (from && to) flownPairs.add(routePairKey(from, to));
-  }
-
-  return {
-    airlines,
-    countries: [...countries.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([code]) => ({ code, name: countryName(code) ?? code })),
-    topAirports: rankByCount(airportCodes)
-      .slice(0, 6)
-      .map(([code]) => code),
-    topAircraft: rankByCount(flights.map((flight) => flight.aircraft))[0]?.[0],
-    flownPairs: [...flownPairs],
-  };
-}
 
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "webm", "m4v"]);
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "heic"]);
@@ -486,19 +430,6 @@ export default async function FlightsPage() {
               </div>
             )}
           </section>
-
-          <FlightPlanner
-            quickCodes={flying.topAirports}
-            routes={buildSuggestionRoutes()}
-            challenges={buildChallenges()}
-            defaultAircraft={favouriteAircraft ?? flying.topAircraft ?? "A320"}
-            favouriteAirline={
-              favouriteAirline
-                ? { name: favouriteAirline, iata: favouriteAirlineIata }
-                : null
-            }
-            flownRouteKeys={flying.flownPairs}
-          />
 
           {error && (
             <p className="text-sm text-red-600 dark:text-red-400">

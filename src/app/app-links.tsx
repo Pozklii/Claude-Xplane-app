@@ -1,16 +1,13 @@
 import Link from "next/link";
 import styles from "./home.module.css";
 
-// The app's three sections, which need an account. All three live on the
-// flights page: the map (the globe) at the top, then the flight planner and
-// the flight log further down. (The planner's anchor is PLANNER_ID in
-// flights/planner-context.tsx, spelled out here because that's a client
-// module: a server component importing a value from one gets a client
-// reference, not the string.)
+// The app's three sections, which need an account: the flight map (the
+// globe) and the flight log share the flights page, the log below the map;
+// the flight planner has its own page.
 export const APP_LINKS = [
   { href: "/flights#log", label: "Flight Log", icon: "log" },
   { href: "/flights", label: "Flight Map", icon: "map" },
-  { href: "/flights#flight-planner", label: "Flight Plan", icon: "plan" },
+  { href: "/plan", label: "Flight Plan", icon: "plan" },
 ] as const;
 
 type IconName = (typeof APP_LINKS)[number]["icon"] | "lock";

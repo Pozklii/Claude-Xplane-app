@@ -25,15 +25,25 @@ const PlannerContext = createContext<PlannerContextValue | null>(null);
 
 export const PLANNER_ID = "flight-planner";
 
-// Shared by the globe (clicking an airport), the planner's tabs and the
-// suggestion/challenge lists (clicking an airport code), so any of them
-// can bring up an airport's METAR and facts.
-export function PlannerProvider({ children }: { children: React.ReactNode }) {
+// Shared by the planner's tabs and its suggestion/challenge lists (clicking
+// an airport code), so any of them can bring up an airport's details and
+// METAR, and by the flights page's globe, where clicking an airport offers
+// a link to it on the Flight Plan page (which then opens with
+// `initialAirport` shown).
+export function PlannerProvider({
+  children,
+  initialAirport = null,
+}: {
+  children: React.ReactNode;
+  initialAirport?: string | null;
+}) {
   const [tab, setTabState] = useState<PlannerTab>("airport");
   const [visited, setVisited] = useState<ReadonlySet<PlannerTab>>(
     () => new Set<PlannerTab>(["airport"]),
   );
-  const [airportCode, setAirportCode] = useState<string | null>(null);
+  const [airportCode, setAirportCode] = useState<string | null>(
+    initialAirport ? initialAirport.toUpperCase() : null,
+  );
 
   const setTab = useCallback((next: PlannerTab) => {
     setTabState(next);
