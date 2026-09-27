@@ -78,7 +78,7 @@ export function AppButtons({ signedIn }: { signedIn: boolean }) {
     );
   }
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div className={styles.appButtons}>
       <div className={styles.appLinks}>
         {APP_LINKS.map((link) => (
           <span

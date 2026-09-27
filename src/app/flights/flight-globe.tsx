@@ -96,6 +96,45 @@ const OVERVIEW_MAX_ZOOM = 4;
 // container; at zoom 1 the whole sphere fits inside its circular clip.
 const BARE_OVERVIEW_MAX_ZOOM = 1;
 
+// With wholeGlobe, how much of the (oversized) map container's width the
+// sphere fills, and how far the container reaches past its parent.
+const WHOLE_GLOBE_OVERHANG = 0.2;
+const WHOLE_GLOBE_FILL = 0.92 / (1 + 2 * WHOLE_GLOBE_OVERHANG);
+
+// A camera looking straight down at [lng, lat], zoomed so the whole sphere
+// fills `fill` of a container `width` pixels across. MapLibre scales the
+// globe up by 1/cos(latitude) of the map's centre (to keep zoom levels
+// consistent with the flat map), so the zoom has to allow for that.
+function wholeGlobeCamera(lng: number, lat: number, width: number, fill: number) {
+  const cosLat = Math.max(0.05, Math.cos((lat * Math.PI) / 180));
+  return {
+    center: [lng, lat] as [number, number],
+    zoom: Math.log2((fill * width * Math.PI * cosLat) / 512),
+    pitch: 0,
+    bearing: 0,
+  };
+}
+
+// The point on the globe at the middle of a set of points (the normalised
+// sum of their unit vectors): for two, the midpoint of the great circle
+// between them.
+function sphericalCentre(points: { lng: number; lat: number }[]): [number, number] {
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (const { lng, lat } of points) {
+    const lam = (lng * Math.PI) / 180;
+    const phi = (lat * Math.PI) / 180;
+    x += Math.cos(phi) * Math.cos(lam);
+    y += Math.cos(phi) * Math.sin(lam);
+    z += Math.sin(phi);
+  }
+  return [
+    (Math.atan2(y, x) * 180) / Math.PI,
+    (Math.atan2(z, Math.hypot(x, y)) * 180) / Math.PI,
+  ];
+}
+
 // The bare flat map's edge fade (see the flat prop): two gradients, one
 // across and one down, intersected.
 const FLAT_EDGE_FADE =
@@ -134,6 +173,7 @@ export function FlightGlobe({
   arcColor = DEFAULT_ARC_COLOR,
   interactive = true,
   flat = false,
+  wholeGlobe = false,
   onAirportClick,
 }: {
   points: GlobePoint[];
@@ -168,6 +208,14 @@ export function FlightGlobe({
    * and in bare mode a wide rectangle whose edges fade into the page
    * rather than a circle. Fixed for an instance's lifetime. */
   flat?: boolean;
+  /** Keep the whole sphere in view, never cut off: the camera never zooms
+   * or tilts in, and selecting a flight just turns the globe to face it.
+   * The map container also reaches past its parent on every side (with
+   * negative margins, so the layout still sees a parent-sized square),
+   * leaving room for high arcs to rise off the sphere without meeting
+   * its edge. For bare, display-only use (the landing page's tour), in
+   * place of the usual circular clip. Fixed for an instance's lifetime. */
+  wholeGlobe?: boolean;
   /** Called with an airport's code when it's clicked (after flying in). */
   onAirportClick?: (code: string) => void;
 }) {
@@ -184,6 +232,7 @@ export function FlightGlobe({
   const bareRef = useRef(bare);
   const interactiveRef = useRef(interactive);
   const flatRef = useRef(flat);
+  const wholeGlobeRef = useRef(wholeGlobe);
   // Set around every programmatic flyTo so the idle-spin loop below doesn't
   // fight it by nudging the center mid-animation.
   const cameraAnimatingRef = useRef(false);
@@ -710,6 +759,20 @@ export function FlightGlobe({
         });
       }
 
+      const container = containerRef.current;
+      const wholeCamera = (pts: { lng: number; lat: number }[]) =>
+        wholeGlobeCamera(
+          ...sphericalCentre(pts),
+          container?.clientWidth ?? 380,
+          WHOLE_GLOBE_FILL,
+        );
+
+      if (!hasFitRef.current && points.length > 0 && wholeGlobeRef.current) {
+        hasFitRef.current = true;
+        map.jumpTo(wholeCamera(points));
+        cameraSelectionRef.current = selectedId;
+        return;
+      }
       if (!hasFitRef.current && points.length > 0) {
         hasFitRef.current = true;
         const lngs = points.map((p) => p.lng);
@@ -726,18 +789,38 @@ export function FlightGlobe({
       if (selectedId === cameraSelectionRef.current) return;
       cameraSelectionRef.current = selectedId;
 
-      if (selectedArc) {
-        // Newly selected: pulse the route's glow a couple of times while
-        // the camera flies in on it, fading out as it arrives.
-        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-          const pulseStart = performance.now();
-          const tick = (now: number) => {
-            const t = Math.min(1, (now - pulseStart) / SELECTION_PULSE_MS);
-            renderLayers(Math.sin(Math.PI * 2 * t) ** 2 * (1 - t));
-            if (t < 1) pulseFrameRef.current = requestAnimationFrame(tick);
-          };
-          pulseFrameRef.current = requestAnimationFrame(tick);
-        }
+      // Newly selected: pulse the route's glow a couple of times while the
+      // camera flies to it, fading out as it arrives.
+      if (
+        selectedArc &&
+        !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        const pulseStart = performance.now();
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - pulseStart) / SELECTION_PULSE_MS);
+          renderLayers(Math.sin(Math.PI * 2 * t) ** 2 * (1 - t));
+          if (t < 1) pulseFrameRef.current = requestAnimationFrame(tick);
+        };
+        pulseFrameRef.current = requestAnimationFrame(tick);
+      }
+
+      if (wholeGlobeRef.current) {
+        // Turn to face the selected route (or all of them), whole globe in
+        // view throughout.
+        if (points.length === 0) return;
+        const camera = wholeCamera(
+          selectedArc
+            ? [
+                { lng: selectedArc.startLng, lat: selectedArc.startLat },
+                { lng: selectedArc.endLng, lat: selectedArc.endLat },
+              ]
+            : points,
+        );
+        flyToTracked(map, {
+          ...camera,
+          duration: selectedArc ? SELECTION_FLY_DURATION : OVERVIEW_FLY_DURATION,
+        });
+      } else if (selectedArc) {
 
         const lngs = [selectedArc.startLng, selectedArc.endLng];
         const lats = [selectedArc.startLat, selectedArc.endLat];
@@ -802,7 +885,14 @@ export function FlightGlobe({
       <div
         ref={containerRef}
         style={
-          bare && flat
+          bare && wholeGlobe && !flat
+            ? {
+                aspectRatio: "1",
+                width: `${100 * (1 + 2 * WHOLE_GLOBE_OVERHANG)}%`,
+                margin: `${-100 * WHOLE_GLOBE_OVERHANG}%`,
+                pointerEvents: interactive ? undefined : "none",
+              }
+            : bare && flat
             ? {
                 aspectRatio: "16 / 10",
                 overflow: "hidden",

@@ -25,13 +25,16 @@ const FIRST_DELAY_MS = 1500;
 
 const noopSubscribe = () => () => {};
 
-// The landing page's example-flight band, under the hero: a heading and a summary card for
-// the current example flight on the left, the globe on the right. The
+// The landing page hero's layout and example-flight tour: the heading (and
+// under it, a summary card for the current example flight) on the left, the
+// engine animation's anchor in the middle, and the globe on the right; on a
+// narrow screen, stacked in that order but with the engine second. The
 // globe keeps the last few generated example flights drawn and, every few
 // seconds, generates a new one (see generateExampleFlight — endless, from
 // real airline routes) and flies onto it, until the visitor pauses it.
 export function LandingShowcase(props: {
   header: React.ReactNode;
+  engine: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
   /** Show the flights on a flat map instead of the globe. */
@@ -46,11 +49,13 @@ export function LandingShowcase(props: {
 
 function Showcase({
   header,
+  engine,
   airports,
   initial,
   flat = false,
 }: {
   header: React.ReactNode;
+  engine: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
   flat?: boolean;
@@ -118,59 +123,62 @@ function Showcase({
   ]);
 
   return (
-    <div
-      className={`grid w-full grid-cols-1 items-center gap-14 ${flat ? "lg:grid-cols-[1fr_520px]" : "lg:grid-cols-[1fr_380px]"}`}
-    >
-      <div className="flex flex-col items-start gap-6 text-left">
-        {/* Its own wrapper: an element passed in from a server component
-            that sits beside siblings here otherwise trips React's
-            missing-"key" warning. */}
-        <div>{header}</div>
+    <div className={styles.heroGrid}>
+      {/* Each passed-in element gets its own wrapper: one from a server
+          component sitting beside siblings here otherwise trips React's
+          missing-"key" warning. */}
+      <div className={styles.heroHeader}>{header}</div>
+      <div className={styles.heroEngine}>{engine}</div>
 
-        <div className="flex w-full max-w-sm flex-col gap-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className={`${styles.showcaseLabel} tabular-nums`}>
-              {selectedFlightId ? "Example flight" : "Example flights"}
-            </p>
-            <button
-              type="button"
-              onClick={() => setPaused((p) => !p)}
-              aria-pressed={paused}
-              className={`${styles.showcaseToggle} text-xs`}
-            >
-              {paused ? "Play tour" : "Pause tour"}
-            </button>
-          </div>
-          <div className={styles.showcaseTrack} aria-hidden="true">
-            {!paused && (
-              // Restarted (by key) for every step, and sized to that
-              // step's own delay, so it shows when the next flight lands.
-              <div
-                key={`${selectedFlightId}-${delay}`}
-                className={styles.showcaseProgress}
-                style={{ animationDuration: `${delay}ms` }}
-              />
-            )}
-          </div>
-          {/* A fixed minimum height so the heading above doesn't shift up
-              and down as cards with different amounts of text swap in. */}
-          <div className={`${styles.showcaseCardSlot} min-h-[290px]`}>
-            <SelectedFlightCard
-              details={details}
-              arcColor={DEFAULT_ARC_COLOR}
-              showThumbnail={false}
-              closable={false}
-              emptyHint="Example flights will appear here in a moment."
+      <div className={`${styles.heroTour} flex flex-col gap-3`}>
+        <div className="flex items-center justify-between gap-3">
+          <p className={`${styles.showcaseLabel} tabular-nums`}>
+            {selectedFlightId ? "Example flight" : "Example flights"}
+          </p>
+          <button
+            type="button"
+            onClick={() => setPaused((p) => !p)}
+            aria-pressed={paused}
+            className={`${styles.showcaseToggle} text-xs`}
+          >
+            {paused ? "Play tour" : "Pause tour"}
+          </button>
+        </div>
+        <div className={styles.showcaseTrack} aria-hidden="true">
+          {!paused && (
+            // Restarted (by key) for every step, and sized to that
+            // step's own delay, so it shows when the next flight lands.
+            <div
+              key={`${selectedFlightId}-${delay}`}
+              className={styles.showcaseProgress}
+              style={{ animationDuration: `${delay}ms` }}
             />
-          </div>
+          )}
+        </div>
+        {/* A fixed minimum height so the layout doesn't shift as cards
+            with different amounts of text swap in. */}
+        <div className={`${styles.showcaseCardSlot} min-h-[290px]`}>
+          <SelectedFlightCard
+            details={details}
+            arcColor={DEFAULT_ARC_COLOR}
+            showThumbnail={false}
+            closable={false}
+            emptyHint="Example flights will appear here in a moment."
+          />
         </div>
       </div>
 
-      <div
-        className={`${flat ? "w-[520px]" : "w-[380px]"} max-w-full justify-self-center lg:justify-self-end`}
-      >
-        {/* Display-only: the tour drives it, visitors can't drag or click it. */}
-        <FlightGlobe points={points} arcs={arcs} bare flat={flat} interactive={false} />
+      <div className={styles.heroGlobe}>
+        {/* Display-only: the tour drives it, visitors can't drag or click
+            it. Always shown whole, turning to face each flight. */}
+        <FlightGlobe
+          points={points}
+          arcs={arcs}
+          bare
+          flat={flat}
+          wholeGlobe
+          interactive={false}
+        />
       </div>
     </div>
   );

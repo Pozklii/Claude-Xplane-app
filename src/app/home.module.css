@@ -105,8 +105,7 @@
 }
 
 /* The engine animation's canvas covers the hero (see engine-fx.ts); the
-   engine itself is centred on .engineBox, centred in the hero under the
-   heading. */
+   engine itself is centred on .engineBox (see .heroGrid). */
 .engineCanvas {
   position: absolute;
   inset: 0;
@@ -115,30 +114,94 @@
   z-index: 0;
   pointer-events: none;
 }
+/* The hero's layout (see landing-showcase.tsx). On a narrow screen, one
+   centred column: heading, engine, example-flight card, globe. On a wide
+   one, the engine in the middle of the screen, the heading and card to its
+   left and the globe to its right, all within the first screenful. */
 .heroGrid {
+  --hero-align: center;
+  --hero-text-align: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "header" "engine" "tour" "globe";
+  justify-items: center;
+  gap: 1.5rem;
+}
+.heroHeader {
+  grid-area: header;
+}
+.heroEngine {
+  grid-area: engine;
+}
+.heroTour {
+  grid-area: tour;
+  width: 100%;
+  max-width: 24rem;
+}
+.heroGlobe {
+  grid-area: globe;
+  width: min(380px, 100%);
+}
+.heroIntro {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 1.5rem;
-  text-align: center;
+  align-items: var(--hero-align);
+  text-align: var(--hero-text-align);
+  gap: 1rem;
 }
 .engineBox {
   width: min(88vw, 420px);
   aspect-ratio: 1;
   pointer-events: none;
 }
-@media (min-width: 1024px) {
+@media (min-width: 1100px) {
+  /* A screenful (less the site header), with the engine centred in it. */
+  .hero {
+    min-height: calc(100svh - 53px);
+  }
+  .heroGrid {
+    --hero-align: flex-start;
+    --hero-text-align: left;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas:
+      "header engine globe"
+      "tour engine globe";
+    justify-items: stretch;
+    column-gap: 1.5rem;
+    row-gap: 1.75rem;
+  }
+  .heroHeader {
+    align-self: end;
+  }
+  .heroEngine,
+  .heroGlobe {
+    align-self: center;
+  }
+  .heroTour {
+    align-self: start;
+  }
+  .heroGlobe {
+    width: 100%;
+    max-width: 400px;
+    justify-self: center;
+  }
   .engineBox {
-    width: min(560px, 60vh);
+    width: min(520px, 36vw, 68vh);
   }
 }
 
 /* The app's sections on the landing page (see app-links.tsx): gold glass
    buttons once signed in; greyed out, with a lock, before. */
+.appButtons {
+  display: flex;
+  flex-direction: column;
+  align-items: var(--hero-align, center);
+  gap: 0.5rem;
+}
 .appLinks {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: var(--hero-align, center);
   gap: 8px;
 }
 .appLink {
