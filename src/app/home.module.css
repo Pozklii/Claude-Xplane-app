@@ -95,43 +95,92 @@
   }
 }
 
-/* Fractal-flame alternatives to the sky, previewed with ?bg= on the landing
-   page: each a pre-rendered flame (drawn with a fractal flame renderer, the
-   chaos-game algorithm behind Apophysis-style art) on a dark ground, over a
-   base colour matching that ground. The light shafts belong to the sky, so
-   they go. */
+/* The fractal-flame backgrounds (one picked at random per visit; see
+   FLAMES in page.tsx): each a pre-rendered flame (drawn with a fractal
+   flame renderer, the chaos-game algorithm behind Apophysis-style art),
+   dimmed so the engine and text stay the stars, over a base colour
+   matching its dark ground. Set in motion by three layers: the image
+   itself slowly drifting (turning and zooming a little, oversized so its
+   edges never show), a blurred glow copy turning the other way and
+   pulsing, screen-blended so the veils seem to shimmer, and twinkling
+   motes orbiting the middle (flame-motes.tsx). */
 .flameVeil {
   background: #1e1624;
+  --flame: url("/sky/flame-veil.webp");
+  --flame-glow: url("/sky/flame-veil-glow.webp");
 }
 .flameEmber {
   background: #0e1226;
+  --flame: url("/sky/flame-ember.webp");
+  --flame-glow: url("/sky/flame-ember-glow.webp");
 }
 .flameVortex {
   background: #080a18;
+  --flame: url("/sky/flame-vortex.webp");
+  --flame-glow: url("/sky/flame-vortex-glow.webp");
 }
-.flameVeil .sky,
-.flameEmber .sky,
-.flameVortex .sky {
+.flameSky {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.flameBase,
+.flameGlow {
+  position: absolute;
+  inset: -12%;
   background-size: cover;
   background-position: center;
+  will-change: transform;
 }
-/* Each dimmed to taste, so the gold engine and the text stay the stars. */
-.flameVeil .sky {
-  background-image: url("/sky/flame-veil.webp");
-  filter: brightness(0.72);
+.flameBase {
+  background-image: var(--flame);
+  animation: flameDrift 48s ease-in-out infinite alternate;
 }
-.flameEmber .sky {
-  background-image: url("/sky/flame-ember.webp");
-  filter: brightness(0.5);
+.flameGlow {
+  background-image: var(--flame-glow);
+  mix-blend-mode: screen;
+  opacity: 0.2;
+  animation:
+    flameGlowTurn 37s ease-in-out infinite alternate,
+    flameGlowPulse 9s ease-in-out infinite alternate;
 }
-.flameVortex .sky {
-  background-image: url("/sky/flame-vortex.webp");
-  filter: brightness(0.66);
+.flameMotes {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
-.flameVeil .skyRays,
-.flameEmber .skyRays,
-.flameVortex .skyRays {
-  display: none;
+@keyframes flameDrift {
+  from {
+    transform: rotate(-4deg) scale(1.02);
+  }
+  to {
+    transform: rotate(4deg) scale(1.1);
+  }
+}
+@keyframes flameGlowTurn {
+  from {
+    transform: rotate(6deg) scale(1.1);
+  }
+  to {
+    transform: rotate(-6deg) scale(1.02);
+  }
+}
+@keyframes flameGlowPulse {
+  from {
+    opacity: 0.08;
+  }
+  to {
+    opacity: 0.38;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flameBase,
+  .flameGlow {
+    animation: none;
+  }
 }
 
 /* Soft shadows keep the hero's text readable where it crosses the sun's

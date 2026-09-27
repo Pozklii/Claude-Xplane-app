@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppButtons } from "./app-links";
 import { buildExampleShowcase } from "./example-flights";
 import { EngineCanvas } from "./engine-canvas";
+import { FlameMotes } from "./flame-motes";
 import { LandingShowcase } from "./landing-showcase";
 import styles from "./home.module.css";
 
@@ -24,24 +25,34 @@ const features = [
   },
 ];
 
-// Fractal-flame alternatives to the golden-hour sky, for previewing (see
-// .flameVeil and co. in home.module.css).
-const FLAME_BACKGROUNDS = {
-  veil: styles.flameVeil,
-  ember: styles.flameEmber,
-  vortex: styles.flameVortex,
+// The page's backgrounds: pre-rendered fractal flames (public/sky/flame-*),
+// one picked at random for each visit, set in motion by the classes and
+// motes below; or the golden-hour sky. ?bg=<name> picks one.
+const FLAMES = {
+  veil: { className: styles.flameVeil, motes: ["255,150,200", "150,190,255", "190,255,150"] },
+  ember: { className: styles.flameEmber, motes: ["255,190,110", "255,140,60", "120,190,255"] },
+  vortex: { className: styles.flameVortex, motes: ["110,240,210", "130,160,255", "150,255,170"] },
 };
+type FlameName = keyof typeof FLAMES;
+const FLAME_NAMES = Object.keys(FLAMES) as FlameName[];
+
+// A different flame on each visit: this page renders per request (it reads
+// the visitor's session), on the server, so the pick is made once per
+// page view and the browser gets the same one it was rendered with.
+function randomFlame(): FlameName {
+  return FLAME_NAMES[Math.floor(Math.random() * FLAME_NAMES.length)];
+}
 
 export default async function Home(props: PageProps<"/">) {
   // ?map=2d previews the example flights on a flat map instead of the globe.
   const { map, bg } = await props.searchParams;
   const flat = map === "2d";
-  // ?bg=veil|ember|vortex previews a fractal-flame background in place of
-  // the golden-hour sky.
-  const flameBackground =
-    typeof bg === "string" && Object.hasOwn(FLAME_BACKGROUNDS, bg)
-      ? FLAME_BACKGROUNDS[bg as keyof typeof FLAME_BACKGROUNDS]
-      : "";
+  const flame: FlameName | null =
+    bg === "golden"
+      ? null
+      : typeof bg === "string" && Object.hasOwn(FLAMES, bg)
+        ? (bg as FlameName)
+        : randomFlame();
   const { airports, initial } = buildExampleShowcase();
   const supabase = await createClient();
   const {
@@ -50,12 +61,25 @@ export default async function Home(props: PageProps<"/">) {
 
   return (
     <div
-      className={`${styles.page} ${styles.landing} ${flameBackground} flex flex-1 flex-col font-sans`}
+      className={`${styles.page} ${styles.landing} ${flame ? FLAMES[flame].className : ""} flex flex-1 flex-col font-sans`}
     >
-      {/* The golden-hour sky behind the whole page, and its light shafts
-          (pre-rendered; see .sky in home.module.css). */}
-      <div className={styles.sky} aria-hidden="true" />
-      <div className={styles.skyRays} aria-hidden="true" />
+      {flame ? (
+        // A fractal flame behind the whole page: the image slowly drifting,
+        // a soft glow copy of it turning the other way and pulsing, and
+        // twinkling motes orbiting its middle (see .flameSky).
+        <div className={styles.flameSky} aria-hidden="true">
+          <div className={styles.flameBase} />
+          <div className={styles.flameGlow} />
+          <FlameMotes colors={FLAMES[flame].motes} />
+        </div>
+      ) : (
+        <>
+          {/* The golden-hour sky, and its light shafts (pre-rendered; see
+              .sky in home.module.css). */}
+          <div className={styles.sky} aria-hidden="true" />
+          <div className={styles.skyRays} aria-hidden="true" />
+        </>
+      )}
       <main className={styles.hero}>
         <EngineCanvas />
 
