@@ -1,12 +1,10 @@
 "use server";
 
 import { getAirportFacts } from "@/lib/airport-details";
-import { triviaFor } from "@/lib/airport-trivia";
 import { CHALLENGING_AIRPORTS } from "@/lib/challenging-airports";
 
 /** An airport for the airport panel, by ICAO or IATA code (public data):
- * its name and codes, whether it's a famously challenging airport, and a
- * pool of facts about it and its country to show one of at random. */
+ * its name and codes, and whether it's a famously challenging airport. */
 export async function lookupAirport(code: string) {
   const query = String(code ?? "")
     .trim()
@@ -30,10 +28,6 @@ export async function lookupAirport(code: string) {
       : null,
     runwayNames: facts.runways.map((runway) => runway.name),
     challenge: challenge?.why ?? null,
-    // The challenge is shown separately, so leave it out of the facts.
-    trivia: triviaFor([query]).filter(
-      (fact) => !challenge || !fact.text.includes("famously challenging"),
-    ),
   };
 }
 

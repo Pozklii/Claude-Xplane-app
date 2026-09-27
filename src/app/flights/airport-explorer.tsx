@@ -228,42 +228,6 @@ function WeatherPanel({ airport }: { airport: AirportLookup }) {
   );
 }
 
-function hash(text: string) {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h = Math.imul(h ^ text.charCodeAt(i), 16777619);
-  }
-  return h >>> 0;
-}
-
-/** One fact about the airport or its country, with a button for another. */
-function DidYouKnow({ airport }: { airport: AirportLookup }) {
-  const [shuffle, setShuffle] = useState(0);
-  const facts = airport.trivia;
-  if (facts.length === 0) return null;
-  const fact = facts[(hash(airport.code) + shuffle) % facts.length];
-  return (
-    <section className="flex items-start gap-3 rounded-xl border border-black/[.08] p-3 dark:border-white/[.145]">
-      <Flag country={fact.country} className="mt-0.5 text-lg" />
-      <div className="flex flex-col gap-1">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">
-          Did you know? &middot; {fact.subject}
-        </p>
-        <p className="text-sm text-black dark:text-zinc-100">{fact.text}</p>
-        {facts.length > 1 && (
-          <button
-            type="button"
-            onClick={() => setShuffle((n) => n + 1)}
-            className="self-start text-xs text-blue-600 underline dark:text-blue-400"
-          >
-            Another fact
-          </button>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function AirportDetails({
   airport,
   showWeather,
@@ -299,8 +263,6 @@ function AirportDetails({
           <strong>Challenging airport:</strong> {airport.challenge}
         </p>
       )}
-
-      <DidYouKnow key={`fact-${airport.code}`} airport={airport} />
 
       <button
         type="button"

@@ -4,14 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { KNOWN_AIRCRAFT } from "@/lib/aircraft";
 import { findAirline } from "@/lib/airlines";
 import { findAirport } from "@/lib/airports";
-import { triviaFor } from "@/lib/airport-trivia";
 import { countryName } from "@/lib/countries";
 import { distanceNm } from "@/lib/geo";
 import { formatDate } from "@/lib/dates";
 import { EXAMPLE_ROUTES } from "@/lib/example-flights/routes";
 import { deleteFlight } from "./actions";
 import { AirlineLogo } from "./airline-logo";
-import { FactToast } from "./fact-toast";
 import { FavouritesForm } from "./favourites-form";
 import { Flag } from "./flag";
 import { FlightPlanner } from "./flight-planner";
@@ -352,17 +350,6 @@ export default async function FlightsPage() {
     thumbnailByFlight,
   );
 
-  // A pool of facts per flight (its two airports and their countries),
-  // for the "did you know?" card shown when a flight is opened.
-  const factsByFlight = Object.fromEntries(
-    (flights ?? [])
-      .filter((flight) => flightDetails[flight.id])
-      .map((flight) => [
-        flight.id,
-        triviaFor([flight.departure, flight.arrival]),
-      ]),
-  );
-
   return (
     <SelectionProvider>
       <PlannerProvider>
@@ -602,7 +589,6 @@ export default async function FlightsPage() {
             })}
           </div>
         </div>
-        <FactToast factsByFlight={factsByFlight} />
       </PlannerProvider>
     </SelectionProvider>
   );
