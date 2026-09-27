@@ -46,6 +46,12 @@
     0 0 0 1px color-mix(in srgb, var(--arc-color) 18%, transparent),
     0 18px 50px -18px color-mix(in srgb, var(--arc-color) 55%, transparent);
 }
+.mapLink {
+  color: var(--arc-color);
+}
+.mapLink:hover {
+  text-decoration: underline;
+}
 .airlineHeader {
   padding-bottom: 14px;
   border-bottom: 1px solid rgba(143, 208, 245, 0.14);

@@ -2,37 +2,17 @@
 
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
-import {
-  DEFAULT_ARC_COLOR,
-  FlightGlobe,
-  type GlobeArc,
-  type GlobePoint,
-} from "./flight-globe";
+import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flight-globe";
 import { usePlanner } from "./planner-context";
+import { ROUTE_COLORS, useRouteColor } from "./route-color";
 import { SelectedFlightCard, type FlightDetails } from "./selected-flight-card";
 
-const STORAGE_KEY = "flightworld:arc-color";
 const VIEW_STORAGE_KEY = "flightworld:map-view";
-
-// The route colours to choose from.
-const ROUTE_COLORS = [
-  { name: "Sky", hex: DEFAULT_ARC_COLOR },
-  { name: "Gold", hex: "#f5c451" },
-  { name: "Coral", hex: "#ff7a6b" },
-  { name: "Rose", hex: "#ff6fb5" },
-  { name: "Violet", hex: "#a78bfa" },
-  { name: "Lime", hex: "#9be15d" },
-  { name: "White", hex: "#e8eef5" },
-];
 
 type MapView = "globe" | "map";
 
 function noopSubscribe() {
   return () => {};
-}
-
-function getPersistedArcColor() {
-  return window.localStorage.getItem(STORAGE_KEY);
 }
 
 function getPersistedView() {
@@ -43,9 +23,9 @@ function getServerValue() {
   return null;
 }
 
-// The flights page's globe band: the page header, the selected flight's
-// details card and the globe itself — all here because the card and the
-// globe share the user's chosen route color.
+// The Flight Map page: its header, the selected flight's details card and
+// the globe (or 2D map) itself — all here because the card and the map
+// share the user's chosen route colour.
 export function CustomizableGlobe({
   points,
   arcs,
@@ -62,38 +42,19 @@ export function CustomizableGlobe({
   /** Start on the flat 2D map rather than the globe (?map=2d). */
   flat?: boolean;
 }) {
-  // Reads localStorage without a server/client hydration mismatch: this
-  // resolves to null during SSR and the client's first render, then
-  // (harmlessly, since nothing else writes this key from outside this
-  // component) settles on the stored value right after.
-  const persisted = useSyncExternalStore(
-    noopSubscribe,
-    getPersistedArcColor,
-    getServerValue,
-  );
+  const [arcColor, handleChange] = useRouteColor();
+  // Globe or flat 2D map (straight route lines), remembered likewise.
   const persistedView = useSyncExternalStore(
     noopSubscribe,
     getPersistedView,
     getServerValue,
   );
-  // A color picked THIS session, which takes priority once set — a plain
-  // setState from the input's own onChange, not an effect, so it applies
-  // immediately rather than waiting for the next external-store read.
-  const [pickedThisSession, setPickedThisSession] = useState<string | null>(
-    null,
-  );
-  const arcColor = pickedThisSession ?? persisted ?? DEFAULT_ARC_COLOR;
-  // Globe or flat 2D map (straight route lines), likewise remembered.
   const [viewThisSession, setViewThisSession] = useState<MapView | null>(null);
   const view: MapView =
     viewThisSession ??
     (flat ? "map" : persistedView === "map" ? "map" : "globe");
   const { airportCode, openAirport } = usePlanner();
 
-  const handleChange = (color: string) => {
-    setPickedThisSession(color);
-    window.localStorage.setItem(STORAGE_KEY, color);
-  };
   const handleView = (next: MapView) => {
     setViewThisSession(next);
     window.localStorage.setItem(VIEW_STORAGE_KEY, next);
@@ -109,7 +70,7 @@ export function CustomizableGlobe({
           arcColor={arcColor}
           userId={userId}
           prominent
-          emptyHint={`Select a route on the ${view === "map" ? "map" : "globe"}, or a flight below, to see its details.`}
+          emptyHint={`Select a route on the ${view === "map" ? "map" : "globe"} to see its details.`}
         />
       </div>
       {/* Same bare, circular globe (and container width) as the landing page,

@@ -1,0 +1,28 @@
+"use client";
+
+import { useRouteColor } from "./route-color";
+import { SelectedFlightCard, type FlightDetails } from "./selected-flight-card";
+
+// The Flight Log page's summary of the flight picked in the list: the same
+// card as on the Flight Map page, in the user's route colour, with a link
+// to the flight on the map. Choosing a flight further down the list
+// scrolls back up to it.
+export function LogSummary({
+  details,
+  userId,
+}: {
+  details: Record<string, FlightDetails>;
+  userId: string;
+}) {
+  const [arcColor] = useRouteColor();
+  return (
+    <SelectedFlightCard
+      details={details}
+      arcColor={arcColor}
+      userId={userId}
+      prominent
+      mapLink
+      emptyHint="Pick a flight below to see its summary here."
+    />
+  );
+}

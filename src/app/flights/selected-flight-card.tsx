@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatDate, formatDuration } from "@/lib/dates";
 import { AirlineLogo } from "./airline-logo";
@@ -77,8 +78,9 @@ export function SelectedFlightCard({
   userId,
   showThumbnail = true,
   closable = true,
-  emptyHint = "Select a route on the globe, or a flight below, to see its details.",
+  emptyHint = "Select a flight to see its details.",
   prominent = false,
+  mapLink = false,
 }: {
   details: Record<string, FlightDetails>;
   arcColor: string;
@@ -91,6 +93,8 @@ export function SelectedFlightCard({
    * heading the card and a glow in the route colour, so the selected
    * flight is the focus. */
   prominent?: boolean;
+  /** Link to the flight on the Flight Map page (from the Flight Log). */
+  mapLink?: boolean;
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const flight = selectedFlightId ? details[selectedFlightId] : undefined;
@@ -106,8 +110,13 @@ export function SelectedFlightCard({
     if (!prominent || !selectedFlightId || !card) return;
     const { top } = card.getBoundingClientRect();
     if (top >= 0 && top < window.innerHeight * 0.6) return;
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    card.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    const reduce = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    card.scrollIntoView({
+      behavior: reduce ? "auto" : "smooth",
+      block: "start",
+    });
   }, [prominent, selectedFlightId]);
 
   if (!selectedFlightId || !flight) {
@@ -132,7 +141,11 @@ export function SelectedFlightCard({
           className={`${styles.reveal} ${styles.airlineHeader} flex items-center gap-3`}
           style={{ "--i": 0 } as React.CSSProperties}
         >
-          <AirlineLogo name={flight.airline} iata={flight.airlineIata ?? null} size="lg" />
+          <AirlineLogo
+            name={flight.airline}
+            iata={flight.airlineIata ?? null}
+            size="lg"
+          />
           <div className="flex min-w-0 flex-col">
             <span className={`${styles.route} text-base font-semibold`}>
               {flight.airline}
@@ -146,7 +159,9 @@ export function SelectedFlightCard({
         // Without an image of its own, a flight gets a slim block in its
         // route colour rather than a picture (the map already shows the
         // route).
-        <div className={`${styles.thumb} ${flight.thumbnailUrl ? "" : styles.thumbBlock}`}>
+        <div
+          className={`${styles.thumb} ${flight.thumbnailUrl ? "" : styles.thumbBlock}`}
+        >
           {flight.thumbnailUrl ? (
             // Keyed by URL so a newly chosen thumbnail eases in too.
             // eslint-disable-next-line @next/next/no-img-element
@@ -287,6 +302,16 @@ export function SelectedFlightCard({
           <p className={`${styles.soft} text-sm`}>No notes for this flight.</p>
         )}
       </section>
+
+      {mapLink && (
+        <Link
+          href={`/flights?flight=${encodeURIComponent(selectedFlightId)}`}
+          className={`${styles.reveal} ${styles.mapLink} self-start text-sm font-medium`}
+          style={{ "--i": 4 } as React.CSSProperties}
+        >
+          Show on Flight Map &rarr;
+        </Link>
+      )}
     </article>
   );
 }

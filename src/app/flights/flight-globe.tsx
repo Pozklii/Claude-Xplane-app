@@ -12,6 +12,7 @@ import {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useSelection } from "./selection-context";
+import { DEFAULT_ARC_COLOR } from "./route-color";
 
 export type GlobePoint = {
   code: string;
@@ -56,7 +57,7 @@ function supportsWebGL2() {
 const noopSubscribe = () => () => {};
 
 // deck.gl color accessors take [r, g, b, a] (0-255), not CSS strings.
-export const DEFAULT_ARC_COLOR = "#38d9ff";
+export { DEFAULT_ARC_COLOR };
 // Airports have no visible marker (a flat disc on the globe's surface
 // z-fights with it and flickers, especially zoomed in and pitched on a
 // selected route) — the arc endpoints already show where they are. The
@@ -869,9 +870,20 @@ export function FlightGlobe({
             : WHOLE_GLOBE_FILL,
         );
 
+      // The first view: all the flights, or straight onto the one already
+      // selected when the page opens with one (from a Flight Log link).
       if (!hasFitRef.current && points.length > 0 && wholeGlobeRef.current) {
         hasFitRef.current = true;
-        map.jumpTo(wholeCamera(points));
+        map.jumpTo(
+          wholeCamera(
+            selectedArc
+              ? [
+                  { lng: selectedArc.startLng, lat: selectedArc.startLat },
+                  { lng: selectedArc.endLng, lat: selectedArc.endLat },
+                ]
+              : points,
+          ),
+        );
         cameraSelectionRef.current = selectedId;
         return;
       }
@@ -888,8 +900,11 @@ export function FlightGlobe({
           duration: 0,
           maxZoom: overviewMaxZoom,
         });
-        cameraSelectionRef.current = selectedId;
-        return;
+        // With a flight already selected, carry on to fly in on it.
+        if (!selectedArc) {
+          cameraSelectionRef.current = selectedId;
+          return;
+        }
       }
 
       if (selectedId === cameraSelectionRef.current) return;

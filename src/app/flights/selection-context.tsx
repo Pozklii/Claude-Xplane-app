@@ -18,11 +18,18 @@ type SelectionContextValue = {
 
 const SelectionContext = createContext<SelectionContextValue | null>(null);
 
-export function SelectionProvider({ children }: { children: React.ReactNode }) {
+export function SelectionProvider({
+  children,
+  initialSelectedId = null,
+}: {
+  children: React.ReactNode;
+  /** A flight to start with selected (e.g. one linked to from the log). */
+  initialSelectedId?: string | null;
+}) {
   const [selection, setSelection] = useState<{
     id: string | null;
     count: number;
-  }>({ id: null, count: 0 });
+  }>({ id: initialSelectedId, count: 0 });
   const setSelectedFlightId = useCallback(
     (id: string | null) =>
       setSelection((prev) => ({ id, count: prev.count + 1 })),

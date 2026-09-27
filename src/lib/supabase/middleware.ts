@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED_PREFIXES = ["/flights", "/plan"];
+const PROTECTED_PREFIXES = ["/flights", "/log", "/plan"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -34,8 +34,9 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isProtected = PROTECTED_PREFIXES.some((prefix) =>
-    pathname.startsWith(prefix),
+  // Whole path segments only: "/log" mustn't also catch "/login".
+  const isProtected = PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
 
   if (isProtected && !user) {

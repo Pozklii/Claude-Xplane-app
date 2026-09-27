@@ -14,6 +14,14 @@ function parseRating(value: unknown) {
     : undefined;
 }
 
+// Every page showing the user's flights or favourites: the Flight Map, the
+// Flight Log and the Flight Plan (its suggestions use both).
+function revalidateFlightPages() {
+  revalidatePath("/flights");
+  revalidatePath("/log");
+  revalidatePath("/plan");
+}
+
 export async function addFlight(
   _prevState: FlightFormState,
   formData: FormData,
@@ -70,7 +78,7 @@ export async function addFlight(
     return { error: error.message };
   }
 
-  revalidatePath("/flights");
+  revalidateFlightPages();
 }
 
 export async function deleteFlight(id: string) {
@@ -95,7 +103,7 @@ export async function deleteFlight(id: string) {
   }
 
   await supabase.from("flights").delete().eq("id", id);
-  revalidatePath("/flights");
+  revalidateFlightPages();
 }
 
 /** Sets (or, with null, clears) a flight's 1–10 rating. */
@@ -124,7 +132,7 @@ export async function rateFlight(id: string, rating: number | null) {
     return { error: error.message };
   }
 
-  revalidatePath("/flights");
+  revalidateFlightPages();
 }
 
 export type PreferencesFormState =
@@ -163,6 +171,6 @@ export async function savePreferences(
     return { error: error.message };
   }
 
-  revalidatePath("/flights");
+  revalidateFlightPages();
   return { saved: true };
 }
