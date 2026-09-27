@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import { ArcLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { ArcLayer, LineLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
   LngLatBounds,
@@ -93,7 +93,10 @@ function resolveArcColors(arcColor: string) {
     ...mixToward(rgb, [255, 255, 255], 0.3),
     110,
   ];
-  return { base, selected, glow, glowSelected };
+  // The other routes while one is selected, faded back so it stands out.
+  const dimmed: [number, number, number, number] = [...rgb, 70];
+  const glowDimmed: [number, number, number, number] = [...rgb, 16];
+  return { base, selected, glow, glowSelected, dimmed, glowDimmed };
 }
 
 // Selecting a flight zooms and tilts the camera in on its two airports,
@@ -122,7 +125,12 @@ const WHOLE_GLOBE_FILL = 0.92 / (1 + 2 * WHOLE_GLOBE_OVERHANG);
 // fills `fill` of a container `width` pixels across. MapLibre scales the
 // globe up by 1/cos(latitude) of the map's centre (to keep zoom levels
 // consistent with the flat map), so the zoom has to allow for that.
-function wholeGlobeCamera(lng: number, lat: number, width: number, fill: number) {
+function wholeGlobeCamera(
+  lng: number,
+  lat: number,
+  width: number,
+  fill: number,
+) {
   const cosLat = Math.max(0.05, Math.cos((lat * Math.PI) / 180));
   return {
     center: [lng, lat] as [number, number],
@@ -135,7 +143,9 @@ function wholeGlobeCamera(lng: number, lat: number, width: number, fill: number)
 // The point on the globe at the middle of a set of points (the normalised
 // sum of their unit vectors): for two, the midpoint of the great circle
 // between them.
-function sphericalCentre(points: { lng: number; lat: number }[]): [number, number] {
+function sphericalCentre(
+  points: { lng: number; lat: number }[],
+): [number, number] {
   let x = 0;
   let y = 0;
   let z = 0;
@@ -240,7 +250,11 @@ export function FlightGlobe({
     useSelection();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const canDraw = useSyncExternalStore(noopSubscribe, supportsWebGL2, () => true);
+  const canDraw = useSyncExternalStore(
+    noopSubscribe,
+    supportsWebGL2,
+    () => true,
+  );
   const overlayRef = useRef<MapboxOverlay | null>(null);
   const onSelectIdRef = useRef(onSelectId);
   const selectedIdRef = useRef(selectedId);
@@ -283,19 +297,19 @@ export function FlightGlobe({
     let map: MapLibreMap;
     try {
       map = new MapLibreMap({
-      container,
-      style: STYLE_URL,
-      center: [0, 20],
-      zoom: 0.5,
-      // A flat map zoomed out past a single world width would just show
-      // repeated copies of it side by side.
-      minZoom: flatRef.current ? 0 : undefined,
-      // MapLibre's own attribution control (a white bar/button over the
-      // map) is off; the same credits the style requires — OpenFreeMap,
-      // OpenMapTiles and OpenStreetMap — are given in the caption below
-      // instead, styled to sit on the page rather than over the globe.
-      attributionControl: false,
-      interactive: interactiveRef.current,
+        container,
+        style: STYLE_URL,
+        center: [0, 20],
+        zoom: 0.5,
+        // A flat map zoomed out past a single world width would just show
+        // repeated copies of it side by side.
+        minZoom: flatRef.current ? 0 : undefined,
+        // MapLibre's own attribution control (a white bar/button over the
+        // map) is off; the same credits the style requires — OpenFreeMap,
+        // OpenMapTiles and OpenStreetMap — are given in the caption below
+        // instead, styled to sit on the page rather than over the globe.
+        attributionControl: false,
+        interactive: interactiveRef.current,
       });
     } catch {
       // Not fatal: the rest of the page carries on without the globe.
@@ -678,6 +692,17 @@ export function FlightGlobe({
       // when the data or an updateTriggers entry changes, so a function
       // would silently keep drawing the old color/selection. Constant
       // values (like these) are compared directly and always apply.
+      // On the flat map, routes are straight lines rather than arcs, each
+      // taking the shorter way round: one crossing the Pacific ends past
+      // ±180° (on the map's next copy of the world) rather than cutting
+      // back across the whole map.
+      const lineEnd = (d: GlobeArc): [number, number] => {
+        const delta = d.endLng - d.startLng;
+        return [
+          d.endLng - (delta > 180 ? 360 : delta < -180 ? -360 : 0),
+          d.endLat,
+        ];
+      };
       const buildArcLayers = (
         id: string,
         data: GlobeArc[],
@@ -685,38 +710,63 @@ export function FlightGlobe({
         glowColor: [number, number, number, number],
         coreWidth: number,
         glowWidth: number,
-      ): ArcLayer<GlobeArc>[] => [
-        new ArcLayer<GlobeArc>({
-          id: `${id}-glow`,
-          data,
-          pickable: false,
-          greatCircle: true,
-          // GlobeView back-face-culls by default, which hides an arc's
-          // tube geometry from most angles unless culling is disabled.
-          parameters: { cullMode: "none", depthWriteEnabled: false },
-          getSourcePosition: (d) => [d.startLng, d.startLat],
-          getTargetPosition: (d) => [d.endLng, d.endLat],
-          getSourceColor: glowColor,
-          getTargetColor: glowColor,
-          getWidth: glowWidth,
-          getHeight: 0.35,
-          widthUnits: "pixels",
-        }),
-        new ArcLayer<GlobeArc>({
-          id,
-          data,
-          pickable: true,
-          greatCircle: true,
-          parameters: { cullMode: "none" },
-          getSourcePosition: (d) => [d.startLng, d.startLat],
-          getTargetPosition: (d) => [d.endLng, d.endLat],
-          getSourceColor: coreColor,
-          getTargetColor: coreColor,
-          getWidth: coreWidth,
-          getHeight: 0.35,
-          widthUnits: "pixels",
-        }),
-      ];
+      ): (ArcLayer<GlobeArc> | LineLayer<GlobeArc>)[] =>
+        flatRef.current
+          ? [
+              new LineLayer<GlobeArc>({
+                id: `${id}-glow`,
+                data,
+                pickable: false,
+                parameters: { depthWriteEnabled: false },
+                getSourcePosition: (d) => [d.startLng, d.startLat],
+                getTargetPosition: lineEnd,
+                getColor: glowColor,
+                getWidth: glowWidth,
+                widthUnits: "pixels",
+              }),
+              new LineLayer<GlobeArc>({
+                id,
+                data,
+                pickable: true,
+                getSourcePosition: (d) => [d.startLng, d.startLat],
+                getTargetPosition: lineEnd,
+                getColor: coreColor,
+                getWidth: coreWidth,
+                widthUnits: "pixels",
+              }),
+            ]
+          : [
+              new ArcLayer<GlobeArc>({
+                id: `${id}-glow`,
+                data,
+                pickable: false,
+                greatCircle: true,
+                // GlobeView back-face-culls by default, which hides an arc's
+                // tube geometry from most angles unless culling is disabled.
+                parameters: { cullMode: "none", depthWriteEnabled: false },
+                getSourcePosition: (d) => [d.startLng, d.startLat],
+                getTargetPosition: (d) => [d.endLng, d.endLat],
+                getSourceColor: glowColor,
+                getTargetColor: glowColor,
+                getWidth: glowWidth,
+                getHeight: 0.35,
+                widthUnits: "pixels",
+              }),
+              new ArcLayer<GlobeArc>({
+                id,
+                data,
+                pickable: true,
+                greatCircle: true,
+                parameters: { cullMode: "none" },
+                getSourcePosition: (d) => [d.startLng, d.startLat],
+                getTargetPosition: (d) => [d.endLng, d.endLat],
+                getSourceColor: coreColor,
+                getTargetColor: coreColor,
+                getWidth: coreWidth,
+                getHeight: 0.35,
+                widthUnits: "pixels",
+              }),
+            ];
       const pointLayer = new ScatterplotLayer<GlobePoint>({
         id: "flight-points",
         data: points,
@@ -737,8 +787,8 @@ export function FlightGlobe({
             ...buildArcLayers(
               "flight-arcs",
               arcs.filter((arc) => arc !== selectedArc),
-              arcColors.base,
-              arcColors.glow,
+              selectedArc ? arcColors.dimmed : arcColors.base,
+              selectedArc ? arcColors.glowDimmed : arcColors.glow,
               1.3,
               5,
             ),
@@ -773,8 +823,7 @@ export function FlightGlobe({
                 // eastern one), and vice versa.
                 anchor:
                   selectedArc &&
-                  point.lng >
-                    Math.min(selectedArc.startLng, selectedArc.endLng)
+                  point.lng > Math.min(selectedArc.startLng, selectedArc.endLng)
                     ? "right"
                     : "left",
               },
@@ -805,7 +854,11 @@ export function FlightGlobe({
           [Math.min(...lngs), Math.min(...lats)],
           [Math.max(...lngs), Math.max(...lats)],
         ];
-        map.fitBounds(bounds, { padding: 60, duration: 0, maxZoom: overviewMaxZoom });
+        map.fitBounds(bounds, {
+          padding: 60,
+          duration: 0,
+          maxZoom: overviewMaxZoom,
+        });
         cameraSelectionRef.current = selectedId;
         return;
       }
@@ -842,10 +895,11 @@ export function FlightGlobe({
         );
         flyToTracked(map, {
           ...camera,
-          duration: selectedArc ? SELECTION_FLY_DURATION : OVERVIEW_FLY_DURATION,
+          duration: selectedArc
+            ? SELECTION_FLY_DURATION
+            : OVERVIEW_FLY_DURATION,
         });
       } else if (selectedArc) {
-
         const lngs = [selectedArc.startLng, selectedArc.endLng];
         const lats = [selectedArc.startLat, selectedArc.endLat];
         const bounds = new LngLatBounds([
@@ -917,25 +971,25 @@ export function FlightGlobe({
                 pointerEvents: interactive ? undefined : "none",
               }
             : bare && flat
-            ? {
-                aspectRatio: "16 / 10",
-                overflow: "hidden",
-                // Fades out towards every edge, so the map's rectangle
-                // melts into the page rather than reading as a box.
-                maskImage: FLAT_EDGE_FADE,
-                WebkitMaskImage: FLAT_EDGE_FADE,
-                maskComposite: "intersect",
-                WebkitMaskComposite: "source-in",
-                pointerEvents: interactive ? undefined : "none",
-              }
-            : bare
               ? {
-                  aspectRatio: "1",
-                  borderRadius: "50%",
+                  aspectRatio: "16 / 10",
                   overflow: "hidden",
+                  // Fades out towards every edge, so the map's rectangle
+                  // melts into the page rather than reading as a box.
+                  maskImage: FLAT_EDGE_FADE,
+                  WebkitMaskImage: FLAT_EDGE_FADE,
+                  maskComposite: "intersect",
+                  WebkitMaskComposite: "source-in",
                   pointerEvents: interactive ? undefined : "none",
                 }
-              : { height, pointerEvents: interactive ? undefined : "none" }
+              : bare
+                ? {
+                    aspectRatio: "1",
+                    borderRadius: "50%",
+                    overflow: "hidden",
+                    pointerEvents: interactive ? undefined : "none",
+                  }
+                : { height, pointerEvents: interactive ? undefined : "none" }
         }
       >
         {!canDraw && (

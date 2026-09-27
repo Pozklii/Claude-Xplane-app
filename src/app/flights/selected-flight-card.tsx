@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatDate, formatDuration } from "@/lib/dates";
 import { AirlineLogo } from "./airline-logo";
 import { Flag } from "./flag";
@@ -71,51 +71,6 @@ function CountUp({
   return <span ref={ref}>{format(value)}</span>;
 }
 
-// Stand-in thumbnail for a flight with no uploaded image: its route drawn
-// as a great-circle-ish curve between the two airport codes.
-function RoutePlaceholder({ from, to }: { from: string; to: string }) {
-  return (
-    <svg viewBox="0 0 320 180" role="img" aria-label={`${from} to ${to}`}>
-      <defs>
-        <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-          <path d="M20 0H0V20" fill="none" stroke="#12293b" strokeWidth="1" />
-        </pattern>
-      </defs>
-      <rect width="320" height="180" fill="url(#grid)" />
-      <path
-        className={styles.routeLine}
-        d="M48 128 Q160 20 272 128"
-        fill="none"
-        stroke="var(--arc-color)"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <circle cx="48" cy="128" r="4" fill="var(--arc-color)" />
-      <circle cx="272" cy="128" r="4" fill="var(--arc-color)" />
-      <text
-        x="48"
-        y="154"
-        textAnchor="middle"
-        fill="#dcedf7"
-        fontSize="14"
-        fontWeight="600"
-      >
-        {from}
-      </text>
-      <text
-        x="272"
-        y="154"
-        textAnchor="middle"
-        fill="#dcedf7"
-        fontSize="14"
-        fontWeight="600"
-      >
-        {to}
-      </text>
-    </svg>
-  );
-}
-
 export function SelectedFlightCard({
   details,
   arcColor,
@@ -142,6 +97,18 @@ export function SelectedFlightCard({
   // Which flight the thumbnail picker is open for, so it closes by itself
   // when a different flight is selected.
   const [pickerFlightId, setPickerFlightId] = useState<string | null>(null);
+  const cardRef = useRef<HTMLElement>(null);
+
+  // On the flights page, choosing a flight (say, from the log further down)
+  // brings its summary into view, unless it's already on screen.
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!prominent || !selectedFlightId || !card) return;
+    const { top } = card.getBoundingClientRect();
+    if (top >= 0 && top < window.innerHeight * 0.6) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    card.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }, [prominent, selectedFlightId]);
 
   if (!selectedFlightId || !flight) {
     return <p className={`${styles.hint} text-sm`}>{emptyHint}</p>;
@@ -155,6 +122,7 @@ export function SelectedFlightCard({
     // Keyed by flight so every new selection replays the entrance.
     <article
       key={selectedFlightId}
+      ref={cardRef}
       className={`${styles.card} ${prominent ? styles.prominent : ""}`}
       style={{ "--arc-color": arcColor } as React.CSSProperties}
       aria-live="polite"
@@ -175,7 +143,10 @@ export function SelectedFlightCard({
       )}
 
       {showThumbnail && (
-        <div className={styles.thumb}>
+        // Without an image of its own, a flight gets a slim block in its
+        // route colour rather than a picture (the map already shows the
+        // route).
+        <div className={`${styles.thumb} ${flight.thumbnailUrl ? "" : styles.thumbBlock}`}>
           {flight.thumbnailUrl ? (
             // Keyed by URL so a newly chosen thumbnail eases in too.
             // eslint-disable-next-line @next/next/no-img-element
@@ -184,9 +155,7 @@ export function SelectedFlightCard({
               src={flight.thumbnailUrl}
               alt={`${flight.from.code} to ${flight.to.code}`}
             />
-          ) : (
-            <RoutePlaceholder from={flight.from.code} to={flight.to.code} />
-          )}
+          ) : null}
           {userId && !pickerOpen && (
             <button
               type="button"
