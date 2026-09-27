@@ -179,6 +179,9 @@ export function CustomizableGlobe({
           arcs={arcs}
           arcColor={arcColor}
           bare
+          // Always shown whole: selecting a flight turns the globe to face
+          // it rather than zooming in past its round frame.
+          wholeGlobe
           flat={view === "map"}
           onAirportClick={(code) => openAirport(code, { scroll: false })}
         />

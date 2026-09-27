@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ArcLayer, LineLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
@@ -120,6 +120,9 @@ const BARE_OVERVIEW_MAX_ZOOM = 1;
 // sphere fills, and how far the container reaches past its parent.
 const WHOLE_GLOBE_OVERHANG = 0.2;
 const WHOLE_GLOBE_FILL = 0.92 / (1 + 2 * WHOLE_GLOBE_OVERHANG);
+// An interactive whole globe's container isn't oversized (see the
+// wholeGlobe prop), so the sphere leaves a margin inside it instead.
+const WHOLE_GLOBE_FILL_INTERACTIVE = 0.82;
 
 // A camera looking straight down at [lng, lat], zoomed so the whole sphere
 // fills `fill` of a container `width` pixels across. MapLibre scales the
@@ -235,13 +238,17 @@ export function FlightGlobe({
    * and in bare mode a wide rectangle whose edges fade into the page
    * rather than a circle. Fixed for an instance's lifetime. */
   flat?: boolean;
-  /** Keep the whole sphere in view, never cut off: the camera never zooms
-   * or tilts in, and selecting a flight just turns the globe to face it.
-   * The map container also reaches past its parent on every side (with
-   * negative margins, so the layout still sees a parent-sized square),
-   * leaving room for high arcs to rise off the sphere without meeting
-   * its edge. For bare, display-only use (the landing page's tour), in
-   * place of the usual circular clip. Fixed for an instance's lifetime. */
+  /** Keep the whole sphere in view, never cut off: selecting a flight
+   * never zooms or tilts in, it just turns the globe to face the route.
+   * In bare mode this replaces the usual circular clip. Display-only (the
+   * landing page's tour), the map container also reaches past its parent
+   * on every side (with negative margins, so the layout still sees a
+   * parent-sized square), leaving room for high arcs to rise off the
+   * sphere. Interactive (the flights page), it stays parent-sized, since
+   * overhanging would cover nearby controls, with the sphere leaving a
+   * margin inside it; there the round clip only returns while the visitor
+   * has zoomed in (or flown into an airport) closer than the whole globe.
+   * Fixed for an instance's lifetime. */
   wholeGlobe?: boolean;
   /** Called with an airport's code when it's clicked (after flying in). */
   onAirportClick?: (code: string) => void;
@@ -265,6 +272,9 @@ export function FlightGlobe({
   const interactiveRef = useRef(interactive);
   const flatRef = useRef(flat);
   const wholeGlobeRef = useRef(wholeGlobe);
+  // An interactive whole globe zoomed in past the point where the sphere
+  // fills its container, which brings the round clip back.
+  const [zoomedIn, setZoomedIn] = useState(false);
   // Set around every programmatic flyTo so the idle-spin loop below doesn't
   // fight it by nudging the center mid-animation.
   const cameraAnimatingRef = useRef(false);
@@ -606,6 +616,23 @@ export function FlightGlobe({
       map.on("move", syncOverlayViewState);
       syncOverlayViewState();
 
+      if (wholeGlobeRef.current && interactiveRef.current && !flatRef.current) {
+        // Clip to a circle only once the sphere has grown to the edge of
+        // its container, so the switch doesn't show.
+        const updateClip = () => {
+          const center = map.getCenter();
+          const filled = wholeGlobeCamera(
+            center.lng,
+            center.lat,
+            container.clientWidth,
+            1,
+          ).zoom;
+          setZoomedIn(map.getZoom() > filled);
+        };
+        map.on("move", updateClip);
+        updateClip();
+      }
+
       // deck.gl's own onClick prop on a layer doesn't reliably fire from
       // real MapLibre-driven clicks in interleaved mode (interaction
       // handling is delegated to MapLibre, which only forwards a subset of
@@ -837,7 +864,9 @@ export function FlightGlobe({
         wholeGlobeCamera(
           ...sphericalCentre(pts),
           container?.clientWidth ?? 380,
-          WHOLE_GLOBE_FILL,
+          interactiveRef.current
+            ? WHOLE_GLOBE_FILL_INTERACTIVE
+            : WHOLE_GLOBE_FILL,
         );
 
       if (!hasFitRef.current && points.length > 0 && wholeGlobeRef.current) {
@@ -963,33 +992,39 @@ export function FlightGlobe({
       <div
         ref={containerRef}
         style={
-          bare && wholeGlobe && !flat
+          bare && wholeGlobe && !flat && interactive
             ? {
                 aspectRatio: "1",
-                width: `${100 * (1 + 2 * WHOLE_GLOBE_OVERHANG)}%`,
-                margin: `${-100 * WHOLE_GLOBE_OVERHANG}%`,
-                pointerEvents: interactive ? undefined : "none",
+                borderRadius: zoomedIn ? "50%" : undefined,
+                overflow: zoomedIn ? "hidden" : undefined,
               }
-            : bare && flat
+            : bare && wholeGlobe && !flat
               ? {
-                  aspectRatio: "16 / 10",
-                  overflow: "hidden",
-                  // Fades out towards every edge, so the map's rectangle
-                  // melts into the page rather than reading as a box.
-                  maskImage: FLAT_EDGE_FADE,
-                  WebkitMaskImage: FLAT_EDGE_FADE,
-                  maskComposite: "intersect",
-                  WebkitMaskComposite: "source-in",
+                  aspectRatio: "1",
+                  width: `${100 * (1 + 2 * WHOLE_GLOBE_OVERHANG)}%`,
+                  margin: `${-100 * WHOLE_GLOBE_OVERHANG}%`,
                   pointerEvents: interactive ? undefined : "none",
                 }
-              : bare
+              : bare && flat
                 ? {
-                    aspectRatio: "1",
-                    borderRadius: "50%",
+                    aspectRatio: "16 / 10",
                     overflow: "hidden",
+                    // Fades out towards every edge, so the map's rectangle
+                    // melts into the page rather than reading as a box.
+                    maskImage: FLAT_EDGE_FADE,
+                    WebkitMaskImage: FLAT_EDGE_FADE,
+                    maskComposite: "intersect",
+                    WebkitMaskComposite: "source-in",
                     pointerEvents: interactive ? undefined : "none",
                   }
-                : { height, pointerEvents: interactive ? undefined : "none" }
+                : bare
+                  ? {
+                      aspectRatio: "1",
+                      borderRadius: "50%",
+                      overflow: "hidden",
+                      pointerEvents: interactive ? undefined : "none",
+                    }
+                  : { height, pointerEvents: interactive ? undefined : "none" }
         }
       >
         {!canDraw && (
