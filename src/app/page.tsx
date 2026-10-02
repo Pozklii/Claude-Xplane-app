@@ -5,6 +5,7 @@ import { buildExampleShowcase } from "./example-flights";
 import { EngineCanvas } from "./engine-canvas";
 import { FlameMotes } from "./flame-motes";
 import { FlameLive } from "./flame-live";
+import { generatedPalette } from "./flame-random";
 import { LandingShowcase } from "./landing-showcase";
 import styles from "./home.module.css";
 
@@ -26,37 +27,66 @@ const features = [
   },
 ];
 
-// The page's backgrounds: pre-rendered fractal flames (public/sky/flame-*),
-// one picked at random for each visit, set in motion by the classes and
-// motes below; or the golden-hour sky. ?bg=<name> picks one.
+// The page's backgrounds: on each visit, either one of three hand-picked
+// fractal flames (pre-rendered stills in public/sky/flame-*, set in motion
+// by the classes and motes below) or, half the time, a new one generated in
+// their style from a random seed (flame-random.ts). ?bg=<name> picks a
+// hand-picked one, ?bg=random a generated one, ?seed=<n> a particular
+// generated one, and ?bg=golden the earlier golden-hour sky.
 const FLAMES = {
-  veil: { className: styles.flameVeil, motes: ["255,150,200", "150,190,255", "190,255,150"] },
-  ember: { className: styles.flameEmber, motes: ["255,190,110", "255,140,60", "120,190,255"] },
-  vortex: { className: styles.flameVortex, motes: ["110,240,210", "130,160,255", "150,255,170"] },
+  veil: {
+    className: styles.flameVeil,
+    motes: ["255,150,200", "150,190,255", "190,255,150"],
+  },
+  ember: {
+    className: styles.flameEmber,
+    motes: ["255,190,110", "255,140,60", "120,190,255"],
+  },
+  vortex: {
+    className: styles.flameVortex,
+    motes: ["110,240,210", "130,160,255", "150,255,170"],
+  },
 };
 type FlameName = keyof typeof FLAMES;
 const FLAME_NAMES = Object.keys(FLAMES) as FlameName[];
 
-// A different flame on each visit: this page renders per request (it reads
-// the visitor's session), on the server, so the pick is made once per
-// page view and the browser gets the same one it was rendered with.
+// A different background on each visit: this page renders per request (it
+// reads the visitor's session), on the server, so the pick is made once
+// per page view and the browser gets the same one it was rendered with.
 function randomFlame(): FlameName {
   return FLAME_NAMES[Math.floor(Math.random() * FLAME_NAMES.length)];
 }
+function randomSeed() {
+  return 100000 + Math.floor(Math.random() * 900000);
+}
+function coinFlip() {
+  return Math.random() < 0.5;
+}
 
 export default async function Home(props: PageProps<"/">) {
-  // ?map=2d previews the example flights on a flat map instead of the globe.
-  const { map, bg, sharp: sharpParam } = await props.searchParams;
+  const { bg, seed: seedParam, sharp: sharpParam } = await props.searchParams;
   // ?sharp=1 previews crisper backgrounds: sharper stills, the live flame
   // at full resolution without blur, and no soft glow over them.
   const sharp = sharpParam === "1";
-  const flat = map === "2d";
-  const flame: FlameName | null =
-    bg === "golden"
+  const pinned = typeof bg === "string" && Object.hasOwn(FLAMES, bg);
+  const seedNumber =
+    typeof seedParam === "string" ? Number.parseInt(seedParam, 10) : NaN;
+  // A generated flame's seed, or null for a hand-picked one (or the sky).
+  const seed: number | null =
+    bg === "golden" || pinned
       ? null
-      : typeof bg === "string" && Object.hasOwn(FLAMES, bg)
+      : Number.isFinite(seedNumber) && seedNumber >= 0
+        ? seedNumber
+        : bg === "random" || coinFlip()
+          ? randomSeed()
+          : null;
+  const flame: FlameName | null =
+    bg === "golden" || seed !== null
+      ? null
+      : pinned
         ? (bg as FlameName)
         : randomFlame();
+  const generated = seed !== null ? generatedPalette(seed) : null;
   const { airports, initial } = buildExampleShowcase();
   const supabase = await createClient();
   const {
@@ -66,8 +96,21 @@ export default async function Home(props: PageProps<"/">) {
   return (
     <div
       className={`${styles.page} ${styles.landing} ${flame ? FLAMES[flame].className : ""} flex flex-1 flex-col font-sans`}
+      style={
+        generated ? { background: `rgb(${generated.bg.join(",")})` } : undefined
+      }
     >
-      {flame ? (
+      {seed !== null && generated ? (
+        // A flame generated for this visit: rendered live, morphing, over
+        // the page's dark ground (or, where it can't run, a still drawn in
+        // the browser), with motes in its colours. Its number lets a
+        // favourite be found again (?seed=).
+        <div className={styles.flameSky} aria-hidden="true">
+          <FlameLive seed={seed} sharp={sharp} />
+          <FlameMotes colors={generated.motes} />
+          <p className={styles.flameLabel}>Background no. {seed}</p>
+        </div>
+      ) : flame ? (
         // A fractal flame behind the whole page: rendered live, its shapes
         // slowly morphing (over the still, which shows first and stands in
         // wherever the live one can't run, gently drifting), under a soft
@@ -93,11 +136,12 @@ export default async function Home(props: PageProps<"/">) {
       <main className={styles.hero}>
         <EngineCanvas />
 
-        <div className={`${styles.content} mx-auto w-full max-w-[1400px] px-6 py-8 min-[1100px]:py-4`}>
+        <div
+          className={`${styles.content} mx-auto w-full max-w-[1400px] px-6 py-8 min-[1100px]:py-4`}
+        >
           <LandingShowcase
             airports={airports}
             initial={initial}
-            flat={flat}
             header={
               <div className={styles.heroIntro}>
                 <h1
@@ -134,12 +178,15 @@ export default async function Home(props: PageProps<"/">) {
               // Where the engine animation sits; it's drawn on the canvas
               // above, which covers the whole hero so its exhaust can
               // stream across.
-              <div className={styles.engineBox} data-engine-anchor aria-hidden="true" />
+              <div
+                className={styles.engineBox}
+                data-engine-anchor
+                aria-hidden="true"
+              />
             }
           />
         </div>
       </main>
-
     </div>
   );
 }

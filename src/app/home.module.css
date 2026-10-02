@@ -156,6 +156,30 @@
     flameGlowTurn 37s ease-in-out infinite alternate,
     flameGlowPulse 9s ease-in-out infinite alternate;
 }
+/* A generated flame's fallback still (flame-live.tsx), drawn small and
+   scaled up, drifting like the hand-picked stills. */
+.flameStill {
+  position: absolute;
+  inset: -12%;
+  width: 124%;
+  height: 124%;
+  filter: blur(1.5px);
+  animation: flameDrift 48s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flameStill {
+    animation: none;
+  }
+}
+/* Which generated background this is, quietly, for finding it again. */
+.flameLabel {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.28);
+}
 /* The live flame (flame-live.tsx), faded in over the still once ready. */
 .flameLive {
   position: absolute;
@@ -231,15 +255,16 @@
   pointer-events: none;
 }
 /* The hero's layout (see landing-showcase.tsx). On a narrow screen, one
-   centred column: heading, engine, example-flight card, globe. On a wide
-   one, the engine in the middle of the screen, the heading and card to its
-   left and the globe to its right, all within the first screenful. */
+   centred column: heading, engine, example-flight card, feature blurbs. On
+   a wide one, the engine in the middle of the screen, the heading and card
+   to its left and the blurbs stacked to its right, all within the first
+   screenful. */
 .heroGrid {
   --hero-align: center;
   --hero-text-align: center;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "header" "engine" "tour" "globe" "features";
+  grid-template-areas: "header" "engine" "tour" "features";
   justify-items: center;
   gap: 1.5rem;
 }
@@ -253,10 +278,6 @@
   grid-area: tour;
   width: 100%;
   max-width: 24rem;
-}
-.heroGlobe {
-  grid-area: globe;
-  width: min(380px, 100%);
 }
 .heroFeatures {
   grid-area: features;
@@ -277,17 +298,15 @@
   pointer-events: none;
 }
 @media (min-width: 1100px) {
-  /* One screenful, with nothing to scroll to: the engine centred, the
-     feature blurbs in a compact row under it and the globe, and the engine
-     shrinking on shorter screens to leave them room. */
+  /* One screenful, with nothing to scroll to: the engine centred, and
+     shrinking on shorter screens. */
   .heroGrid {
     --hero-align: flex-start;
     --hero-text-align: left;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     grid-template-areas:
-      "header engine globe"
-      "tour engine globe"
-      "tour features features";
+      "header engine features"
+      "tour engine features";
     justify-items: stretch;
     column-gap: 1.5rem;
     row-gap: 1.25rem;
@@ -295,25 +314,24 @@
   .heroHeader {
     align-self: end;
   }
-  .heroEngine,
-  .heroGlobe {
+  .heroEngine {
     align-self: center;
   }
   .heroTour {
     align-self: start;
   }
   .heroFeatures {
-    align-self: start;
-    max-width: none;
+    align-self: center;
+    justify-self: end;
+    max-width: 22rem;
     padding-top: 0;
   }
-  .heroGlobe {
-    width: 100%;
-    max-width: 400px;
-    justify-self: center;
+  /* Stacked in their column, rather than side by side. */
+  .heroFeatures > div {
+    grid-template-columns: minmax(0, 1fr);
   }
   .engineBox {
-    width: min(520px, 36vw, calc(100vh - 190px));
+    width: min(540px, 38vw, calc(100vh - 140px));
   }
 }
 

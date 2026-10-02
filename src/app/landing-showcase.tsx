@@ -1,11 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import {
-  DEFAULT_ARC_COLOR,
-  FlightGlobe,
-  type GlobePoint,
-} from "./flights/flight-globe";
+import { DEFAULT_ARC_COLOR } from "./flights/route-color";
 import { SelectedFlightCard } from "./flights/selected-flight-card";
 import { SelectionProvider, useSelection } from "./flights/selection-context";
 import {
@@ -18,8 +14,8 @@ import {
 import { isoDaysBefore, localToday } from "@/lib/dates";
 import styles from "./home.module.css";
 
-// How long each example flight stays up, and how long to wait for the globe
-// to load before the first one.
+// How long each example flight stays up, and how long to wait before the
+// first one.
 const DWELL_MS = 7000;
 const FIRST_DELAY_MS = 1500;
 
@@ -27,20 +23,17 @@ const noopSubscribe = () => () => {};
 
 // The landing page hero's layout and example-flight tour: the heading (and
 // under it, a summary card for the current example flight) on the left, the
-// engine animation's anchor in the middle, the globe on the right, and the
-// feature blurbs under those two; on a narrow screen, stacked in that order
-// but with the engine second. The
-// globe keeps the last few generated example flights drawn and, every few
-// seconds, generates a new one (see generateExampleFlight — endless, from
-// real airline routes) and flies onto it, until the visitor pauses it.
+// engine animation's anchor in the middle and the feature blurbs on the
+// right; on a narrow screen, stacked in that order but with the engine
+// second. Every few seconds the tour generates a new example flight (see
+// generateExampleFlight: endless, from real airline routes) and shows it on
+// the card, until the visitor pauses it.
 export function LandingShowcase(props: {
   header: React.ReactNode;
   engine: React.ReactNode;
   features: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
-  /** Show the flights on a flat map instead of the globe. */
-  flat?: boolean;
 }) {
   return (
     <SelectionProvider>
@@ -55,14 +48,12 @@ function Showcase({
   features,
   airports,
   initial,
-  flat = false,
 }: {
   header: React.ReactNode;
   engine: React.ReactNode;
   features: React.ReactNode;
   airports: Record<string, ExampleAirport>;
   initial: ExampleFlight[];
-  flat?: boolean;
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const [paused, setPaused] = useState(false);
@@ -79,15 +70,9 @@ function Showcase({
   const today = useSyncExternalStore(noopSubscribe, localToday, () => null);
 
   const routes = useMemo(() => usableRoutes(airports), [airports]);
-  const { arcs, points, details } = useMemo(() => {
-    const pointsByCode = new Map<string, GlobePoint>();
-    for (const flight of flights) {
-      for (const point of flight.points) pointsByCode.set(point.code, point);
-    }
-    return {
-      arcs: flights.map((flight) => flight.arc),
-      points: Array.from(pointsByCode.values()),
-      details: Object.fromEntries(
+  const details = useMemo(
+    () =>
+      Object.fromEntries(
         flights.map((flight) => [
           flight.id,
           today
@@ -95,8 +80,8 @@ function Showcase({
             : flight.details,
         ]),
       ),
-    };
-  }, [flights, today]);
+    [flights, today],
+  );
 
   const delay = started ? DWELL_MS : FIRST_DELAY_MS;
 
@@ -172,18 +157,6 @@ function Showcase({
         </div>
       </div>
 
-      <div className={styles.heroGlobe}>
-        {/* Display-only: the tour drives it, visitors can't drag or click
-            it. Always shown whole, turning to face each flight. */}
-        <FlightGlobe
-          points={points}
-          arcs={arcs}
-          bare
-          flat={flat}
-          wholeGlobe
-          interactive={false}
-        />
-      </div>
       <div className={styles.heroFeatures}>{features}</div>
     </div>
   );

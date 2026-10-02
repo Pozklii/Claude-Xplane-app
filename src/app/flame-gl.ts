@@ -18,7 +18,7 @@ const MAX_XFORMS = 4;
 const NV = VARIATIONS.length;
 const ITERATIONS = 18;
 // How much of the buffer survives each frame.
-const DECAY = 0.93;
+const DECAY = 0.95;
 // The buffer's resolution relative to the canvas's CSS size: the flame is
 // soft, so a lower one spends the points on density rather than pixels.
 const RESOLUTION = 0.6;
@@ -71,7 +71,11 @@ vec2 variation(int k, vec2 p, inout uint s) {
   if (k == 5) return vec2(sin(th) / r, r * cos(th)); // hyperbolic
   if (k == 6) { float om = rand(s) < 0.5 ? 0.0 : 3.14159265; return sqrt(r) * vec2(cos(th / 2.0 + om), sin(th / 2.0 + om)); } // julia
   if (k == 7) return p * (4.0 / (r2 + 4.0)); // bubble
-  return p * (2.0 / (r + 1.0)); // eyefish
+  if (k == 8) return p * (2.0 / (r + 1.0)); // eyefish
+  if (k == 10) return sin(p); // sinusoidal
+  if (k == 11) return p / r2; // spherical
+  if (k == 12) return th / 3.14159265 * vec2(sin(3.14159265 * r), cos(3.14159265 * r)); // disc
+  return p; // linear (9)
 }
 
 vec3 palette(float t) {
@@ -287,7 +291,7 @@ export function startFlame(
     loc(points, "uPalettePos"),
     flame.palette.map(([pos]) => pos),
   );
-  gl.uniform2f(loc(points, "uCenter"), 0, 0);
+  gl.uniform2f(loc(points, "uCenter"), ...(flame.center ?? [0, 0]));
   gl.useProgram(tone);
   gl.uniform3f(
     loc(tone, "uBg"),
@@ -379,7 +383,7 @@ export function startFlame(
     // phones light.
     count = sharp
       ? Math.round(Math.min(900_000, Math.max(150_000, W * H * 0.5)))
-      : Math.round(Math.min(360_000, Math.max(90_000, W * H * 0.55)));
+      : Math.round(Math.min(400_000, Math.max(100_000, W * H * 0.8)));
     // Frame it like the still: covering the canvas at the still's aspect.
     const effW = Math.max(W, H * STILL_ASPECT);
     gl.useProgram(points);

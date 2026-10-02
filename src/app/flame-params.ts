@@ -14,6 +14,12 @@ export const VARIATIONS = [
   "julia",
   "bubble",
   "eyefish",
+  // Not used by the three below; available to generated flames
+  // (flame-random.ts).
+  "linear",
+  "sinusoidal",
+  "spherical",
+  "disc",
 ] as const;
 export type Variation = (typeof VARIATIONS)[number];
 
@@ -29,6 +35,8 @@ export type FlameParams = {
   final: { variations: Partial<Record<Variation, number>> } | null;
   scale: number;
   rotate: number;
+  /** The point the camera centres on (default: the origin). */
+  center?: [number, number];
   palette: [number, [number, number, number]][];
   bg: [number, number, number];
   dim: number;
