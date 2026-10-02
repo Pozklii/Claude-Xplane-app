@@ -6,14 +6,23 @@ import styles from "./home.module.css";
 const MOTES = 90;
 // A full turn of the slowest orbit takes about this long, in seconds.
 const ORBIT_SECONDS = 260;
+// Floating, the slowest mote takes about this long to rise up the page.
+const RISE_SECONDS = 90;
 
 // Glowing specks for the fractal-flame backgrounds: each slowly orbits the
 // middle of the page (the flame's own swirl) at its own pace and distance,
 // drifting in and out a little and twinkling, in the flame's colours.
 // Drawn additively on a canvas covering the page; paused when the tab is
 // hidden (requestAnimationFrame stops), and a single still frame under
-// prefers-reduced-motion.
-export function FlameMotes({ colors }: { colors: string[] }) {
+// prefers-reduced-motion. With `float`, they instead rise slowly up the
+// page like dust in still air, swaying a little as they go.
+export function FlameMotes({
+  colors,
+  float = false,
+}: {
+  colors: string[];
+  float?: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -42,13 +51,27 @@ export function FlameMotes({ colors }: { colors: string[] }) {
       const cy = H / 2;
       const reach = Math.hypot(W, H) / 2;
       for (const m of motes) {
-        const a = m.angle + (m.speed * t * Math.PI * 2) / ORBIT_SECONDS;
-        const d = reach * (m.dist + 0.03 * Math.sin(t * 0.21 + m.wobble));
-        const x = cx + Math.cos(a) * d;
-        // Squashed a little, like a swirl seen at an angle.
-        const y = cy + Math.sin(a) * d * 0.7;
+        let x: number;
+        let y: number;
+        if (float) {
+          // Each starts at its own height (from its angle) and column
+          // (from its distance), rising at its own pace, wrapping round.
+          const rise =
+            (m.angle / (Math.PI * 2) + (Math.abs(m.speed) * t) / RISE_SECONDS) %
+            1;
+          y = H + 10 - rise * (H + 20);
+          x = (m.dist / 0.87) * W + 14 * m.size * Math.sin(t * 0.3 + m.wobble);
+        } else {
+          const a = m.angle + (m.speed * t * Math.PI * 2) / ORBIT_SECONDS;
+          const d = reach * (m.dist + 0.03 * Math.sin(t * 0.21 + m.wobble));
+          x = cx + Math.cos(a) * d;
+          // Squashed a little, like a swirl seen at an angle.
+          y = cy + Math.sin(a) * d * 0.7;
+        }
         if (x < -10 || x > W + 10 || y < -10 || y > H + 10) continue;
-        const glow = 0.25 + 0.75 * Math.pow(0.5 + 0.5 * Math.sin(t * m.twinkle + m.phase), 3);
+        const glow =
+          0.25 +
+          0.75 * Math.pow(0.5 + 0.5 * Math.sin(t * m.twinkle + m.phase), 3);
         const r = m.size * 4;
         const g = ctx.createRadialGradient(x, y, 0, x, y, r);
         g.addColorStop(0, `rgba(${m.color},${(0.9 * glow).toFixed(3)})`);
@@ -91,7 +114,9 @@ export function FlameMotes({ colors }: { colors: string[] }) {
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [colors]);
+  }, [colors, float]);
 
-  return <canvas ref={canvasRef} className={styles.flameMotes} aria-hidden="true" />;
+  return (
+    <canvas ref={canvasRef} className={styles.flameMotes} aria-hidden="true" />
+  );
 }

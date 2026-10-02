@@ -161,6 +161,8 @@ uniform vec3 uBg;
 uniform float uDim;
 uniform vec2 uTexel;
 uniform bool uBlur;
+uniform float uGamma;
+uniform float uOpacity;
 in vec2 vUv;
 out vec4 outColor;
 void main() {
@@ -177,7 +179,7 @@ void main() {
   float dens = a.a;
   vec3 avg = dens > 0.0 ? a.rgb / dens : vec3(0.0);
   float alpha = clamp(log(1.0 + dens) / max(uRefLog, 1e-3), 0.0, 1.0);
-  float ga = 0.85 * pow(alpha, 1.0 / 1.5);
+  float ga = uOpacity * pow(alpha, 1.0 / uGamma);
   vec3 rgb = avg * ga + uBg * (1.0 - ga);
   vec2 v = (vUv - 0.5) * 2.0;
   rgb *= 1.0 - 0.45 * dot(v, v) / 2.0;
@@ -218,13 +220,19 @@ export function startFlame(
   {
     onReady,
     onFail,
-    sharp = false,
+    sharp: sharpOption = false,
+    lines = false,
   }: {
     onReady: () => void;
     onFail: () => void;
     /** Crisper: full resolution (up to the screen's pixel density), more
      * points, no blur and a shorter trail; costs more. */
     sharp?: boolean;
+    /** The line style: sharp, and tone-mapped so only the flame's densest
+     * crests light up, as fine bright filaments over dark space, while the
+     * whole flame floats: drifting and bobbing slowly, as if suspended,
+     * and gently breathing in and out. */
+    lines?: boolean;
   },
 ): () => void {
   const gl = canvas.getContext("webgl2", {
@@ -300,12 +308,18 @@ export function startFlame(
     flame.bg[2] / 255,
   );
   gl.uniform1f(loc(tone, "uDim"), flame.dim);
+  const sharp = sharpOption || lines;
   gl.uniform1i(loc(tone, "uBlur"), sharp ? 0 : 1);
+  // Gamma below 1 steepens the tone curve: faint haze stays dark and only
+  // the crests show, as lines.
+  gl.uniform1f(loc(tone, "uGamma"), lines ? 0.9 : 1.5);
+  gl.uniform1f(loc(tone, "uOpacity"), lines ? 1 : 0.85);
+  const exposurePercentile = lines ? 0.996 : 0.999;
   const resolution = sharp
     ? Math.min(1.5, window.devicePixelRatio || 1)
     : RESOLUTION;
   const maxWidth = sharp ? 2600 : MAX_WIDTH;
-  const decay = sharp ? 0.9 : DECAY;
+  const decay = lines ? 0.92 : sharp ? 0.9 : DECAY;
 
   // Two float accumulation buffers, ping-ponged, and a small probe buffer.
   let W = 0;
@@ -367,6 +381,7 @@ export function startFlame(
   };
   setup(probeTarget, PROBE_W, PROBE_H, false);
 
+  let clipScale: [number, number] = [1, 1];
   const resize = () => {
     const cssW = canvas.clientWidth;
     const cssH = canvas.clientHeight;
@@ -386,12 +401,12 @@ export function startFlame(
       : Math.round(Math.min(400_000, Math.max(100_000, W * H * 0.8)));
     // Frame it like the still: covering the canvas at the still's aspect.
     const effW = Math.max(W, H * STILL_ASPECT);
-    gl.useProgram(points);
-    gl.uniform2f(
-      loc(points, "uClipScale"),
+    clipScale = [
       (flame.scale / 2) * (effW / W),
       (flame.scale / 2) * (effW / H),
-    );
+    ];
+    gl.useProgram(points);
+    gl.uniform2f(loc(points, "uClipScale"), ...clipScale);
     gl.useProgram(tone);
     gl.uniform2f(loc(tone, "uTexel"), 1 / W, 1 / H);
   };
@@ -471,6 +486,23 @@ export function startFlame(
       loc(points, "uRot"),
       ((flame.rotate + 6 * Math.sin((t * Math.PI * 2) / 96)) * Math.PI) / 180,
     );
+    if (lines) {
+      // Floating: the camera drifts on two slow, out-of-step rhythms (a
+      // few percent of the view either way) and breathes in and out.
+      const span = 2 / flame.scale;
+      const [cx, cy] = flame.center ?? [0, 0];
+      gl.uniform2f(
+        loc(points, "uCenter"),
+        cx + 0.05 * span * Math.sin((t * Math.PI * 2) / 37),
+        cy + 0.035 * span * Math.sin((t * Math.PI * 2) / 29 + 1.3),
+      );
+      const breathe = 1 + 0.035 * Math.sin((t * Math.PI * 2) / 23);
+      gl.uniform2f(
+        loc(points, "uClipScale"),
+        clipScale[0] * breathe,
+        clipScale[1] * breathe,
+      );
+    }
     gl.drawArrays(gl.POINTS, 0, count);
     gl.disable(gl.BLEND);
     current = 1 - current;
@@ -498,7 +530,8 @@ export function startFlame(
         if (probePixels[i] > 0) lit.push(probePixels[i]);
       if (lit.length > 50) {
         lit.sort((x, y) => x - y);
-        const measured = (lit[Math.floor(lit.length * 0.999) - 1] / 255) * 16;
+        const measured =
+          (lit[Math.floor(lit.length * exposurePercentile) - 1] / 255) * 16;
         refLog = refLog ? refLog + (measured - refLog) * 0.35 : measured;
       }
     }

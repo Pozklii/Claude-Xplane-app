@@ -64,10 +64,18 @@ function coinFlip() {
 }
 
 export default async function Home(props: PageProps<"/">) {
-  const { bg, seed: seedParam, sharp: sharpParam } = await props.searchParams;
+  const {
+    bg,
+    seed: seedParam,
+    sharp: sharpParam,
+    style,
+  } = await props.searchParams;
+  // ?style=lines previews a sharper style: the flame as fine bright lines
+  // over dark space, floating, with the motes drifting upward.
+  const lines = style === "lines";
   // ?sharp=1 previews crisper backgrounds: sharper stills, the live flame
   // at full resolution without blur, and no soft glow over them.
-  const sharp = sharpParam === "1";
+  const sharp = sharpParam === "1" || lines;
   const pinned = typeof bg === "string" && Object.hasOwn(FLAMES, bg);
   const seedNumber =
     typeof seedParam === "string" ? Number.parseInt(seedParam, 10) : NaN;
@@ -106,8 +114,8 @@ export default async function Home(props: PageProps<"/">) {
         // the browser), with motes in its colours. Its number lets a
         // favourite be found again (?seed=).
         <div className={styles.flameSky} aria-hidden="true">
-          <FlameLive seed={seed} sharp={sharp} />
-          <FlameMotes colors={generated.motes} />
+          <FlameLive seed={seed} sharp={sharp} lines={lines} />
+          <FlameMotes colors={generated.motes} float={lines} />
           <p className={styles.flameLabel}>Background no. {seed}</p>
         </div>
       ) : flame ? (
@@ -121,9 +129,9 @@ export default async function Home(props: PageProps<"/">) {
           aria-hidden="true"
         >
           <div className={styles.flameBase} />
-          <FlameLive flame={flame} sharp={sharp} />
+          <FlameLive flame={flame} sharp={sharp} lines={lines} />
           {!sharp && <div className={styles.flameGlow} />}
-          <FlameMotes colors={FLAMES[flame].motes} />
+          <FlameMotes colors={FLAMES[flame].motes} float={lines} />
         </div>
       ) : (
         <>

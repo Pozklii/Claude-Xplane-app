@@ -22,10 +22,13 @@ export function FlameLive({
   flame,
   seed,
   sharp = false,
+  lines = false,
 }: {
   flame?: keyof typeof FLAME_PARAMS;
   seed?: number;
   sharp?: boolean;
+  /** The sharp, floating line style (see startFlame). */
+  lines?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stillRef = useRef<HTMLCanvasElement>(null);
@@ -64,8 +67,9 @@ export function FlameLive({
         drawStill();
       },
       sharp,
+      lines,
     });
-  }, [flame, seed, sharp]);
+  }, [flame, seed, sharp, lines]);
 
   return (
     <>
