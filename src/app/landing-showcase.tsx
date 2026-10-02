@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { DEFAULT_ARC_COLOR } from "./flights/route-color";
+import { MiniGlobe, type MiniGlobeView } from "./mini-globe";
 import { SelectedFlightCard } from "./flights/selected-flight-card";
 import { SelectionProvider, useSelection } from "./flights/selection-context";
 import {
@@ -70,6 +77,12 @@ function Showcase({
   const today = useSyncExternalStore(noopSubscribe, localToday, () => null);
 
   const routes = useMemo(() => usableRoutes(airports), [airports]);
+  // The current flight's route for the card's mini globe, and where the
+  // globe last faced, so each new card's globe turns on from there.
+  const selectedArc = flights.find(
+    (flight) => flight.id === selectedFlightId,
+  )?.arc;
+  const globeView = useRef<MiniGlobeView>(null);
   const details = useMemo(
     () =>
       Object.fromEntries(
@@ -152,6 +165,15 @@ function Showcase({
             arcColor={DEFAULT_ARC_COLOR}
             showThumbnail={false}
             closable={false}
+            aside={
+              selectedArc && (
+                <MiniGlobe
+                  route={selectedArc}
+                  color={DEFAULT_ARC_COLOR}
+                  viewRef={globeView}
+                />
+              )
+            }
             emptyHint="Example flights will appear here in a moment."
           />
         </div>

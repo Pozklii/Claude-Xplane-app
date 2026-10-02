@@ -422,6 +422,13 @@ a.appLink:focus-visible {
   color: var(--on-bg-soft);
 }
 
+/* The tour card's mini globe (mini-globe.tsx). */
+.miniGlobe {
+  display: block;
+  width: 108px;
+  height: 108px;
+}
+
 /* The example-flight tour strip above the landing page's summary card. */
 .showcaseLabel {
   font-size: 10px;

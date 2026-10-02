@@ -81,6 +81,7 @@ export function SelectedFlightCard({
   emptyHint = "Select a flight to see its details.",
   prominent = false,
   mapLink = false,
+  aside,
 }: {
   details: Record<string, FlightDetails>;
   arcColor: string;
@@ -95,6 +96,9 @@ export function SelectedFlightCard({
   prominent?: boolean;
   /** Link to the flight on the Flight Map page (from the Flight Log). */
   mapLink?: boolean;
+  /** Shown beside the route and figures (e.g. the landing page's mini
+   * globe), which then take the rest of the width. */
+  aside?: React.ReactNode;
 }) {
   const { selectedFlightId, setSelectedFlightId } = useSelection();
   const flight = selectedFlightId ? details[selectedFlightId] : undefined;
@@ -198,77 +202,93 @@ export function SelectedFlightCard({
         />
       )}
 
-      <div
-        className={`${styles.reveal} flex items-start justify-between gap-3`}
-        style={{ "--i": 0 } as React.CSSProperties}
-      >
-        <div className="flex flex-col gap-0.5">
-          <h2
-            className={`${styles.route} ${prominent ? "text-2xl" : "text-lg"} font-semibold`}
+      {/* With an aside, the route and figures form a column beside it;
+          without, these wrappers drop out of the layout. */}
+      <div className={aside ? "flex items-start gap-3" : "contents"}>
+        <div
+          className={aside ? "flex min-w-0 flex-1 flex-col gap-4" : "contents"}
+        >
+          <div
+            className={`${styles.reveal} flex items-start justify-between gap-3`}
+            style={{ "--i": 0 } as React.CSSProperties}
           >
-            {flight.from.code} &rarr; {flight.to.code}
-          </h2>
-          <p
-            className={`${styles.soft} flex flex-wrap items-center gap-1 ${prominent ? "text-sm" : "text-xs"}`}
+            <div className="flex flex-col gap-0.5">
+              <h2
+                className={`${styles.route} ${prominent ? "text-2xl" : "text-lg"} font-semibold`}
+              >
+                {flight.from.code} &rarr; {flight.to.code}
+              </h2>
+              <p
+                className={`${styles.soft} flex flex-wrap items-center gap-1 ${prominent ? "text-sm" : "text-xs"}`}
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Flag country={flight.from.country} />
+                  {flight.from.city}
+                </span>
+                <span>to</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Flag country={flight.to.country} />
+                  {flight.to.city}
+                </span>
+              </p>
+            </div>
+            {closable && (
+              <button
+                type="button"
+                onClick={() => setSelectedFlightId(null)}
+                className={styles.close}
+                aria-label="Close flight details"
+              >
+                &times;
+              </button>
+            )}
+          </div>
+
+          <dl
+            className={`${styles.reveal} grid grid-cols-2 gap-3`}
+            style={{ "--i": 1 } as React.CSSProperties}
           >
-            <span className="inline-flex items-center gap-1.5">
-              <Flag country={flight.from.country} />
-              {flight.from.city}
-            </span>
-            <span>to</span>
-            <span className="inline-flex items-center gap-1.5">
-              <Flag country={flight.to.country} />
-              {flight.to.city}
-            </span>
-          </p>
+            <div className="flex flex-col gap-1">
+              <dt className={styles.label}>Distance</dt>
+              <dd
+                className={`${styles.stat} ${prominent ? "text-xl" : "text-base"} font-semibold`}
+              >
+                <CountUp
+                  value={flight.distanceNm}
+                  format={(n) => `${formatInteger(n)} nm`}
+                />
+              </dd>
+              <dd className={`${styles.soft} text-[11px] tabular-nums`}>
+                <CountUp
+                  value={distanceKm}
+                  format={(n) => `${formatInteger(n)} km`}
+                />
+              </dd>
+            </div>
+            <div className="flex flex-col gap-1">
+              <dt className={styles.label}>Flight time</dt>
+              <dd
+                className={`${styles.stat} ${prominent ? "text-xl" : "text-base"} font-semibold`}
+              >
+                <CountUp value={flight.hours} format={formatDuration} />
+              </dd>
+              {flight.rating != null && (
+                <dd className={`${styles.soft} text-[11px] tabular-nums`}>
+                  Rated {flight.rating}/10
+                </dd>
+              )}
+            </div>
+          </dl>
         </div>
-        {closable && (
-          <button
-            type="button"
-            onClick={() => setSelectedFlightId(null)}
-            className={styles.close}
-            aria-label="Close flight details"
+        {aside && (
+          <div
+            className={`${styles.reveal} shrink-0`}
+            style={{ "--i": 1 } as React.CSSProperties}
           >
-            &times;
-          </button>
+            {aside}
+          </div>
         )}
       </div>
-
-      <dl
-        className={`${styles.reveal} grid grid-cols-2 gap-3`}
-        style={{ "--i": 1 } as React.CSSProperties}
-      >
-        <div className="flex flex-col gap-1">
-          <dt className={styles.label}>Distance</dt>
-          <dd
-            className={`${styles.stat} ${prominent ? "text-xl" : "text-base"} font-semibold`}
-          >
-            <CountUp
-              value={flight.distanceNm}
-              format={(n) => `${formatInteger(n)} nm`}
-            />
-          </dd>
-          <dd className={`${styles.soft} text-[11px] tabular-nums`}>
-            <CountUp
-              value={distanceKm}
-              format={(n) => `${formatInteger(n)} km`}
-            />
-          </dd>
-        </div>
-        <div className="flex flex-col gap-1">
-          <dt className={styles.label}>Flight time</dt>
-          <dd
-            className={`${styles.stat} ${prominent ? "text-xl" : "text-base"} font-semibold`}
-          >
-            <CountUp value={flight.hours} format={formatDuration} />
-          </dd>
-          {flight.rating != null && (
-            <dd className={`${styles.soft} text-[11px] tabular-nums`}>
-              Rated {flight.rating}/10
-            </dd>
-          )}
-        </div>
-      </dl>
 
       <p
         className={`${styles.reveal} ${styles.soft} flex flex-wrap items-center gap-1.5 text-xs`}
