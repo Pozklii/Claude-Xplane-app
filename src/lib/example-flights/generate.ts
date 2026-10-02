@@ -130,6 +130,21 @@ export function generateExampleFlight({
     recentNoteKeys,
   );
 
+  // Gate and runway times, in UTC: a departure off the gate in the day's
+  // usual hours (every 5 minutes), a taxi out to takeoff, and a taxi in
+  // after landing, the block time (gate to gate) being the flight time.
+  const departure = 5 * Math.round(between(5.5 * 60, 23 * 60, rng) / 5);
+  const arrival = departure + Math.round(hours * 60);
+  // Taxiing takes less of a short hop's block time.
+  const taxiOut = Math.round(
+    Math.min(between(8, 24, rng), (arrival - departure) * 0.2),
+  );
+  const taxiIn = Math.round(
+    Math.min(between(4, 14, rng), (arrival - departure) * 0.15),
+  );
+  const takeoff = departure + taxiOut;
+  const landing = arrival - taxiIn;
+
   return {
     id,
     routeKey,
@@ -154,6 +169,7 @@ export function generateExampleFlight({
       to: { code: to.code, city: to.city },
       hours,
       distanceNm: distance,
+      times: { departure, takeoff, landing, arrival },
       notes: notes.text,
       thumbnailUrl: null,
       customThumbnailPath: null,

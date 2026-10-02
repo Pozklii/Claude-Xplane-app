@@ -386,7 +386,11 @@ a.appLink:focus-visible {
 }
 
 /* The example flight's card, as warm dark glass on the landing page. */
+/* The landing card, a little tighter; on a short desktop screen, without
+   its notes, so the page still fits one screenful. */
 .showcaseCardSlot article {
+  gap: 12px;
+  padding: 14px;
   background: rgba(40, 30, 50, 0.4);
   border-color: rgba(240, 190, 120, 0.35);
   backdrop-filter: blur(4px);
@@ -420,6 +424,12 @@ a.appLink:focus-visible {
 
 .featureText {
   color: var(--on-bg-soft);
+}
+
+@media (min-width: 1100px) and (max-height: 760px) {
+  .showcaseCardSlot [data-card-part="notes"] {
+    display: none;
+  }
 }
 
 /* The tour card's mini globe (mini-globe.tsx). */
