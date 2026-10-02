@@ -553,16 +553,21 @@ export function startFlame(
     }
   };
 
+  let firstTick = 0;
   const tick = (now: number) => {
     frame = requestAnimationFrame(tick);
     // About 30 frames a second is plenty for something this slow.
     if (now - last < 30) return;
     const took = last ? now - last : 33;
     last = now;
+    if (!firstTick) firstTick = now;
     render((now - start) / 1000);
-    // Give up (back to the still) if the device can't keep up.
+    // Give up (back to the still) if the device can't keep up: a run of
+    // slow frames, or barely getting going in the first few seconds (so a
+    // weak device is never bogged down for long).
     slowFrames = took > 90 ? slowFrames + 1 : Math.max(0, slowFrames - 1);
-    if (slowFrames > 40) {
+    const struggling = !ready && now - firstTick > 4000 && frames < 30;
+    if (slowFrames > 20 || struggling) {
       stop();
       onFail();
     }
