@@ -1,7 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArcLayer, LineLayer, ScatterplotLayer } from "@deck.gl/layers";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { Layer } from "@deck.gl/core";
+import {
+  ArcLayer,
+  IconLayer,
+  LineLayer,
+  ScatterplotLayer,
+} from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
   LngLatBounds,
@@ -13,6 +25,12 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useSelection } from "./selection-context";
 import { DEFAULT_ARC_COLOR } from "./route-color";
+import {
+  deadReckon,
+  LiveTrafficPanel,
+  useLiveTraffic,
+  type LiveAircraft,
+} from "./live-traffic";
 
 export type GlobePoint = {
   code: string;
@@ -195,6 +213,25 @@ const SPIN_DEGREES_PER_SECOND = 4;
 // engages for realistic data rather than only for globe-spanning ones.
 const SPIN_MAX_ZOOM = 5;
 
+// Live traffic: an airliner silhouette, nose up (north), tinted per aircraft
+// by deck.gl (mask), rotated to its track.
+const AIRCRAFT_ICON = {
+  url:
+    "data:image/svg+xml;charset=utf-8," +
+    encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><path fill="#fff" d="M32 4c2.2 0 3.6 2.6 3.6 6v14.2l20.4 12.1v5.2l-20.4-6.2v12.1l6.6 5v4.1L32 53.7l-10.2 2.8v-4.1l6.6-5V35.3L8 41.5v-5.2l20.4-12.1V10c0-3.4 1.4-6 3.6-6z"/></svg>',
+    ),
+  width: 64,
+  height: 64,
+  mask: true,
+};
+const LIVE_COLOR: [number, number, number, number] = [236, 244, 255, 235];
+const LIVE_SELECTED_COLOR: [number, number, number, number] = [255, 207, 138, 255];
+// Re-query once the view's centre has moved this far from the last query
+// point (the feed covers a 250 nm, ~4°, radius around it).
+const LIVE_REQUERY_DEGREES = 1.5;
+type PlacedAircraft = LiveAircraft & { position: [number, number, number] };
+
 export function FlightGlobe({
   points,
   arcs,
@@ -205,6 +242,7 @@ export function FlightGlobe({
   interactive = true,
   flat = false,
   wholeGlobe = false,
+  liveTraffic = false,
   onAirportClick,
 }: {
   points: GlobePoint[];
@@ -253,6 +291,9 @@ export function FlightGlobe({
   wholeGlobe?: boolean;
   /** Called with an airport's code when it's clicked (after flying in). */
   onAirportClick?: (code: string) => void;
+  /** Show live airline traffic around the centre of the view (adsb.lol),
+   * and pause the idle spin so the view stays put. */
+  liveTraffic?: boolean;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -291,10 +332,36 @@ export function FlightGlobe({
   };
 
   const onAirportClickRef = useRef(onAirportClick);
+  const liveTrafficRef = useRef(liveTraffic);
+  const [liveHex, setLiveHex] = useState<string | null>(null);
+  const setLiveHexRef = useRef(setLiveHex);
   useEffect(() => {
     onSelectIdRef.current = onSelectId;
     selectedIdRef.current = selectedId;
     onAirportClickRef.current = onAirportClick;
+    liveTrafficRef.current = liveTraffic;
+  });
+
+  // The overlay's layers are the flight routes (rebuilt by the data effect
+  // below) plus, when on, the live traffic layer (rebuilt every second as
+  // aircraft move); each side updates its own ref and re-pushes both.
+  const baseLayersRef = useRef<Layer[]>([]);
+  const liveLayerRef = useRef<Layer | null>(null);
+  const pushLayers = useCallback(() => {
+    overlayRef.current?.setProps({
+      layers: liveLayerRef.current
+        ? [...baseLayersRef.current, liveLayerRef.current]
+        : baseLayersRef.current,
+    });
+  }, []);
+  const getMapCentre = useCallback(() => {
+    const centre = mapRef.current?.getCenter();
+    return centre ? { lat: centre.lat, lon: ((centre.lng + 540) % 360) - 180 } : null;
+  }, []);
+  const live = useLiveTraffic(liveTraffic && canDraw, getMapCentre);
+  const liveRef = useRef(live);
+  useEffect(() => {
+    liveRef.current = live;
   });
 
   // Create the map (and its deck.gl overlay) once. Data (arcs/points) and
@@ -352,6 +419,7 @@ export function FlightGlobe({
         !userInteracting &&
         !cameraAnimatingRef.current &&
         !selectedIdRef.current &&
+        !liveTrafficRef.current &&
         !document.hidden &&
         map.getZoom() < SPIN_MAX_ZOOM
       ) {
@@ -639,8 +707,32 @@ export function FlightGlobe({
       // handling is delegated to MapLibre, which only forwards a subset of
       // events) — pick manually from MapLibre's click event instead, which
       // is proven reliable.
+      map.on("moveend", () => {
+        const feed = liveRef.current.feed;
+        if (!liveTrafficRef.current || !feed) return;
+        const centre = map.getCenter();
+        const dLon = Math.abs(((centre.lng - feed.centre.lon + 540) % 360) - 180);
+        if (
+          Math.max(Math.abs(centre.lat - feed.centre.lat), dLon) >
+          LIVE_REQUERY_DEGREES
+        ) {
+          liveRef.current.refresh();
+        }
+      });
+
       map.on("click", (event) => {
         if (!interactiveRef.current) return;
+        if (liveTrafficRef.current) {
+          const plane = overlay.pickObject({
+            x: event.point.x,
+            y: event.point.y,
+            radius: 8,
+            layerIds: ["live-traffic"],
+          });
+          const hex = (plane?.object as PlacedAircraft | undefined)?.hex;
+          setLiveHexRef.current(hex ?? null);
+          if (hex) return;
+        }
         const hit = overlay.pickObject({
           x: event.point.x,
           y: event.point.y,
@@ -810,8 +902,7 @@ export function FlightGlobe({
       // pulse below.
       const renderLayers = (pulse: number) => {
         const [r, g, b, a] = arcColors.glowSelected;
-        overlayRef.current?.setProps({
-          layers: [
+        baseLayersRef.current = [
             ...buildArcLayers(
               "flight-arcs",
               arcs.filter((arc) => arc !== selectedArc),
@@ -828,9 +919,9 @@ export function FlightGlobe({
               2.5 + 1.5 * pulse,
               9 + 16 * pulse,
             ),
-            pointLayer,
-          ],
-        });
+          pointLayer,
+        ];
+        pushLayers();
       };
       cancelAnimationFrame(pulseFrameRef.current);
       renderLayers(0);
@@ -994,7 +1085,57 @@ export function FlightGlobe({
     // by then, so an update deferred to it would silently never apply.
     if (overlayRef.current) apply();
     else map.once("load", apply);
-  }, [arcs, points, selectedId, overviewMaxZoom, arcColor]);
+  }, [arcs, points, selectedId, overviewMaxZoom, arcColor, pushLayers]);
+
+  // Live traffic: place every aircraft where dead reckoning says it is now,
+  // once a second, between the feed's 20-second updates.
+  const liveFeed = live.feed;
+  const selectedLiveHex = liveTraffic ? liveHex : null;
+  useEffect(() => {
+    if (!liveFeed) {
+      if (liveLayerRef.current) {
+        liveLayerRef.current = null;
+        pushLayers();
+      }
+      return;
+    }
+    const draw = () => {
+      const now = Date.now();
+      const data: PlacedAircraft[] = liveFeed.aircraft.map((aircraft) => ({
+        ...aircraft,
+        position: [
+          ...deadReckon(aircraft, liveFeed.receivedAt, now),
+          aircraft.altitudeFt * 0.3048,
+        ],
+      }));
+      liveLayerRef.current = new IconLayer<PlacedAircraft>({
+        id: "live-traffic",
+        data,
+        pickable: true,
+        // Drawn flat on the surface, so each icon's heading stays true to
+        // north as the globe turns; and, like the arcs, with back-face
+        // culling off, without which GlobeView draws none of them.
+        billboard: false,
+        parameters: { cullMode: "none", depthWriteEnabled: false },
+        getIcon: () => AIRCRAFT_ICON,
+        getPosition: (d) => d.position,
+        // deck.gl angles run anticlockwise; tracks run clockwise from north.
+        getAngle: (d) => -d.trackDeg,
+        getSize: (d) => (d.hex === selectedLiveHex ? 26 : 17),
+        getColor: (d) =>
+          d.hex === selectedLiveHex ? LIVE_SELECTED_COLOR : LIVE_COLOR,
+        sizeUnits: "pixels",
+        updateTriggers: {
+          getSize: selectedLiveHex,
+          getColor: selectedLiveHex,
+        },
+      });
+      pushLayers();
+    };
+    draw();
+    const timer = window.setInterval(draw, 1000);
+    return () => window.clearInterval(timer);
+  }, [liveFeed, selectedLiveHex, pushLayers]);
 
   return (
     <div
@@ -1048,6 +1189,14 @@ export function FlightGlobe({
           </p>
         )}
       </div>
+      {liveTraffic && canDraw && (
+        <LiveTrafficPanel
+          feed={live.feed}
+          error={live.error}
+          selectedHex={selectedLiveHex}
+          onClose={() => setLiveHex(null)}
+        />
+      )}
       <p
         className={
           bare
@@ -1085,6 +1234,20 @@ export function FlightGlobe({
           OpenFreeMap
         </a>
         .
+        {liveTraffic && (
+          <>
+            {" "}Live aircraft &copy;{" "}
+            <a
+              href="https://adsb.lol/"
+              className="underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              adsb.lol
+            </a>{" "}
+            contributors (ODbL).
+          </>
+        )}
       </p>
     </div>
   );

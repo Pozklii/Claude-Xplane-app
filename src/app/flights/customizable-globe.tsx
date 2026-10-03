@@ -54,6 +54,9 @@ export function CustomizableGlobe({
     viewThisSession ??
     (flat ? "map" : persistedView === "map" ? "map" : "globe");
   const { airportCode, openAirport } = usePlanner();
+  // Live airline traffic (adsb.lol) around the centre of the view; off by
+  // default, since it polls an outside service.
+  const [liveTraffic, setLiveTraffic] = useState(false);
 
   const handleView = (next: MapView) => {
     setViewThisSession(next);
@@ -107,6 +110,18 @@ export function CustomizableGlobe({
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            aria-pressed={liveTraffic}
+            onClick={() => setLiveTraffic((on) => !on)}
+            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+              liveTraffic
+                ? "border-white/40 bg-white/15 text-white"
+                : "border-white/15 text-white/60 hover:text-white"
+            }`}
+          >
+            Live traffic
+          </button>
           <div
             role="group"
             aria-label="Route colour"
@@ -144,6 +159,7 @@ export function CustomizableGlobe({
           // it rather than zooming in past its round frame.
           wholeGlobe
           flat={view === "map"}
+          liveTraffic={liveTraffic}
           onAirportClick={(code) => openAirport(code, { scroll: false })}
         />
         {airportCode && (
