@@ -35,7 +35,11 @@ type LiveState =
   | { status: "ok"; entries: WeatherChallengeEntry[] };
 
 function ChallengingNow() {
-  const { openAirport } = usePlanner();
+  const { openAirport, plan, loadPlan } = usePlanner();
+  // A weather challenge has no set route: it becomes the destination,
+  // keeping whatever else is planned.
+  const updatePlan = (changes: { to: string }) =>
+    loadPlan({ ...plan, ...changes });
   const [live, setLive] = useState<LiveState>({ status: "loading" });
 
   useEffect(() => {
@@ -117,6 +121,13 @@ function ChallengingNow() {
                   ))}
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={() => updatePlan({ to: entry.icao })}
+                className="mt-1 rounded-full border border-black/[.08] px-2.5 py-1 text-xs text-zinc-700 transition-colors hover:bg-black/[.04] dark:border-white/[.145] dark:text-zinc-300 dark:hover:bg-[#1a1a1a]"
+              >
+                Plan a flight here
+              </button>
             </li>
           ))}
         </ul>
@@ -132,6 +143,7 @@ export function ChallengingFlights({
 }: {
   challenges: ChallengeCardData[];
 }) {
+  const { loadPlan } = usePlanner();
   return (
     <div className="flex flex-col gap-6">
       <ChallengingNow />
@@ -210,6 +222,21 @@ export function ChallengingFlights({
                       {challenge.route.aircraft}
                     </span>
                   </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      challenge.route &&
+                      loadPlan({
+                        from: challenge.route.from.code,
+                        to: challenge.icao,
+                        airline: challenge.route.airline ?? "",
+                        aircraft: challenge.route.aircraft,
+                      })
+                    }
+                    className="ml-auto shrink-0 rounded-full bg-blue-600 px-2.5 py-1 font-medium text-white transition-colors hover:bg-blue-700"
+                  >
+                    Plan this flight
+                  </button>
                 </div>
               )}
             </li>

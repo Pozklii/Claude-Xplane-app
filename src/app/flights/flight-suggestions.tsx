@@ -5,6 +5,7 @@ import { estimateHours, KNOWN_AIRCRAFT, matchAircraft } from "@/lib/aircraft";
 import { formatDuration } from "@/lib/dates";
 import { AirlineLogo } from "./airline-logo";
 import { AirportLink } from "./airport-link";
+import { usePlanner } from "./planner-context";
 import type { SuggestionRoute } from "./planner-data";
 
 const QUICK_TYPES = [
@@ -36,6 +37,7 @@ export function FlightSuggestions({
 }) {
   const [query, setQuery] = useState(defaultAircraft);
   const [showAll, setShowAll] = useState(false);
+  const { loadPlan } = usePlanner();
   const flown = useMemo(() => new Set(flownRouteKeys), [flownRouteKeys]);
 
   const matches = useMemo(() => matchAircraft(query), [query]);
@@ -183,6 +185,20 @@ export function FlightSuggestions({
                       Flown
                     </span>
                   )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      loadPlan({
+                        from: route.from.code,
+                        to: route.to.code,
+                        airline: route.airline ?? "",
+                        aircraft: types[0] ?? "",
+                      })
+                    }
+                    className="rounded-full bg-blue-600 px-2.5 py-1 font-medium text-white transition-colors hover:bg-blue-700"
+                  >
+                    Plan this flight
+                  </button>
                 </div>
               </li>
             ))}

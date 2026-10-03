@@ -386,8 +386,7 @@ a.appLink:focus-visible {
 }
 
 /* The example flight's card, as warm dark glass on the landing page. */
-/* The landing card, a little tighter; on a short desktop screen, without
-   its notes, so the page still fits one screenful. */
+/* The landing card, a little tighter, so the page fits one screenful. */
 .showcaseCardSlot article {
   gap: 12px;
   padding: 14px;
@@ -426,9 +425,19 @@ a.appLink:focus-visible {
   color: var(--on-bg-soft);
 }
 
-@media (min-width: 1100px) and (max-height: 760px) {
-  .showcaseCardSlot [data-card-part="notes"] {
-    display: none;
+/* On a short desktop screen, a slightly smaller heading and tighter gaps
+   in the hero's left column, so the whole tour card (notes included) still
+   fits one screenful. */
+@media (min-width: 1100px) and (max-height: 720px) {
+  .heroIntro {
+    gap: 0.5rem;
+  }
+  .heroIntro h1 {
+    font-size: 1.875rem;
+    line-height: 2.2rem;
+  }
+  .heroGrid {
+    row-gap: 0.75rem;
   }
 }
 

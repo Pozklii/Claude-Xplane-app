@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { estimateHours, KNOWN_AIRCRAFT } from "@/lib/aircraft";
+import { formatDuration } from "@/lib/dates";
 import { distanceNm, initialCourse } from "@/lib/geo";
 import { lookupAirport, type AirportLookup } from "./airport-actions";
+import { AirlineLogo } from "./airline-logo";
 import { Flag } from "./flag";
-import { usePlanner } from "./planner-context";
+import { ROUTE_PLAN_ID, usePlanner } from "./planner-context";
 
 const KM_PER_NM = 1.852;
 const MI_PER_NM = 1.15078;
@@ -86,16 +89,32 @@ function AirportField({
   );
 }
 
-// The Flight Plan page's route: a From and To airport, and the distance
-// between them (great circle), with the initial heading and a rough flight
-// time. Each airport's details and weather are a click away.
-export function RoutePlanner() {
-  const { airportCode, openAirport } = usePlanner();
-  // Starts from the airport the page was opened for, if any.
-  const [from, setFrom] = useState(airportCode ?? "");
-  const [to, setTo] = useState("");
+const fieldClass =
+  "w-full rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50";
+
+// The Flight Plan page's route: a From and To airport, the airline and
+// aircraft, and the distance between the airports (great circle), with the
+// initial heading and a flight time for the aircraft. Choosing a suggested
+// route or a challenge further down the page loads it here (see loadPlan).
+// Each airport's details and weather are a click away.
+export function RoutePlanner({
+  airlines,
+}: {
+  /** Airlines to suggest, with IATA codes for their logos. */
+  airlines: { name: string; iata: string | null }[];
+}) {
+  const { openAirport, plan, updatePlan, planLoads } = usePlanner();
+  const { from, to, airline, aircraft } = plan;
+  const setFrom = (value: string) => updatePlan({ from: value });
+  const setTo = (value: string) => updatePlan({ to: value });
   const fromLookup = useAirport(from);
   const toLookup = useAirport(to);
+  const airlineIata =
+    airlines.find((a) => a.name.toLowerCase() === airline.trim().toLowerCase())
+      ?.iata ?? null;
+  const knownAircraft = KNOWN_AIRCRAFT.find(
+    (name) => name.toLowerCase() === aircraft.trim().toLowerCase(),
+  );
 
   const both =
     fromLookup.state === "found" && toLookup.state === "found"
@@ -103,10 +122,22 @@ export function RoutePlanner() {
       : null;
   const nm = both ? distanceNm(both.a, both.b) : null;
   const course = both ? initialCourse(both.a, both.b) : null;
-  const hours = nm !== null ? nm / AVERAGE_KT : null;
+  // The chosen aircraft's own cruise speed and overheads, when it's one we
+  // know; otherwise a typical airliner's average.
+  const hours =
+    nm === null
+      ? null
+      : knownAircraft
+        ? estimateHours(knownAircraft, nm)
+        : nm / AVERAGE_KT;
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl bg-zinc-50 p-4 dark:bg-zinc-900/60">
+    <div
+      id={ROUTE_PLAN_ID}
+      // Keyed by loads, so a newly loaded flight replays the highlight.
+      key={planLoads}
+      className={`flex scroll-mt-6 flex-col gap-4 rounded-xl bg-zinc-50 p-4 dark:bg-zinc-900/60 ${planLoads > 0 ? "motion-safe:animate-[planLoaded_1.6s_ease-out]" : ""}`}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <AirportField
           label="From"
@@ -146,6 +177,58 @@ export function RoutePlanner() {
         />
       </div>
 
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <label
+            htmlFor="route-airline"
+            className="text-xs font-medium uppercase tracking-wide text-zinc-500"
+          >
+            Airline
+          </label>
+          <div className="flex items-center gap-2">
+            {airline.trim() && (
+              <AirlineLogo name={airline.trim()} iata={airlineIata} />
+            )}
+            <input
+              id="route-airline"
+              list="route-airlines"
+              value={airline}
+              onChange={(event) => updatePlan({ airline: event.target.value })}
+              placeholder="Any airline, or private"
+              autoComplete="off"
+              className={fieldClass}
+            />
+          </div>
+          <datalist id="route-airlines">
+            {airlines.map((a) => (
+              <option key={a.name} value={a.name} />
+            ))}
+          </datalist>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <label
+            htmlFor="route-aircraft"
+            className="text-xs font-medium uppercase tracking-wide text-zinc-500"
+          >
+            Aircraft
+          </label>
+          <input
+            id="route-aircraft"
+            list="route-aircraft-types"
+            value={aircraft}
+            onChange={(event) => updatePlan({ aircraft: event.target.value })}
+            placeholder="e.g. Boeing 737-800"
+            autoComplete="off"
+            className={fieldClass}
+          />
+          <datalist id="route-aircraft-types">
+            {KNOWN_AIRCRAFT.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        </div>
+      </div>
+
       {both && nm !== null && course !== null && hours !== null ? (
         <div className="flex flex-col gap-3 border-t border-black/[.06] pt-4 sm:flex-row sm:items-end sm:justify-between dark:border-white/[.08]">
           <div className="flex flex-col gap-1">
@@ -159,9 +242,8 @@ export function RoutePlanner() {
               {fmt(nm * KM_PER_NM)} km &middot; {fmt(nm * MI_PER_NM)} mi
               &middot; initial heading{" "}
               {String(Math.round(course) % 360).padStart(3, "0")}&deg; &middot;
-              about {Math.floor(hours)}h{" "}
-              {String(Math.round((hours % 1) * 60)).padStart(2, "0")}m at{" "}
-              {AVERAGE_KT} kt
+              about {formatDuration(hours)}{" "}
+              {knownAircraft ? `in a ${knownAircraft}` : `at ${AVERAGE_KT} kt`}
             </p>
           </div>
           <div className="flex gap-2">

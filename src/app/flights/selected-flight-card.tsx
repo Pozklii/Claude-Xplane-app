@@ -22,7 +22,8 @@ export type FlightDetails = {
   hours: number;
   distanceNm: number;
   /** Gate and runway times (example flights), in minutes after midnight
-   * UTC on the flight's date; past 1440 is the next day. */
+   * UTC on the flight's date; past 1440 is the next day. The card shows
+   * the takeoff and landing times. */
   times?: {
     departure: number;
     takeoff: number;
@@ -54,10 +55,8 @@ function formatClock(minutes: number) {
 }
 
 const TIME_LABELS = [
-  ["departure", "Departure"],
   ["takeoff", "Takeoff"],
   ["landing", "Landing"],
-  ["arrival", "Arrival"],
 ] as const;
 
 // Counts up from 0 to `value` once on mount by writing straight to the
@@ -302,6 +301,27 @@ export function SelectedFlightCard({
                 </dd>
               )}
             </div>
+            {flight.times &&
+              TIME_LABELS.map(([key, label]) => {
+                const { clock, day } = formatClock(flight.times![key]);
+                return (
+                  <div key={key} className="flex flex-col gap-1">
+                    <dt className={styles.label}>{label} (UTC)</dt>
+                    <dd
+                      className={`${styles.stat} text-base font-semibold tabular-nums`}
+                    >
+                      {clock}
+                      {day && (
+                        <sup
+                          className={`${styles.soft} ml-0.5 text-[10px] font-normal`}
+                        >
+                          {day}
+                        </sup>
+                      )}
+                    </dd>
+                  </div>
+                );
+              })}
           </dl>
         </div>
         {aside && (
@@ -313,38 +333,6 @@ export function SelectedFlightCard({
           </div>
         )}
       </div>
-
-      {flight.times && (
-        <section
-          className={`${styles.reveal} flex flex-col gap-1.5`}
-          style={{ "--i": 2 } as React.CSSProperties}
-        >
-          <h3 className={styles.label}>Times (UTC)</h3>
-          <dl className="grid grid-cols-4 gap-2">
-            {TIME_LABELS.map(([key, label]) => {
-              const { clock, day } = formatClock(flight.times![key]);
-              return (
-                <div key={key} className="flex flex-col gap-0.5">
-                  <dt className={`${styles.soft} text-[11px]`}>{label}</dt>
-                  <dd
-                    className={`${styles.stat} text-sm font-semibold tabular-nums`}
-                  >
-                    {clock}
-                    {day && (
-                      <sup
-                        className={`${styles.soft} ml-0.5 text-[10px] font-normal`}
-                      >
-                        {day}
-                      </sup>
-                    )}
-                  </dd>
-                </div>
-              );
-            })}
-          </dl>
-        </section>
-      )}
-
       <p
         className={`${styles.reveal} ${styles.soft} flex flex-wrap items-center gap-1.5 text-xs`}
         style={{ "--i": 2 } as React.CSSProperties}
@@ -369,7 +357,6 @@ export function SelectedFlightCard({
       <section
         className={`${styles.reveal} flex flex-col gap-1`}
         style={{ "--i": 3 } as React.CSSProperties}
-        data-card-part="notes"
       >
         <h3 className={styles.label}>Notes</h3>
         {flight.notes ? (

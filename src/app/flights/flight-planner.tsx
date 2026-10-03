@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { AirportExplorer } from "./airport-explorer";
 import { ChallengingFlights } from "./challenging-flights";
 import { FlightSuggestions } from "./flight-suggestions";
@@ -29,6 +30,18 @@ export function FlightPlanner({
   flownRouteKeys: string[];
 }) {
   const { tab, setTab, visited } = usePlanner();
+  // The airlines on the suggested routes (the favourite first), for the
+  // route panel's airline field.
+  const airlines = useMemo(() => {
+    const byName = new Map<string, string | null>();
+    if (favouriteAirline)
+      byName.set(favouriteAirline.name, favouriteAirline.iata);
+    for (const route of routes) {
+      if (route.airline && !byName.has(route.airline))
+        byName.set(route.airline, route.airlineIata);
+    }
+    return [...byName].map(([name, iata]) => ({ name, iata }));
+  }, [routes, favouriteAirline]);
 
   return (
     <section
@@ -39,7 +52,7 @@ export function FlightPlanner({
         Plan your next flight
       </h2>
 
-      <RoutePlanner />
+      <RoutePlanner airlines={airlines} />
 
       <div className="flex">
         <div
