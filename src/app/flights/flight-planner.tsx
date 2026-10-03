@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { AirportExplorer } from "./airport-explorer";
 import { ChallengingFlights } from "./challenging-flights";
+import { ConfirmedFlightPanel } from "./confirmed-flight";
 import { FlightSuggestions } from "./flight-suggestions";
 import type { ChallengeCardData, SuggestionRoute } from "./planner-data";
 import { PLANNER_ID, usePlanner, type PlannerTab } from "./planner-context";
@@ -52,6 +53,7 @@ export function FlightPlanner({
         Plan your next flight
       </h2>
 
+      <ConfirmedFlightPanel />
       <RoutePlanner airlines={airlines} />
 
       <div className="flex">

@@ -6,6 +6,11 @@ import { formatDuration } from "@/lib/dates";
 import { distanceNm, initialCourse } from "@/lib/geo";
 import { lookupAirport, type AirportLookup } from "./airport-actions";
 import { AirlineLogo } from "./airline-logo";
+import { CONFIRMED_FLIGHT_ID } from "./confirmed-flight";
+import {
+  setConfirmedFlight,
+  useConfirmedFlight,
+} from "./confirmed-flight-store";
 import { Flag } from "./flag";
 import { ROUTE_PLAN_ID, usePlanner } from "./planner-context";
 
@@ -96,7 +101,8 @@ const fieldClass =
 // aircraft, and the distance between the airports (great circle), with the
 // initial heading and a flight time for the aircraft. Choosing a suggested
 // route or a challenge further down the page loads it here (see loadPlan).
-// Each airport's details and weather are a click away.
+// Each airport's details and weather are a click away, and once there's an
+// aircraft the flight can be confirmed (see confirmed-flight.tsx).
 export function RoutePlanner({
   airlines,
 }: {
@@ -130,6 +136,44 @@ export function RoutePlanner({
       : knownAircraft
         ? estimateHours(knownAircraft, nm)
         : nm / AVERAGE_KT;
+
+  const confirmed = useConfirmedFlight();
+  const isConfirmed =
+    confirmed !== null &&
+    both !== null &&
+    confirmed.from === both.a.code &&
+    confirmed.to === both.b.code &&
+    confirmed.airline === airline.trim() &&
+    confirmed.aircraft === aircraft.trim();
+  const confirm = () => {
+    if (!both || nm === null || hours === null || !aircraft.trim()) return;
+    const place = (airport: AirportLookup) =>
+      airport.city ? `${airport.name}, ${airport.city}` : airport.name;
+    setConfirmedFlight({
+      from: both.a.code,
+      to: both.b.code,
+      fromName: place(both.a),
+      toName: place(both.b),
+      fromCountry: both.a.country?.code ?? null,
+      toCountry: both.b.country?.code ?? null,
+      airline: airline.trim(),
+      airlineIata,
+      aircraft: aircraft.trim(),
+      nm,
+      hours,
+      confirmedAt: new Date().toISOString(),
+    });
+    // Once it's drawn, bring the confirmed flight (just above) into view.
+    requestAnimationFrame(() => {
+      const reduce = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      document.getElementById(CONFIRMED_FLIGHT_ID)?.scrollIntoView({
+        behavior: reduce ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  };
 
   return (
     <div
@@ -264,6 +308,34 @@ export function RoutePlanner({
           Enter two airports (ICAO or IATA codes) to see the distance between
           them.
         </p>
+      )}
+
+      {both && (
+        <div className="flex flex-wrap items-center gap-3">
+          {isConfirmed ? (
+            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+              &#10003; This flight is confirmed.
+            </p>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={confirm}
+                disabled={!aircraft.trim()}
+                className="rounded-full bg-foreground px-5 py-2 text-sm font-medium text-background transition-colors hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-[#ccc]"
+              >
+                Confirm flight
+              </button>
+              <p className="text-xs text-zinc-500">
+                {!aircraft.trim()
+                  ? "Choose an aircraft to confirm this flight."
+                  : confirmed
+                    ? `Replaces your confirmed ${confirmed.from} → ${confirmed.to}.`
+                    : "Then fly it, and log it when you're done."}
+              </p>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
