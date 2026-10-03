@@ -2,11 +2,11 @@ import Link from "next/link";
 import styles from "./home.module.css";
 
 // The app's three sections, each its own page, which need an account: the
-// flight log (logging and the list of flights), the flight map (the globe)
-// and the flight planner.
+// flight map (the globe, and where signing in lands), the flight log
+// (logging and the list of flights) and the flight planner.
 export const APP_LINKS = [
-  { href: "/log", label: "Flight Log", icon: "log" },
   { href: "/flights", label: "Flight Map", icon: "map" },
+  { href: "/log", label: "Flight Log", icon: "log" },
   { href: "/plan", label: "Flight Plan", icon: "plan" },
 ] as const;
 

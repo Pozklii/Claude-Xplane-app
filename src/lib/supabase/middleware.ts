@@ -39,6 +39,13 @@ export async function updateSession(request: NextRequest) {
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
 
+  // Signed in, the Flight Map is home: the bare landing page sends you
+  // there. (With a query, e.g. a background preview like ?bg=ember, the
+  // landing page still shows.)
+  if (pathname === "/" && user && !request.nextUrl.search) {
+    return redirectWithCookies(new URL("/flights", request.url), response);
+  }
+
   if (isProtected && !user) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
@@ -46,4 +53,12 @@ export async function updateSession(request: NextRequest) {
   }
 
   return response;
+}
+
+// A redirect carrying over any cookies the session refresh set, so a
+// refreshed token isn't lost on the way.
+function redirectWithCookies(url: URL, from: NextResponse) {
+  const redirect = NextResponse.redirect(url);
+  for (const cookie of from.cookies.getAll()) redirect.cookies.set(cookie);
+  return redirect;
 }

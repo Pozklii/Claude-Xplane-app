@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { APP_LINKS } from "./app-links";
+import { HeaderLinks } from "./header-links";
 import { signOut } from "./login/actions";
 
 export async function SiteHeader() {
@@ -10,25 +10,17 @@ export async function SiteHeader() {
   } = await supabase.auth.getUser();
 
   return (
-    <header className="flex items-center justify-between border-b border-black/[.08] px-6 py-4 dark:border-white/[.145]">
+    <header className="flex items-center justify-between gap-4 border-b border-black/[.08] px-6 py-4 dark:border-white/[.145]">
       <Link
         href="/"
         className="text-sm font-semibold text-black dark:text-zinc-50"
       >
         Flight World
       </Link>
-      <nav className="flex items-center gap-4 text-sm">
+      <nav className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm">
         {user ? (
           <>
-            {APP_LINKS.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="text-zinc-600 hover:text-black dark:text-zinc-400 dark:hover:text-zinc-50"
-              >
-                {link.label}
-              </Link>
-            ))}
+            <HeaderLinks />
             <form action={signOut}>
               <button
                 type="submit"
