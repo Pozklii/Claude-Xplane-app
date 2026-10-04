@@ -13,12 +13,13 @@ import { SelectedFlightCard } from "./flights/selected-flight-card";
 import { SelectionProvider, useSelection } from "./flights/selection-context";
 import {
   EXAMPLE_HISTORY_SIZE,
+  exampleFlightDate,
   generateExampleFlight,
   usableRoutes,
   type ExampleAirport,
   type ExampleFlight,
 } from "@/lib/example-flights/generate";
-import { isoDaysBefore, localToday } from "@/lib/dates";
+import { localToday } from "@/lib/dates";
 import styles from "./home.module.css";
 
 // How long each example flight stays up, and how long to wait before the
@@ -89,7 +90,10 @@ function Showcase({
         flights.map((flight) => [
           flight.id,
           today
-            ? { ...flight.details, date: isoDaysBefore(today, flight.daysAgo) }
+            ? {
+                ...flight.details,
+                date: exampleFlightDate(today, flight.daysAgo),
+              }
             : flight.details,
         ]),
       ),

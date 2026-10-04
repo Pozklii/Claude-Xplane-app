@@ -13,6 +13,15 @@ export function isoDaysBefore(isoDate: string, days: number) {
     .slice(0, 10);
 }
 
+/** Whole days from `fromIso` to `toIso` (both "YYYY-MM-DD"). */
+export function isoDaysBetween(fromIso: string, toIso: string) {
+  const day = (iso: string) => {
+    const [year, month, date] = iso.split("-").map(Number);
+    return Date.UTC(year, month - 1, date) / 86_400_000;
+  };
+  return Math.round(day(toIso) - day(fromIso));
+}
+
 /** Today's date in the viewer's own time zone, as "YYYY-MM-DD". */
 export function localToday() {
   const now = new Date();

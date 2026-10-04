@@ -1,7 +1,7 @@
 import { distanceNm } from "@/lib/geo";
 import type { GlobeArc, GlobePoint } from "@/app/flights/flight-globe";
 import type { FlightDetails } from "@/app/flights/selected-flight-card";
-import { isoDaysBefore } from "@/lib/dates";
+import { isoDaysBefore, isoDaysBetween } from "@/lib/dates";
 import { writeNotes } from "./notes";
 import {
   AIRCRAFT,
@@ -51,13 +51,23 @@ export function usableRoutes(airports: Record<string, ExampleAirport>) {
   });
 }
 
-// How far back generated flights go: anywhere from today to ~18 months ago.
-const MAX_DAYS_AGO = 540;
+// How far back generated flights go: as far as X-Plane 12's release (its
+// full 12.0 release, after the early-access builds), so the range grows
+// by a day every day.
+export const XPLANE_12_RELEASE = "2022-12-17";
+
+/** An example flight's date, `daysAgo` days before `today`, never before
+ * X-Plane 12's release (a flight seeded against a slightly later "today"
+ * elsewhere could otherwise land a day early). */
+export function exampleFlightDate(today: string, daysAgo: number) {
+  const date = isoDaysBefore(today, daysAgo);
+  return date < XPLANE_12_RELEASE ? XPLANE_12_RELEASE : date;
+}
 
 /**
  * One random example flight: a route from the table (in either direction),
- * one of the aircraft that airline flies on it, a date in the last ~18
- * months (possibly `today` itself), a flight
+ * one of the aircraft that airline flies on it, a date any day from
+ * X-Plane 12's release to `today` (possibly `today` itself), a flight
  * time estimated from the real great-circle distance and the aircraft's
  * cruise speed, and a couple of generated notes. Endless — call it as
  * often as needed. Avoids repeating any route listed in `recentRouteKeys`
@@ -114,8 +124,9 @@ export function generateExampleFlight({
     lat: airport.lat,
     lng: airport.lon,
   });
-  const daysAgo = Math.floor(rng() * (MAX_DAYS_AGO + 1));
-  const date = isoDaysBefore(today, daysAgo);
+  const maxDaysAgo = Math.max(0, isoDaysBetween(XPLANE_12_RELEASE, today));
+  const daysAgo = Math.floor(rng() * (maxDaysAgo + 1));
+  const date = exampleFlightDate(today, daysAgo);
   const notes = writeNotes(
     {
       from: from.city,
