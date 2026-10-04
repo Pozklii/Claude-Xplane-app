@@ -28,11 +28,11 @@ const FIRST_DELAY_MS = 1500;
 
 const noopSubscribe = () => () => {};
 
-// The landing page hero's layout and example-flight tour: the heading (and
-// under it, a summary card for the current example flight) on the left, the
-// engine animation's anchor in the middle and the feature blurbs on the
-// right; on a narrow screen, stacked in that order but with the engine
-// second. Every few seconds the tour generates a new example flight (see
+// The landing page hero's layout and example-flight tour: the heading
+// (with signing in and the app's sections) and the feature blurbs on the
+// left, the engine animation's anchor in the middle, and the tour, a
+// summary card for the current example flight, on its own on the right; on
+// a narrow screen, stacked as heading, engine, tour, blurbs. Every few seconds the tour generates a new example flight (see
 // generateExampleFlight: endless, from real airline routes) and shows it on
 // the card, until the visitor pauses it.
 export function LandingShowcase(props: {

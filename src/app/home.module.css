@@ -256,9 +256,10 @@
 }
 /* The hero's layout (see landing-showcase.tsx). On a narrow screen, one
    centred column: heading, engine, example-flight card, feature blurbs. On
-   a wide one, the engine in the middle of the screen, the heading and card
-   to its left and the blurbs stacked to its right, all within the first
-   screenful. */
+   a wide one, the engine in the middle of the screen, the heading (with
+   signing in and the app's sections) and the feature blurbs to its left,
+   and the example-flight tour on its own to its right, all within the
+   first screenful. */
 .heroGrid {
   --hero-align: center;
   --hero-text-align: center;
@@ -277,7 +278,7 @@
 .heroTour {
   grid-area: tour;
   width: 100%;
-  max-width: 24rem;
+  max-width: 28rem;
 }
 .heroFeatures {
   grid-area: features;
@@ -305,11 +306,11 @@
     --hero-text-align: left;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     grid-template-areas:
-      "header engine features"
-      "tour engine features";
+      "header engine tour"
+      "features engine tour";
     justify-items: stretch;
-    column-gap: 1.5rem;
-    row-gap: 1.25rem;
+    column-gap: 2rem;
+    row-gap: 2.5rem;
   }
   .heroHeader {
     align-self: end;
@@ -318,12 +319,13 @@
     align-self: center;
   }
   .heroTour {
-    align-self: start;
-  }
-  .heroFeatures {
     align-self: center;
     justify-self: end;
-    max-width: 22rem;
+    max-width: 30rem;
+  }
+  .heroFeatures {
+    align-self: start;
+    max-width: 24rem;
     padding-top: 0;
   }
   /* Stacked in their column, rather than side by side. */
@@ -331,7 +333,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
   .engineBox {
-    width: min(540px, 38vw, calc(100vh - 140px));
+    width: min(480px, 31vw, calc(100vh - 160px));
   }
 }
 
@@ -386,10 +388,9 @@ a.appLink:focus-visible {
 }
 
 /* The example flight's card, as warm dark glass on the landing page. */
-/* The landing card, a little tighter, so the page fits one screenful. */
 .showcaseCardSlot article {
-  gap: 12px;
-  padding: 14px;
+  gap: 14px;
+  padding: 18px;
   background: rgba(40, 30, 50, 0.4);
   border-color: rgba(240, 190, 120, 0.35);
   backdrop-filter: blur(4px);
@@ -425,9 +426,8 @@ a.appLink:focus-visible {
   color: var(--on-bg-soft);
 }
 
-/* On a short desktop screen, a slightly smaller heading and tighter gaps
-   in the hero's left column, so the whole tour card (notes included) still
-   fits one screenful. */
+/* On a short desktop screen, tighter gaps and a smaller card, so the
+   whole tour card (notes included) still fits one screenful. */
 @media (min-width: 1100px) and (max-height: 720px) {
   .heroIntro {
     gap: 0.5rem;
@@ -437,20 +437,31 @@ a.appLink:focus-visible {
     line-height: 2.2rem;
   }
   .heroGrid {
-    row-gap: 0.75rem;
+    row-gap: 1.25rem;
+  }
+  .showcaseCardSlot article {
+    gap: 10px;
+    padding: 14px;
   }
 }
 
-/* The tour card's mini globe (mini-globe.tsx). */
+/* The tour card's mini globe (mini-globe.tsx): as big as the card has
+   room for beside its figures, and the screen's height allows. */
 .miniGlobe {
   display: block;
-  width: 108px;
-  height: 108px;
+  width: 132px;
+  height: 132px;
+}
+@media (min-width: 640px) {
+  .miniGlobe {
+    width: clamp(132px, 22vh, 184px);
+    height: clamp(132px, 22vh, 184px);
+  }
 }
 
 /* The example-flight tour strip above the landing page's summary card. */
 .showcaseLabel {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--on-bg-soft);
