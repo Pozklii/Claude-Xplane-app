@@ -205,6 +205,8 @@ export function FlightGlobe({
   interactive = true,
   flat = false,
   wholeGlobe = false,
+  fill = false,
+  insetLeft = 0,
   onAirportClick,
 }: {
   points: GlobePoint[];
@@ -251,6 +253,15 @@ export function FlightGlobe({
    * has zoomed in (or flown into an airport) closer than the whole globe.
    * Fixed for an instance's lifetime. */
   wholeGlobe?: boolean;
+  /** Fill the parent (which must be positioned and sized) edge to edge,
+   * with nothing clipped: no round frame or faded edges, so zooming in
+   * just fills more of it. The caption sits over the bottom-right corner.
+   * Fixed for an instance's lifetime. */
+  fill?: boolean;
+  /** With fill, the width in pixels covered by content laid over the
+   * map's left side: the globe (and every fit) centres in the space to
+   * its right. */
+  insetLeft?: number;
   /** Called with an airport's code when it's clicked (after flying in). */
   onAirportClick?: (code: string) => void;
 }) {
@@ -273,6 +284,8 @@ export function FlightGlobe({
   const interactiveRef = useRef(interactive);
   const flatRef = useRef(flat);
   const wholeGlobeRef = useRef(wholeGlobe);
+  const fillRef = useRef(fill);
+  const insetLeftRef = useRef(insetLeft);
   // An interactive whole globe zoomed in past the point where the sphere
   // fills its container, which brings the round clip back.
   const [zoomedIn, setZoomedIn] = useState(false);
@@ -295,7 +308,18 @@ export function FlightGlobe({
     onSelectIdRef.current = onSelectId;
     selectedIdRef.current = selectedId;
     onAirportClickRef.current = onAirportClick;
+    insetLeftRef.current = insetLeft;
   });
+
+  // Keep the view centred in the space beside any overlaid content.
+  useEffect(() => {
+    mapRef.current?.setPadding({
+      left: fill ? insetLeft : 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+    });
+  }, [fill, insetLeft]);
 
   // Create the map (and its deck.gl overlay) once. Data (arcs/points) and
   // selection are pushed into it imperatively via the effect below rather
@@ -327,6 +351,14 @@ export function FlightGlobe({
       return;
     }
     mapRef.current = map;
+    if (fillRef.current) {
+      map.setPadding({
+        left: insetLeftRef.current,
+        right: 0,
+        top: 0,
+        bottom: 0,
+      });
+    }
     // Skipped in bare mode: its container is clipped to a circle (see the
     // render below), and this control sits in a screen corner that a
     // circular clip would cut off.
@@ -617,7 +649,12 @@ export function FlightGlobe({
       map.on("move", syncOverlayViewState);
       syncOverlayViewState();
 
-      if (wholeGlobeRef.current && interactiveRef.current && !flatRef.current) {
+      if (
+        wholeGlobeRef.current &&
+        interactiveRef.current &&
+        !flatRef.current &&
+        !fillRef.current
+      ) {
         // Clip to a circle only once the sphere has grown to the edge of
         // its container, so the switch doesn't show.
         const updateClip = () => {
@@ -669,7 +706,18 @@ export function FlightGlobe({
       });
     });
 
-    const resizeObserver = new ResizeObserver(() => map.resize());
+    // A flat map filling the page never zooms out so far that the world
+    // stops filling it (leaving empty space, or copies side by side).
+    const fitFlatMinZoom = () => {
+      if (!fillRef.current || !flatRef.current) return;
+      const size = Math.max(container.clientWidth, container.clientHeight);
+      map.setMinZoom(Math.max(0, Math.log2(size / 512)));
+    };
+    fitFlatMinZoom();
+    const resizeObserver = new ResizeObserver(() => {
+      map.resize();
+      fitFlatMinZoom();
+    });
     resizeObserver.observe(container);
 
     return () => {
@@ -861,10 +909,20 @@ export function FlightGlobe({
       }
 
       const container = containerRef.current;
+      // Filling the page, the sphere fits the open space beside the
+      // overlaid content (and the page's height).
+      const globeSpace = container
+        ? fillRef.current
+          ? Math.min(
+              container.clientWidth - insetLeftRef.current,
+              container.clientHeight,
+            )
+          : container.clientWidth
+        : 380;
       const wholeCamera = (pts: { lng: number; lat: number }[]) =>
         wholeGlobeCamera(
           ...sphericalCentre(pts),
-          container?.clientWidth ?? 380,
+          globeSpace,
           interactiveRef.current
             ? WHOLE_GLOBE_FILL_INTERACTIVE
             : WHOLE_GLOBE_FILL,
@@ -999,47 +1057,54 @@ export function FlightGlobe({
   return (
     <div
       className={
-        bare
-          ? ""
-          : "overflow-hidden rounded-2xl border border-black/[.08] dark:border-white/[.145]"
+        fill
+          ? "absolute inset-0"
+          : bare
+            ? ""
+            : "overflow-hidden rounded-2xl border border-black/[.08] dark:border-white/[.145]"
       }
     >
       <div
         ref={containerRef}
         style={
-          bare && wholeGlobe && !flat && interactive
-            ? {
-                aspectRatio: "1",
-                borderRadius: zoomedIn ? "50%" : undefined,
-                overflow: zoomedIn ? "hidden" : undefined,
-              }
-            : bare && wholeGlobe && !flat
+          fill
+            ? { width: "100%", height: "100%" }
+            : bare && wholeGlobe && !flat && interactive
               ? {
                   aspectRatio: "1",
-                  width: `${100 * (1 + 2 * WHOLE_GLOBE_OVERHANG)}%`,
-                  margin: `${-100 * WHOLE_GLOBE_OVERHANG}%`,
-                  pointerEvents: interactive ? undefined : "none",
+                  borderRadius: zoomedIn ? "50%" : undefined,
+                  overflow: zoomedIn ? "hidden" : undefined,
                 }
-              : bare && flat
+              : bare && wholeGlobe && !flat
                 ? {
-                    aspectRatio: "16 / 10",
-                    overflow: "hidden",
-                    // Fades out towards every edge, so the map's rectangle
-                    // melts into the page rather than reading as a box.
-                    maskImage: FLAT_EDGE_FADE,
-                    WebkitMaskImage: FLAT_EDGE_FADE,
-                    maskComposite: "intersect",
-                    WebkitMaskComposite: "source-in",
+                    aspectRatio: "1",
+                    width: `${100 * (1 + 2 * WHOLE_GLOBE_OVERHANG)}%`,
+                    margin: `${-100 * WHOLE_GLOBE_OVERHANG}%`,
                     pointerEvents: interactive ? undefined : "none",
                   }
-                : bare
+                : bare && flat
                   ? {
-                      aspectRatio: "1",
-                      borderRadius: "50%",
+                      aspectRatio: "16 / 10",
                       overflow: "hidden",
+                      // Fades out towards every edge, so the map's rectangle
+                      // melts into the page rather than reading as a box.
+                      maskImage: FLAT_EDGE_FADE,
+                      WebkitMaskImage: FLAT_EDGE_FADE,
+                      maskComposite: "intersect",
+                      WebkitMaskComposite: "source-in",
                       pointerEvents: interactive ? undefined : "none",
                     }
-                  : { height, pointerEvents: interactive ? undefined : "none" }
+                  : bare
+                    ? {
+                        aspectRatio: "1",
+                        borderRadius: "50%",
+                        overflow: "hidden",
+                        pointerEvents: interactive ? undefined : "none",
+                      }
+                    : {
+                        height,
+                        pointerEvents: interactive ? undefined : "none",
+                      }
         }
       >
         {!canDraw && (
@@ -1050,9 +1115,11 @@ export function FlightGlobe({
       </div>
       <p
         className={
-          bare
-            ? "px-1 py-1.5 text-[11px] text-white/40"
-            : "px-3 py-1.5 text-[11px] text-zinc-600"
+          fill
+            ? "pointer-events-auto absolute bottom-0 right-0 max-w-xl px-6 py-2 text-right text-[11px] text-white/40"
+            : bare
+              ? "px-1 py-1.5 text-[11px] text-white/40"
+              : "px-3 py-1.5 text-[11px] text-zinc-600"
         }
       >
         {interactive &&

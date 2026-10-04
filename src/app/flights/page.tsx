@@ -39,46 +39,44 @@ export default async function FlightsPage(props: PageProps<"/flights">) {
   return (
     <SelectionProvider initialSelectedId={initialFlight}>
       <PlannerProvider>
-        {/* The landing page's dark ground (same tokens), which the bare globe
-            needs behind it to look the same as it does there; it fills the
-            rest of the page. */}
-        <section className={`${styles.page} flex-1`}>
-          <div className="mx-auto w-full max-w-5xl px-6 py-12">
-            <CustomizableGlobe
-              points={points}
-              arcs={arcs}
-              details={details}
-              userId={user.id}
-              flat={map === "2d"}
-              header={
-                <FlightsHeader
-                  title="Flight Map"
-                  count={totals.count}
-                  totalHours={totals.totalHours}
-                  countries={flying.countries.length}
-                  averageRating={totals.averageRating}
+        {/* The page's dark ground (the landing page's tokens), which the
+            bare globe's clear land shows; the map fills the rest of the
+            page. */}
+        <section className={`${styles.page} flex flex-1 flex-col`}>
+          <CustomizableGlobe
+            points={points}
+            arcs={arcs}
+            details={details}
+            userId={user.id}
+            flat={map === "2d"}
+            header={
+              <FlightsHeader
+                title="Flight Map"
+                count={totals.count}
+                totalHours={totals.totalHours}
+                countries={flying.countries.length}
+                averageRating={totals.averageRating}
+              >
+                {flights.length === 0 && (
+                  <p className={`${styles.featureText} mt-3 text-sm`}>
+                    No flights yet: log your first one in the Flight Log.
+                  </p>
+                )}
+                {unresolvedCodes.length > 0 && (
+                  <p className={`${styles.featureText} mt-3 text-xs`}>
+                    Not shown on the map (unrecognized airport code):{" "}
+                    {unresolvedCodes.join(", ")}
+                  </p>
+                )}
+                <Link
+                  href="/log"
+                  className={`${styles.featureText} mt-3 text-sm underline-offset-4 hover:underline`}
                 >
-                  {flights.length === 0 && (
-                    <p className={`${styles.featureText} mt-3 text-sm`}>
-                      No flights yet: log your first one in the Flight Log.
-                    </p>
-                  )}
-                  {unresolvedCodes.length > 0 && (
-                    <p className={`${styles.featureText} mt-3 text-xs`}>
-                      Not shown on the map (unrecognized airport code):{" "}
-                      {unresolvedCodes.join(", ")}
-                    </p>
-                  )}
-                  <Link
-                    href="/log"
-                    className={`${styles.featureText} mt-3 text-sm underline-offset-4 hover:underline`}
-                  >
-                    Log a flight, or browse them all, in the Flight Log &rarr;
-                  </Link>
-                </FlightsHeader>
-              }
-            />
-          </div>
+                  Log a flight, or browse them all, in the Flight Log &rarr;
+                </Link>
+              </FlightsHeader>
+            }
+          />
         </section>
       </PlannerProvider>
     </SelectionProvider>

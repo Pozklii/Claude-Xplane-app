@@ -27,12 +27,12 @@ const features = [
   },
 ];
 
-// The page's backgrounds: on each visit, either one of three hand-picked
-// fractal flames (pre-rendered stills in public/sky/flame-*, set in motion
-// by the classes and motes below) or, half the time, a new one generated in
-// their style from a random seed (flame-random.ts). ?bg=<name> picks a
-// hand-picked one, ?bg=random a generated one, ?seed=<n> a particular
-// generated one, and ?bg=golden the earlier golden-hour sky.
+// The page's backgrounds: on each visit, one of three hand-picked fractal
+// flames (pre-rendered stills in public/sky/flame-*, set in motion by the
+// classes and motes below). ?bg=<name> picks one, and ?bg=golden shows the
+// earlier golden-hour sky. Flames generated in their style (flame-random.ts)
+// are only shown when asked for: ?bg=random for a new one, ?seed=<n> for a
+// particular one.
 const FLAMES = {
   veil: {
     className: styles.flameVeil,
@@ -59,9 +59,6 @@ function randomFlame(): FlameName {
 function randomSeed() {
   return 100000 + Math.floor(Math.random() * 900000);
 }
-function coinFlip() {
-  return Math.random() < 0.5;
-}
 
 export default async function Home(props: PageProps<"/">) {
   const {
@@ -85,7 +82,7 @@ export default async function Home(props: PageProps<"/">) {
       ? null
       : Number.isFinite(seedNumber) && seedNumber >= 0
         ? seedNumber
-        : bg === "random" || coinFlip()
+        : bg === "random"
           ? randomSeed()
           : null;
   const flame: FlameName | null =

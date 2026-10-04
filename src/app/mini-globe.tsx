@@ -1,7 +1,8 @@
 "use client";
 
+import { geoOrthographic, geoPath } from "d3-geo";
 import { useEffect, useRef } from "react";
-import { LAND_DOTS } from "./land-dots";
+import { landShapes } from "./land-shapes";
 import styles from "./home.module.css";
 
 export type MiniGlobeRoute = {
@@ -19,6 +20,13 @@ const TURN_MS = 1100;
 const DRAW_MS = 900;
 const FLIGHT_MS = 3600;
 const RAD = Math.PI / 180;
+
+// The Flight Map globe's colours (flight-globe.tsx): the map style's water,
+// and land left clear over the page's dark ground.
+const WATER = "rgb(158, 189, 255)";
+const LAND = "#020304";
+
+let land: GeoJSON.MultiPolygon | null = null;
 
 type Vec = [number, number, number];
 const toVec = (lat: number, lon: number): Vec => [
@@ -44,8 +52,9 @@ function slerp(a: Vec, b: Vec, t: number): Vec {
 }
 const ease = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
 
-// A small dotted globe for the landing page's example-flight tour: land as
-// a grid of dots, the current flight's route as a glowing great-circle arc
+// A small globe for the landing page's example-flight tour, in the Flight
+// Map's style (light blue seas, dark land), the current flight's route as a
+// glowing great-circle arc
 // between its two airports, drawn in as each flight arrives, with a spark
 // flying along it. The globe turns to face each new route. Canvas 2D (no
 // map library); holds still, without the turning or the spark, under
@@ -110,38 +119,22 @@ export function MiniGlobe({
       };
 
       ctx.clearRect(0, 0, w, w);
-      // The sphere: a dark sea, lit a little from the top left, and a rim.
-      const sea = ctx.createRadialGradient(
-        c - r * 0.35,
-        c - r * 0.4,
-        r * 0.1,
-        c,
-        c,
-        r,
-      );
-      sea.addColorStop(0, "rgba(40, 62, 96, 0.95)");
-      sea.addColorStop(1, "rgba(8, 14, 28, 0.95)");
-      ctx.fillStyle = sea;
+      // The sphere's seas, then the land on them, clipped at the horizon.
+      const projection = geoOrthographic()
+        .rotate([-centre.lon, -centre.lat])
+        .scale(r)
+        .translate([c, c])
+        .clipAngle(90);
+      const shape = geoPath(projection, ctx);
+      ctx.fillStyle = WATER;
       ctx.beginPath();
-      ctx.arc(c, c, r, 0, Math.PI * 2);
+      shape({ type: "Sphere" });
       ctx.fill();
-      ctx.strokeStyle = "rgba(200, 225, 255, 0.18)";
-      ctx.lineWidth = dpr;
-      ctx.stroke();
-
-      // Land, fading towards the limb.
-      ctx.fillStyle = "rgb(205, 225, 245)";
-      const dot = 1.1 * dpr;
-      for (let i = 0; i < LAND_DOTS.length; i += 2) {
-        const p = project(
-          (LAND_DOTS[i] / 10) * RAD,
-          (LAND_DOTS[i + 1] / 10) * RAD,
-        );
-        if (p.z <= 0) continue;
-        ctx.globalAlpha = 0.15 + 0.55 * p.z;
-        ctx.fillRect(p.x - dot / 2, p.y - dot / 2, dot, dot);
-      }
-      ctx.globalAlpha = 1;
+      land ??= landShapes();
+      ctx.fillStyle = LAND;
+      ctx.beginPath();
+      shape(land);
+      ctx.fill();
 
       // The route, drawn in from the departure airport, the far side hidden.
       const drawn = ease((elapsed - TURN_MS * 0.5) / DRAW_MS);
