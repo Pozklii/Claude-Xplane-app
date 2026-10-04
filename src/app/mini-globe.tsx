@@ -59,11 +59,11 @@ const ease = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
 
 // A small globe for the landing page's example-flight tour, in the Flight
 // Map's style (light blue seas, dark land), the current flight's route as a
-// glowing great-circle arc
-// between its two airports, drawn in as each flight arrives, with a spark
-// flying along it. The globe turns to face each new route. Canvas 2D (no
-// map library); holds still, without the turning or the spark, under
-// prefers-reduced-motion.
+// glowing great-circle arc between its two airports, drawn in as each
+// flight arrives, then filling in brightly from the departure airport over
+// and over, like the flight's progress. The globe turns (and zooms) to face
+// each new route. Canvas 2D; holds still, without the turning or the
+// filling, under prefers-reduced-motion.
 export function MiniGlobe({
   route,
   color,
@@ -197,14 +197,14 @@ export function MiniGlobe({
         const { lat, lon } = toLatLon(v);
         return project(lat * RAD, lon * RAD);
       });
-      const stroke = (width: number, alpha: number) => {
+      const stroke = (width: number, alpha: number, to = upto) => {
         ctx.strokeStyle = color;
         ctx.globalAlpha = alpha;
         ctx.lineWidth = width * dpr;
         ctx.lineCap = "round";
         ctx.beginPath();
         let pen = false;
-        for (let i = 0; i <= upto; i++) {
+        for (let i = 0; i <= to; i++) {
           const p = pts[i];
           if (p.z <= 0) {
             pen = false;
@@ -216,9 +216,20 @@ export function MiniGlobe({
         }
         ctx.stroke();
       };
+      const last = pts.length - 1;
       if (upto > 0) {
         stroke(5, 0.22);
-        stroke(1.6, 1);
+        if (!still && drawn >= 1) {
+          // Once drawn, the flight fills the route in from the departure
+          // airport, over and over: faint, then bright up to how far it
+          // has got, holding a moment at the end of each run.
+          const along =
+            ((elapsed - turnMs * 0.5 - DRAW_MS) % FLIGHT_MS) / FLIGHT_MS;
+          stroke(1.6, 0.35);
+          stroke(2, 1, Math.round(Math.min(1, along / 0.8) * last));
+        } else {
+          stroke(1.6, 1);
+        }
       }
       ctx.globalAlpha = 1;
       for (const p of [pts[0], pts[pts.length - 1]]) {
@@ -231,20 +242,6 @@ export function MiniGlobe({
         ctx.beginPath();
         ctx.arc(p.x, p.y, 1.1 * dpr, 0, Math.PI * 2);
         ctx.fill();
-      }
-      // Once drawn, a spark flies the route, over and over.
-      if (!still && drawn >= 1) {
-        const t = ((elapsed - turnMs * 0.5 - DRAW_MS) % FLIGHT_MS) / FLIGHT_MS;
-        const p = pts[Math.round(t * (pts.length - 1))];
-        if (p.z > 0) {
-          const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 6 * dpr);
-          glow.addColorStop(0, "rgba(255, 255, 255, 0.95)");
-          glow.addColorStop(1, "rgba(255, 255, 255, 0)");
-          ctx.fillStyle = glow;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 6 * dpr, 0, Math.PI * 2);
-          ctx.fill();
-        }
       }
       ctx.restore();
       // Zoomed in, a faint rim keeps the window reading as a lens on the
