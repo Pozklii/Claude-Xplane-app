@@ -130,7 +130,7 @@ export function generateExampleFlight({
     recentNoteKeys,
   );
 
-  // Gate and runway times, in UTC: a departure off the gate in the day's
+  // Gate and runway times: a departure off the gate in the day's
   // usual hours (every 5 minutes), a taxi out to takeoff, and a taxi in
   // after landing, the block time (gate to gate) being the flight time.
   const departure = 5 * Math.round(between(5.5 * 60, 23 * 60, rng) / 5);

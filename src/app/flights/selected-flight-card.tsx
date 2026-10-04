@@ -22,8 +22,8 @@ export type FlightDetails = {
   hours: number;
   distanceNm: number;
   /** Gate and runway times (example flights), in minutes after midnight
-   * UTC on the flight's date; past 1440 is the next day. The card shows
-   * the takeoff and landing times. */
+   * on the flight's date; past 1440 is the next day. The card shows the
+   * takeoff and landing times, as plain clock times. */
   times?: {
     departure: number;
     takeoff: number;
@@ -45,13 +45,11 @@ const COUNT_UP_MS = 900;
 
 const formatInteger = (n: number) => Math.round(n).toLocaleString("en-US");
 
-// Minutes after midnight as a 24-hour time, with "+1" (and so on) when it
-// falls on a later day.
+// Minutes after midnight as a 24-hour time (a time past midnight, on the
+// next day, just reads as that time).
 function formatClock(minutes: number) {
-  const day = Math.floor(minutes / 1440);
   const m = ((Math.round(minutes) % 1440) + 1440) % 1440;
-  const clock = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  return { clock, day: day > 0 ? `+${day}` : null };
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
 const TIME_LABELS = [
@@ -303,21 +301,13 @@ export function SelectedFlightCard({
             </div>
             {flight.times &&
               TIME_LABELS.map(([key, label]) => {
-                const { clock, day } = formatClock(flight.times![key]);
                 return (
                   <div key={key} className="flex flex-col gap-1">
-                    <dt className={styles.label}>{label} (UTC)</dt>
+                    <dt className={styles.label}>{label}</dt>
                     <dd
                       className={`${styles.stat} text-base font-semibold tabular-nums`}
                     >
-                      {clock}
-                      {day && (
-                        <sup
-                          className={`${styles.soft} ml-0.5 text-[10px] font-normal`}
-                        >
-                          {day}
-                        </sup>
-                      )}
+                      {formatClock(flight.times![key])}
                     </dd>
                   </div>
                 );
