@@ -12,14 +12,19 @@ export type MiniGlobeRoute = {
   endLng: number;
 };
 
-/** Where the globe last faced, kept by the caller so a new globe (the tour
- * card is rebuilt for every flight) turns on from there. */
-export type MiniGlobeView = { lat: number; lon: number } | null;
+/** Where the globe last faced, and how far it was zoomed in, kept by the
+ * caller so a new globe (the tour card is rebuilt for every flight) turns
+ * on from there. */
+export type MiniGlobeView = { lat: number; lon: number; zoom: number } | null;
 
 const TURN_MS = 1100;
 const DRAW_MS = 900;
 const FLIGHT_MS = 3600;
 const RAD = Math.PI / 180;
+// How much of the globe's width a zoomed-in route spans, and the furthest
+// it zooms in (enough for a hop of a few dozen miles).
+const ROUTE_SPAN = 0.55;
+const MAX_ZOOM = 40;
 
 // The Flight Map globe's colours (flight-globe.tsx): the map style's water,
 // and land left clear over the page's dark ground.
@@ -78,13 +83,52 @@ export function MiniGlobe({
 
     const a = toVec(route.startLat, route.startLng);
     const b = toVec(route.endLat, route.endLng);
-    // Face the middle of the route (tipped a little towards the equator,
-    // which reads better than looking straight down on a pole).
+    // Zoomed in until the route spans a good part of the globe, so a short
+    // hop is still clearly visible; a long one keeps the whole globe.
+    const halfAngle =
+      Math.acos(
+        Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])),
+      ) / 2;
+    const targetZoom = Math.min(
+      MAX_ZOOM,
+      Math.max(1, ROUTE_SPAN / Math.max(1e-4, Math.sin(halfAngle))),
+    );
+    // Face the middle of the route (zoomed out, tipped a little towards
+    // the equator, which reads better than looking straight down on a
+    // pole; zoomed in, straight at it).
     const mid = toLatLon(slerp(a, b, 0.5));
-    const target = toVec(mid.lat * 0.8, mid.lon);
+    const target = toVec(mid.lat * (1 - 0.2 / targetZoom), mid.lon);
     const from = viewRef.current
       ? toVec(viewRef.current.lat, viewRef.current.lon)
       : target;
+    const fromZoom = viewRef.current?.zoom ?? targetZoom;
+    // Between two zoomed-in views far apart, zoom out on the way, like a
+    // flight leaving one airport for the other, rather than racing across
+    // the surface (in log terms, more the further apart they are).
+    const travel = Math.acos(
+      Math.max(
+        -1,
+        Math.min(
+          1,
+          from[0] * target[0] + from[1] * target[1] + from[2] * target[2],
+        ),
+      ),
+    );
+    const dip = Math.min(
+      Math.log(Math.min(fromZoom, targetZoom)),
+      2.5 * travel,
+    );
+    // Zooming out and back in takes a little longer than just turning.
+    const turnMs = TURN_MS * (1 + 0.25 * dip);
+    const zoomAt = (t: number) =>
+      Math.max(
+        1,
+        Math.exp(
+          (1 - t) * Math.log(fromZoom) +
+            t * Math.log(targetZoom) -
+            dip * Math.sin(Math.PI * t),
+        ),
+      );
     const path = Array.from({ length: 65 }, (_, i) => slerp(a, b, i / 64));
     const start = performance.now();
 
@@ -98,14 +142,19 @@ export function MiniGlobe({
         canvas.height = Math.round(size * dpr);
       }
       const elapsed = still ? Infinity : now - start;
-      const centre = toLatLon(slerp(from, target, ease(elapsed / TURN_MS)));
-      viewRef.current = centre;
+      const turned = ease(elapsed / turnMs);
+      const centre = toLatLon(slerp(from, target, turned));
+      const zoom = still ? targetZoom : zoomAt(turned);
+      viewRef.current = { ...centre, zoom };
       const lat0 = centre.lat * RAD;
       const lon0 = centre.lon * RAD;
       const sin0 = Math.sin(lat0);
       const cos0 = Math.cos(lat0);
       const w = canvas.width;
-      const r = w / 2 - 2 * dpr;
+      // The window the globe is seen through, and the sphere's radius
+      // (larger than the window once zoomed in).
+      const windowR = w / 2 - 2 * dpr;
+      const r = windowR * zoom;
       const c = w / 2;
       // Orthographic projection; z > 0 is the facing hemisphere.
       const project = (lat: number, lon: number) => {
@@ -119,6 +168,11 @@ export function MiniGlobe({
       };
 
       ctx.clearRect(0, 0, w, w);
+      // Everything inside the round window.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(c, c, windowR, 0, Math.PI * 2);
+      ctx.clip();
       // The sphere's seas, then the land on them, clipped at the horizon.
       const projection = geoOrthographic()
         .rotate([-centre.lon, -centre.lat])
@@ -137,7 +191,7 @@ export function MiniGlobe({
       ctx.fill();
 
       // The route, drawn in from the departure airport, the far side hidden.
-      const drawn = ease((elapsed - TURN_MS * 0.5) / DRAW_MS);
+      const drawn = ease((elapsed - turnMs * 0.5) / DRAW_MS);
       const upto = Math.round(drawn * (path.length - 1));
       const pts = path.map((v) => {
         const { lat, lon } = toLatLon(v);
@@ -180,7 +234,7 @@ export function MiniGlobe({
       }
       // Once drawn, a spark flies the route, over and over.
       if (!still && drawn >= 1) {
-        const t = ((elapsed - TURN_MS * 0.5 - DRAW_MS) % FLIGHT_MS) / FLIGHT_MS;
+        const t = ((elapsed - turnMs * 0.5 - DRAW_MS) % FLIGHT_MS) / FLIGHT_MS;
         const p = pts[Math.round(t * (pts.length - 1))];
         if (p.z > 0) {
           const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 6 * dpr);
@@ -191,6 +245,18 @@ export function MiniGlobe({
           ctx.arc(p.x, p.y, 6 * dpr, 0, Math.PI * 2);
           ctx.fill();
         }
+      }
+      ctx.restore();
+      // Zoomed in, a faint rim keeps the window reading as a lens on the
+      // globe rather than a flat disc.
+      if (zoom > 1.05) {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+        ctx.globalAlpha = Math.min(1, zoom - 1);
+        ctx.lineWidth = dpr;
+        ctx.beginPath();
+        ctx.arc(c, c, windowR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
       }
     };
 
