@@ -71,25 +71,35 @@ export function airborneHours(takeoff: string | null, landing: string | null) {
 export const conditionsLabel = (conditions: Conditions | null) =>
   CONDITIONS.find(([id]) => id === conditions)?.[1] ?? null;
 
+/** A typed time as "HH:MM" (24-hour): "14:05", "1405", "14.05", "14h05",
+ * "9:45" and "945" all read as times; empty gives null, anything else
+ * undefined. */
+export function normalizeTime(text: string): string | null | undefined {
+  const value = text.trim().replace(/\s+/g, "");
+  if (!value) return null;
+  const match =
+    value.match(/^(\d{1,2})[:.h](\d{2})(?::\d{2})?$/i) ??
+    value.match(/^(\d{1,2})(\d{2})$/);
+  if (!match) return undefined;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return undefined;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
 /** Reads the extra details from a submitted form, or an error message. */
 export function parseExtras(
   formData: FormData,
 ): { extras: FlightExtras } | { error: string } {
   const text = (name: string) => String(formData.get(name) ?? "").trim();
-  const time = (name: string) => {
-    const value = text(name);
-    if (!value) return null;
-    return /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(value)
-      ? value
-      : undefined;
-  };
+  const time = (name: string) => normalizeTime(text(name));
   const takeoff = time("takeoffTime");
   const landing = time("landingTime");
   if (takeoff === undefined || landing === undefined) {
     return { error: "Times must be 24-hour, like 14:05." };
   }
 
-  const rateText = text("landingRate").replace(/^-/, "");
+  const rateText = text("landingRate").replace(/,/g, "").replace(/^-/, "");
   const rate = rateText ? Number(rateText) : null;
   if (rate !== null && !(Number.isInteger(rate) && rate >= 0 && rate <= 5000)) {
     return { error: "Landing rate must be a whole number of fpm, 0–5000." };
