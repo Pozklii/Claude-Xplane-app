@@ -459,6 +459,16 @@ a.appLink:focus-visible {
   }
 }
 
+/* Its satellite imagery's credit, small under it. */
+.miniGlobeCredit {
+  max-width: 100%;
+  font-size: 9px;
+  line-height: 1.25;
+  text-align: center;
+  color: var(--on-bg-soft);
+  opacity: 0.8;
+}
+
 /* The example-flight tour strip above the landing page's summary card. */
 .showcaseLabel {
   font-size: 11px;

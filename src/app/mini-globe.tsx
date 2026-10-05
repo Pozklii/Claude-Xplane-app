@@ -3,6 +3,14 @@
 import { geoOrthographic, geoPath } from "d3-geo";
 import { useEffect, useRef } from "react";
 import { landShapes } from "./land-shapes";
+import {
+  imageryLevel,
+  onTileLoad,
+  prefetchView,
+  prefetchWorld,
+  renderImagery,
+  SATELLITE_CREDIT,
+} from "./satellite-tiles";
 import styles from "./home.module.css";
 
 export type MiniGlobeRoute = {
@@ -26,8 +34,9 @@ const RAD = Math.PI / 180;
 const ROUTE_SPAN = 0.55;
 const MAX_ZOOM = 40;
 
-// The Flight Map globe's colours (flight-globe.tsx): the map style's water,
-// and land left clear over the page's dark ground.
+// Under the satellite imagery, until its tiles arrive (or if they can't):
+// the earlier flat style's seas, and land left clear over the page's dark
+// ground.
 const WATER = "rgb(158, 189, 255)";
 const LAND = "#020304";
 
@@ -132,6 +141,33 @@ export function MiniGlobe({
     const path = Array.from({ length: 65 }, (_, i) => slerp(a, b, i / 64));
     const start = performance.now();
 
+    // Esri World Imagery, as in the Flight Map (satellite-tiles.ts), drawn
+    // into its own canvas, redrawn only when the view moves or another
+    // tile arrives.
+    const imagery = document.createElement("canvas");
+    const imageryCtx = imagery.getContext("2d");
+    let pixels: ImageData | null = null;
+    let tileVersion = 0;
+    let imageryKey = "";
+    prefetchWorld();
+    {
+      // The tiles the route's view will need, while the globe turns to it.
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const w = Math.round(canvas.clientWidth * dpr);
+      const windowR = w / 2 - 2 * dpr;
+      if (w >= 16) {
+        const target0 = toLatLon(target);
+        prefetchView({
+          size: w,
+          radius: windowR * targetZoom,
+          windowRadius: windowR,
+          lat: target0.lat,
+          lon: target0.lon,
+          level: imageryLevel(windowR * targetZoom),
+        });
+      }
+    }
+
     const draw = (now: number) => {
       const size = canvas.clientWidth;
       // Not laid out yet (or hidden): nothing to draw.
@@ -189,6 +225,37 @@ export function MiniGlobe({
       ctx.beginPath();
       shape(land);
       ctx.fill();
+      // The imagery over them, wherever it has arrived. Closer tiles are
+      // only fetched once the globe has finished turning (until then, the
+      // nearest lower level's stand in), rather than at every zoom level
+      // it passes through.
+      if (imageryCtx) {
+        const level = imageryLevel(r);
+        const key = `${w}|${centre.lat}|${centre.lon}|${zoom}|${tileVersion}`;
+        if (key !== imageryKey) {
+          imageryKey = key;
+          if (imagery.width !== w) {
+            imagery.width = w;
+            imagery.height = w;
+            pixels = null;
+          }
+          pixels ??= imageryCtx.createImageData(w, w);
+          renderImagery(
+            pixels,
+            {
+              size: w,
+              radius: r,
+              windowRadius: windowR,
+              lat: centre.lat,
+              lon: centre.lon,
+              level,
+            },
+            turned >= 1 || level <= 3,
+          );
+          imageryCtx.putImageData(pixels, 0, 0);
+        }
+        ctx.drawImage(imagery, 0, 0);
+      }
 
       // The route, drawn in from the departure airport, the far side hidden.
       const drawn = ease((elapsed - turnMs * 0.5) / DRAW_MS);
@@ -257,9 +324,14 @@ export function MiniGlobe({
       }
     };
 
+    const unsubscribe = onTileLoad(() => {
+      tileVersion++;
+      // Held still, nothing else redraws it.
+      if (still) draw(performance.now());
+    });
     if (still) {
       draw(performance.now());
-      return;
+      return unsubscribe;
     }
     let frame = 0;
     const tick = (now: number) => {
@@ -267,10 +339,21 @@ export function MiniGlobe({
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      unsubscribe();
+    };
   }, [route, color, viewRef]);
 
   return (
-    <canvas ref={canvasRef} className={styles.miniGlobe} aria-hidden="true" />
+    <div className="flex flex-col items-center gap-1">
+      <canvas ref={canvasRef} className={styles.miniGlobe} aria-hidden="true" />
+      <p
+        className={styles.miniGlobeCredit}
+        title={`Imagery © ${SATELLITE_CREDIT}`}
+      >
+        Imagery &copy; Esri, Maxar, Earthstar Geographics
+      </p>
+    </div>
   );
 }
