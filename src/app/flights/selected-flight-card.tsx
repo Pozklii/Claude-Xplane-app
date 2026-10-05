@@ -150,6 +150,8 @@ export function SelectedFlightCard({
   }, [prominent, selectedFlightId]);
 
   if (!selectedFlightId || !flight) {
+    // A null hint: nothing at all until a flight is picked.
+    if (emptyHint === null) return null;
     return <p className={`${styles.hint} text-sm`}>{emptyHint}</p>;
   }
 

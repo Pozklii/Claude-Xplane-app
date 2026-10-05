@@ -8,6 +8,7 @@ export function FlightsHeader({
   totalHours,
   countries,
   averageRating,
+  centered = false,
   children,
 }: {
   title: string;
@@ -15,10 +16,14 @@ export function FlightsHeader({
   totalHours: number;
   countries: number;
   averageRating: number | null;
+  /** Centred on the page (the Flight Log) rather than to the left. */
+  centered?: boolean;
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div
+      className={`flex flex-col gap-1 ${centered ? "items-center text-center" : ""}`}
+    >
       <h1 className={`${styles.introHeading} text-3xl font-semibold`}>
         {title}
       </h1>

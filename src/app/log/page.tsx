@@ -87,44 +87,49 @@ export default async function LogPage(props: PageProps<"/log">) {
   return (
     <SelectionProvider>
       <section className={styles.page}>
-        <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 py-12 lg:flex-row lg:items-start lg:justify-between">
+        <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-8 px-6 py-12">
           <FlightsHeader
             title="Flight Log"
             count={totals.count}
             totalHours={totals.totalHours}
             countries={flying.countries.length}
             averageRating={totals.averageRating}
+            centered
           >
-            <Link
-              href="/flights"
-              className={`${styles.featureText} mt-3 text-sm underline-offset-4 hover:underline`}
-            >
-              See your flights on the Flight Map &rarr;
-            </Link>
-            {flights.length > 0 && (
-              <a
-                href="/log/export"
-                download
-                className={`${styles.featureText} mt-1 inline-flex items-center gap-1.5 text-sm underline-offset-4 hover:underline`}
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-sm">
+              <Link
+                href="/flights"
+                className={`${styles.featureText} underline-offset-4 hover:underline`}
               >
-                <svg
-                  viewBox="0 0 16 16"
-                  width="14"
-                  height="14"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
+                See your flights on the Flight Map &rarr;
+              </Link>
+              {flights.length > 0 && (
+                <a
+                  href="/log/export"
+                  download
+                  className={`${styles.featureText} inline-flex items-center gap-1.5 underline-offset-4 hover:underline`}
                 >
-                  <path d="M8 2.5v8M4.5 7.5 8 11l3.5-3.5M3 13.5h10" />
-                </svg>
-                Download your log (CSV)
-              </a>
-            )}
+                  <svg
+                    viewBox="0 0 16 16"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 2.5v8M4.5 7.5 8 11l3.5-3.5M3 13.5h10" />
+                  </svg>
+                  Download your log (CSV)
+                </a>
+              )}
+            </div>
           </FlightsHeader>
-          <div className="w-full max-w-md">
+          {/* The picked flight's summary, centred under the heading (nothing
+              until one is picked). */}
+          <div className="w-full max-w-md empty:hidden">
             <LogSummary details={flightDetails} userId={user.id} />
           </div>
         </div>
@@ -247,6 +252,11 @@ export default async function LogPage(props: PageProps<"/log">) {
               shown={shownFlights.length}
               total={flights.length}
             />
+          )}
+          {shownFlights.length > 0 && (
+            <p className="text-xs text-zinc-500 dark:text-zinc-500">
+              Pick a flight to see its summary at the top of the page.
+            </p>
           )}
           {flights.length > 0 && shownFlights.length === 0 && (
             <p className="text-sm text-zinc-500 dark:text-zinc-500">
