@@ -12,6 +12,7 @@ import {
   type ConfirmedFlight,
 } from "./confirmed-flight-store";
 import { Flag } from "./flag";
+import { FlightExtrasFields } from "./flight-extras-fields";
 import { usePlanner } from "./planner-context";
 
 export const CONFIRMED_FLIGHT_ID = "confirmed-flight";
@@ -175,7 +176,10 @@ export function ConfirmedFlightPanel() {
   );
 }
 
-type LogState = { error: string } | { saved: true } | undefined;
+type LogState =
+  | { error: string }
+  | { saved: true; notice?: string }
+  | undefined;
 
 // The completed flight's Flight Log entry, filled in from the plan: the
 // route and aircraft as flown can still be changed (a diversion, a
@@ -190,10 +194,10 @@ function LogCompletedFlight({
   const [state, action, pending] = useActionState<LogState, FormData>(
     async (_prev, formData) => {
       const result = await addFlight(undefined, formData);
-      if (result?.error) return result;
+      if (result?.error) return { error: result.error };
       // Logged: the flight is done with.
       setConfirmedFlight(null);
-      return { saved: true };
+      return { saved: true, notice: result?.notice };
     },
     undefined,
   );
@@ -208,6 +212,11 @@ function LogCompletedFlight({
         <p className="text-sm font-medium text-black dark:text-zinc-50">
           {flight.from} &rarr; {flight.to} is in your Flight Log.
         </p>
+        {state.notice && (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            {state.notice}
+          </p>
+        )}
         <div className="flex flex-wrap gap-2">
           <Link href="/log" className={primaryButton}>
             Open Flight Log
@@ -318,6 +327,8 @@ function LogCompletedFlight({
           </button>
         )}
       </p>
+
+      <FlightExtrasFields onUseHours={(value) => setHours(value.toFixed(1))} />
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <Field label="Notes" htmlFor="log-notes" grow>

@@ -11,6 +11,13 @@ create table if not exists public.flights (
   hours numeric(5, 1) not null check (hours > 0),
   notes text,
   rating smallint check (rating between 1 and 10),
+  takeoff_time time,
+  landing_time time,
+  landing_rate_fpm smallint check (landing_rate_fpm between 0 and 5000),
+  fuel_used numeric(8, 1) check (fuel_used >= 0),
+  fuel_unit text check (fuel_unit in ('kg', 'lb')),
+  conditions text check (conditions in ('day', 'night', 'twilight')),
+  weather text,
   created_at timestamptz not null default now()
 );
 

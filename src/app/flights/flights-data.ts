@@ -5,6 +5,13 @@ import { findAirline } from "@/lib/airlines";
 import { findAirport } from "@/lib/airports";
 import { distanceNm } from "@/lib/geo";
 import { formatDate } from "@/lib/dates";
+import {
+  conditionsLabel,
+  EXTRA_COLUMNS,
+  NO_EXTRAS,
+  timeMinutes,
+  type FlightExtras,
+} from "@/lib/flight-fields";
 import type { GlobeArc, GlobePoint } from "./flight-globe";
 import type { FlightDetails } from "./selected-flight-card";
 import { thumbnailFolder } from "./thumbnail-path";
@@ -25,7 +32,7 @@ export type Flight = {
   hours: number;
   notes: string | null;
   rating: number | null;
-};
+} & FlightExtras;
 
 export type Preferences = {
   favourite_airline: string | null;
@@ -123,6 +130,20 @@ export function buildFlightDetails(
       hours: Number(flight.hours),
       distanceNm: distanceNm(from, to),
       notes: flight.notes,
+      times:
+        flight.takeoff_time || flight.landing_time
+          ? {
+              takeoff: timeMinutes(flight.takeoff_time) ?? undefined,
+              landing: timeMinutes(flight.landing_time) ?? undefined,
+            }
+          : undefined,
+      landingRateFpm: flight.landing_rate_fpm,
+      fuel:
+        flight.fuel_used != null
+          ? `${Number(flight.fuel_used).toLocaleString("en-US")} ${flight.fuel_unit ?? "kg"}`
+          : null,
+      conditions: conditionsLabel(flight.conditions),
+      weather: flight.weather,
       thumbnailUrl: custom?.url ?? images[0]?.url ?? null,
       customThumbnailPath: custom?.path ?? null,
       images: images.map(({ path, name, url }) => ({ path, name, url })),
@@ -188,28 +209,36 @@ export function buildGlobeData(flights: Flight[]) {
 const FLIGHT_COLUMNS =
   "id, flown_on, airline, aircraft, departure, arrival, hours, notes";
 
-/** Loads the log, still working (without ratings) if the ratings migration
- * hasn't been run on this database yet. */
+// 42703 (Postgres) / PGRST204 (PostgREST): no such column — a migration
+// not yet run on this database.
+const missingColumn = (code: string | undefined) =>
+  code === "42703" || code === "PGRST204";
+
+/** Loads the log, still working (without the extra details, and then
+ * without ratings) on a database the newer migrations haven't been run on
+ * yet. */
 export async function loadFlights(
   supabase: Awaited<ReturnType<typeof createClient>>,
 ) {
-  const result = await supabase
-    .from("flights")
-    .select(`${FLIGHT_COLUMNS}, rating`)
-    .order("flown_on", { ascending: false })
-    .returns<Flight[]>();
-  // 42703 (Postgres) / PGRST204 (PostgREST): no such column.
-  if (result.error?.code !== "42703" && result.error?.code !== "PGRST204") {
-    return result;
+  const query = (columns: string) =>
+    supabase
+      .from("flights")
+      .select(columns)
+      .order("flown_on", { ascending: false })
+      .returns<Partial<Flight>[]>();
+  let result = await query(`${FLIGHT_COLUMNS}, rating, ${EXTRA_COLUMNS}`);
+  if (missingColumn(result.error?.code)) {
+    result = await query(`${FLIGHT_COLUMNS}, rating`);
   }
-  const fallback = await supabase
-    .from("flights")
-    .select(FLIGHT_COLUMNS)
-    .order("flown_on", { ascending: false })
-    .returns<Omit<Flight, "rating">[]>();
+  if (missingColumn(result.error?.code)) {
+    result = await query(FLIGHT_COLUMNS);
+  }
   return {
-    data: fallback.data?.map((flight) => ({ ...flight, rating: null })) ?? null,
-    error: fallback.error,
+    data:
+      result.data?.map(
+        (flight) => ({ rating: null, ...NO_EXTRAS, ...flight }) as Flight,
+      ) ?? null,
+    error: result.error,
   };
 }
 

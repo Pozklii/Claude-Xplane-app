@@ -3,6 +3,7 @@
 import { useActionState, useEffect, useRef } from "react";
 import { KNOWN_AIRCRAFT } from "@/lib/aircraft";
 import { addFlight } from "./actions";
+import { FlightExtrasFields } from "./flight-extras-fields";
 
 export function NewFlightForm() {
   const [state, action, pending] = useActionState(addFlight, undefined);
@@ -90,14 +91,18 @@ export function NewFlightForm() {
           ))}
         </select>
       </div>
+      <FlightExtrasFields />
       <datalist id="known-aircraft">
         {KNOWN_AIRCRAFT.map((name) => (
           <option key={name} value={name} />
         ))}
       </datalist>
       {state?.error && (
-        <p className="text-sm text-red-600 dark:text-red-400">
-          {state.error}
+        <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>
+      )}
+      {state?.notice && (
+        <p className="text-sm text-amber-700 dark:text-amber-400">
+          {state.notice}
         </p>
       )}
       <button

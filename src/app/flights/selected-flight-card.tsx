@@ -25,11 +25,18 @@ export type FlightDetails = {
    * on the flight's date; past 1440 is the next day. The card shows the
    * takeoff and landing times, as plain clock times. */
   times?: {
-    departure: number;
-    takeoff: number;
-    landing: number;
-    arrival: number;
+    departure?: number;
+    takeoff?: number;
+    landing?: number;
+    arrival?: number;
   };
+  /** Logged flights' extra details, where filled in. */
+  landingRateFpm?: number | null;
+  /** e.g. "2,400 kg". */
+  fuel?: string | null;
+  /** e.g. "Night". */
+  conditions?: string | null;
+  weather?: string | null;
   notes: string | null;
   /** Signed URL of the thumbnail to show: the user's chosen one, else the
    * flight's first uploaded image, else null (a drawn route instead). */
@@ -301,17 +308,38 @@ export function SelectedFlightCard({
             </div>
             {flight.times &&
               TIME_LABELS.map(([key, label]) => {
+                if (flight.times?.[key] == null) return null;
                 return (
                   <div key={key} className="flex flex-col gap-1">
                     <dt className={styles.label}>{label}</dt>
                     <dd
                       className={`${styles.stat} text-base font-semibold tabular-nums`}
                     >
-                      {formatClock(flight.times![key])}
+                      {formatClock(flight.times![key]!)}
                     </dd>
                   </div>
                 );
               })}
+            {flight.landingRateFpm != null && (
+              <div className="flex flex-col gap-1">
+                <dt className={styles.label}>Landing rate</dt>
+                <dd
+                  className={`${styles.stat} text-base font-semibold tabular-nums`}
+                >
+                  {formatInteger(flight.landingRateFpm)} fpm
+                </dd>
+              </div>
+            )}
+            {flight.fuel && (
+              <div className="flex flex-col gap-1">
+                <dt className={styles.label}>Fuel used</dt>
+                <dd
+                  className={`${styles.stat} text-base font-semibold tabular-nums`}
+                >
+                  {flight.fuel}
+                </dd>
+              </div>
+            )}
           </dl>
         </div>
         {aside && (
@@ -329,7 +357,10 @@ export function SelectedFlightCard({
       >
         {prominent && flight.airline ? (
           // The airline and aircraft already head the prominent card.
-          formatDate(flight.date)
+          <>
+            {formatDate(flight.date)}
+            {flight.conditions ? ` · ${flight.conditions}` : ""}
+          </>
         ) : (
           <>
             {/* Only a real logo here, not the monogram fallback, which
@@ -340,6 +371,7 @@ export function SelectedFlightCard({
             )}
             {formatDate(flight.date)} &middot; {flight.aircraft}
             {flight.airline ? ` · ${flight.airline}` : ""}
+            {flight.conditions ? ` · ${flight.conditions}` : ""}
           </>
         )}
       </p>
@@ -353,6 +385,11 @@ export function SelectedFlightCard({
           <p className={`${styles.notes} text-sm`}>{flight.notes}</p>
         ) : (
           <p className={`${styles.soft} text-sm`}>No notes for this flight.</p>
+        )}
+        {flight.weather && (
+          <p className={`${styles.soft} break-words font-mono text-[11px]`}>
+            Weather: {flight.weather}
+          </p>
         )}
       </section>
 
