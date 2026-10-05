@@ -33,7 +33,7 @@ export function NewFlightForm() {
         <input
           name="airline"
           type="text"
-          placeholder="Airline (optional)"
+          placeholder="Airline"
           className="col-span-2 rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 sm:col-span-1 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
         />
         <input
@@ -80,10 +80,10 @@ export function NewFlightForm() {
         <select
           name="rating"
           defaultValue=""
-          aria-label="Rating out of 10 (optional)"
+          aria-label="Flight rating out of 10"
           className="rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50"
         >
-          <option value="">Rating (optional)</option>
+          <option value="">Flight rating</option>
           {Array.from({ length: 10 }, (_, i) => 10 - i).map((value) => (
             <option key={value} value={value}>
               {value}/10

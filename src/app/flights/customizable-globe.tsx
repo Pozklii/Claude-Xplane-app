@@ -101,8 +101,8 @@ export function CustomizableGlobe({
           bare
           fill
           insetLeft={insetLeft}
-          // Selecting a flight turns the globe to face it rather than
-          // zooming in.
+          // The whole globe at the overview; selecting a flight zooms to
+          // fit its route.
           wholeGlobe
           flat={view === "map"}
           onAirportClick={(code) => openAirport(code, { scroll: false })}

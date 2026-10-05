@@ -57,7 +57,9 @@ export function RatingControl({
           })}
         </div>
         <span className="text-xs font-medium tabular-nums text-zinc-600 dark:text-zinc-400">
-          {optimistic !== null ? `${optimistic}/10` : "Not rated"}
+          {optimistic !== null
+            ? `Flight rating ${optimistic}/10`
+            : "Flight rating: not rated"}
         </span>
       </div>
       {error && (

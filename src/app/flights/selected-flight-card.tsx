@@ -300,7 +300,7 @@ export function SelectedFlightCard({
               </dd>
               {flight.rating != null && (
                 <dd className={`${styles.soft} text-[11px] tabular-nums`}>
-                  Rated {flight.rating}/10
+                  Flight rating {flight.rating}/10
                 </dd>
               )}
             </div>

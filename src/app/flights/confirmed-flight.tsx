@@ -294,7 +294,6 @@ function LogCompletedFlight({
             id="log-airline"
             name="airline"
             defaultValue={flight.airline}
-            placeholder="Optional"
             className={fieldClass}
           />
         </Field>
@@ -340,14 +339,14 @@ function LogCompletedFlight({
             className={`${fieldClass} resize-y`}
           />
         </Field>
-        <Field label="Rating" htmlFor="log-rating">
+        <Field label="Flight rating" htmlFor="log-rating">
           <select
             id="log-rating"
             name="rating"
             defaultValue=""
             className={fieldClass}
           >
-            <option value="">Optional</option>
+            <option value="">Not rated</option>
             {Array.from({ length: 10 }, (_, i) => 10 - i).map((value) => (
               <option key={value} value={value}>
                 {value}/10

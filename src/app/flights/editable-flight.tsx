@@ -187,7 +187,6 @@ function EditFlightForm({
           <input
             id={`${id}-airline`}
             name="airline"
-            placeholder="Optional"
             defaultValue={flight.airline ?? ""}
             className={fieldClass}
           />,
@@ -232,7 +231,7 @@ function EditFlightForm({
         </div>
         <div className="flex min-w-0 flex-col gap-1.5">
           <label htmlFor={`${id}-rating`} className={labelClass}>
-            Rating
+            Flight rating
           </label>
           <select
             id={`${id}-rating`}

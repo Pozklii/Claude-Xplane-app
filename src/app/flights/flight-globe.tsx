@@ -114,6 +114,9 @@ const SELECTION_PITCH = 55;
 const SELECTION_PADDING = 90;
 const SELECTION_MAX_ZOOM = 9;
 const SELECTION_FLY_DURATION = 1500;
+// Room around a selected route fitted to the view (on top of any space
+// kept for the content laid over the map).
+const ROUTE_FIT_PADDING = 140;
 const SELECTION_PULSE_MS = 1800;
 const OVERVIEW_FLY_DURATION = 1200;
 // Default cap for the initial fit and the post-deselect overview — can be
@@ -149,6 +152,40 @@ function wholeGlobeCamera(
     pitch: 0,
     bearing: 0,
   };
+}
+
+// Points along a route's great circle, as [lng, lat], with longitudes kept
+// continuous (past ±180° rather than jumping back) so a route crossing the
+// antimeridian bounds the short way round.
+function greatCircle(arc: GlobeArc, steps: number): [number, number][] {
+  const rad = Math.PI / 180;
+  const vec = (lng: number, lat: number) => [
+    Math.cos(lat * rad) * Math.cos(lng * rad),
+    Math.cos(lat * rad) * Math.sin(lng * rad),
+    Math.sin(lat * rad),
+  ];
+  const a = vec(arc.startLng, arc.startLat);
+  const b = vec(arc.endLng, arc.endLat);
+  const omega = Math.acos(
+    Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])),
+  );
+  const out: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const sa =
+      omega < 1e-9 ? 1 - t : Math.sin((1 - t) * omega) / Math.sin(omega);
+    const sb = omega < 1e-9 ? t : Math.sin(t * omega) / Math.sin(omega);
+    const v = [0, 1, 2].map((k) => sa * a[k] + sb * b[k]);
+    let lng = Math.atan2(v[1], v[0]) / rad;
+    const lat = Math.atan2(v[2], Math.hypot(v[0], v[1])) / rad;
+    const prev = out[out.length - 1]?.[0];
+    if (prev !== undefined) {
+      while (lng - prev > 180) lng -= 360;
+      while (lng - prev < -180) lng += 360;
+    }
+    out.push([lng, lat]);
+  }
+  return out;
 }
 
 // The point on the globe at the middle of a set of points (the normalised
@@ -248,8 +285,9 @@ export function FlightGlobe({
    * and in bare mode a wide rectangle whose edges fade into the page
    * rather than a circle. Fixed for an instance's lifetime. */
   flat?: boolean;
-  /** Keep the whole sphere in view, never cut off: selecting a flight
-   * never zooms or tilts in, it just turns the globe to face the route.
+  /** Keep the whole sphere in view, never cut off, at the overview:
+   * selecting a flight zooms (top-down, no tilt) to fit its route, or,
+   * for one too long to show any closer, turns the whole globe to face it.
    * In bare mode this replaces the usual circular clip. Display-only (the
    * landing page's tour), the map container also reaches past its parent
    * on every side (with negative margins, so the layout still sees a
@@ -954,19 +992,36 @@ export function FlightGlobe({
             : WHOLE_GLOBE_FILL,
         );
 
+      // The camera fitting a selected route: its whole great circle
+      // (sampled, so an arc bowing towards a pole stays in view), padded,
+      // looking straight down. A route too long to show any closer than
+      // the whole globe gets the whole globe, turned to face it.
+      const routeCamera = (arc: GlobeArc) => {
+        const whole = wholeCamera([
+          { lng: arc.startLng, lat: arc.startLat },
+          { lng: arc.endLng, lat: arc.endLat },
+        ]);
+        const samples = greatCircle(arc, 16);
+        const lngs = samples.map(([lng]) => lng);
+        const lats = samples.map(([, lat]) => lat);
+        const fit = map.cameraForBounds(
+          new LngLatBounds(
+            [Math.min(...lngs), Math.min(...lats)],
+            [Math.max(...lngs), Math.max(...lats)],
+          ),
+          { padding: ROUTE_FIT_PADDING, maxZoom: SELECTION_MAX_ZOOM },
+        );
+        if (!fit?.center || fit.zoom === undefined) return whole;
+        if (!flatRef.current && fit.zoom <= whole.zoom) return whole;
+        return { center: fit.center, zoom: fit.zoom, bearing: 0, pitch: 0 };
+      };
+
       // The first view: all the flights, or straight onto the one already
       // selected when the page opens with one (from a Flight Log link).
       if (!hasFitRef.current && points.length > 0 && wholeGlobeRef.current) {
         hasFitRef.current = true;
         map.jumpTo(
-          wholeCamera(
-            selectedArc
-              ? [
-                  { lng: selectedArc.startLng, lat: selectedArc.startLat },
-                  { lng: selectedArc.endLng, lat: selectedArc.endLat },
-                ]
-              : points,
-          ),
+          selectedArc ? routeCamera(selectedArc) : wholeCamera(points),
         );
         cameraSelectionRef.current = selectedId;
         return;
@@ -1010,17 +1065,12 @@ export function FlightGlobe({
       }
 
       if (wholeGlobeRef.current) {
-        // Turn to face the selected route (or all of them), whole globe in
-        // view throughout.
+        // Zoom to fit the selected route, or back out to the whole globe
+        // facing all of them.
         if (points.length === 0) return;
-        const camera = wholeCamera(
-          selectedArc
-            ? [
-                { lng: selectedArc.startLng, lat: selectedArc.startLat },
-                { lng: selectedArc.endLng, lat: selectedArc.endLat },
-              ]
-            : points,
-        );
+        const camera = selectedArc
+          ? routeCamera(selectedArc)
+          : wholeCamera(points);
         flyToTracked(map, {
           ...camera,
           duration: selectedArc
