@@ -33,10 +33,17 @@ export type GlobeArc = {
   label: string;
 };
 
-// A free, no-API-key vector style — good detail (roads, place labels,
-// land/water) without needing a MapTiler (or similar) key. Swap for a
-// MapTiler satellite style once a key is available.
+// A free, no-API-key vector style, kept for its airport names and 3D
+// buildings (OpenStreetMap's), drawn over satellite imagery.
 const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
+// Esri World Imagery: satellite and aerial imagery of the whole Earth, down
+// to around half a metre per pixel at many airports (aircraft, markings,
+// stands); credited in the caption below.
+const SATELLITE_TILES =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const SATELLITE_MAX_ZOOM = 19;
+const SATELLITE_CREDIT =
+  "Esri, Maxar, Earthstar Geographics, and the GIS User Community";
 const MAP_HEIGHT = 480;
 
 // MapLibre needs WebGL2, and throws when it can't get it (some browsers
@@ -458,37 +465,56 @@ export function FlightGlobe({
         }
       }
 
-      // Strip the basemap down to just airports — their name label and
-      // physical layout (runways, taxiways, aprons/stands, terminals) —
-      // plus enough base geography (water, and the 3D buildings widened
-      // above, which is what actually draws an airport's terminals) to
-      // still read as a globe. Everything else (landcover/landuse
-      // texture, place/road/POI labels, roads, boundaries, hillshading)
-      // is real "terrain detail" that's just clutter at this scale.
-      // OpenMapTiles-schema styles (which OpenFreeMap's "liberty" style
-      // is one of) name the relevant vector source-layers consistently:
-      // "aeroway" for the physical layout, "aerodrome_label" for the
-      // airport's name.
+      // Strip the basemap down to what the satellite imagery (added below)
+      // doesn't already show: airports' names and the 3D buildings widened
+      // above (an airport's terminals, in 3D). The imagery itself shows
+      // the land, sea and each airport's physical layout (runways,
+      // taxiways, stands), so the style's flat fills for those go, along
+      // with everything else (landcover, roads, boundaries, place and POI
+      // labels). OpenMapTiles-schema styles (which OpenFreeMap's
+      // "liberty" style is one of) name the relevant vector source-layers
+      // consistently: "aeroway" for the physical layout, "aerodrome_label"
+      // for the airport's name.
       for (const layer of map.getStyle()?.layers ?? []) {
         const sourceLayer = (layer as { "source-layer"?: string })[
           "source-layer"
         ];
-        const isAirportDetail =
-          sourceLayer === "aeroway" ||
-          sourceLayer === "aerodrome_label" ||
-          layer.id.includes("aeroway") ||
-          layer.id.includes("aerodrome") ||
-          layer.id.includes("airport");
-        const isBaseGeography =
-          layer.type === "background" ||
-          layer.type === "fill-extrusion" ||
-          sourceLayer === "water";
-        if (isAirportDetail || isBaseGeography) continue;
+        const isAirportName =
+          layer.type === "symbol" &&
+          (sourceLayer === "aeroway" ||
+            sourceLayer === "aerodrome_label" ||
+            layer.id.includes("aeroway") ||
+            layer.id.includes("aerodrome") ||
+            layer.id.includes("airport"));
+        const isKept =
+          layer.type === "background" || layer.type === "fill-extrusion";
+        if (isAirportName || isKept) continue;
         try {
           map.setLayoutProperty(layer.id, "visibility", "none");
         } catch {
           // Not fatal — worst case that layer stays visible.
         }
+      }
+
+      // The satellite imagery, under everything but the background (space,
+      // made clear in bare mode below).
+      const firstLayer = map
+        .getStyle()
+        ?.layers?.find((layer) => layer.type !== "background")?.id;
+      try {
+        map.addSource("satellite", {
+          type: "raster",
+          tiles: [SATELLITE_TILES],
+          tileSize: 256,
+          maxzoom: SATELLITE_MAX_ZOOM,
+          attribution: SATELLITE_CREDIT,
+        });
+        map.addLayer(
+          { id: "satellite", type: "raster", source: "satellite" },
+          firstLayer,
+        );
+      } catch {
+        // Not fatal — worst case the map shows without imagery.
       }
 
       // The style's own airport name label (aerodrome_label) is normally
@@ -1124,7 +1150,7 @@ export function FlightGlobe({
       >
         {interactive &&
           `Drag to ${flat ? "move" : "rotate"}, scroll to zoom, click a flight for its route, click an airport to fly into its real 3D buildings${onAirportClick ? " and look it up below" : ""}. `}
-        Map data &copy;{" "}
+        Imagery &copy; {SATELLITE_CREDIT}. Map data &copy;{" "}
         <a
           href="https://www.openstreetmap.org/copyright"
           className="underline"
