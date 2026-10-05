@@ -2,10 +2,15 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { findAirline } from "@/lib/airlines";
+import type { SavedConfirmedFlight } from "../flights/confirmed-flight-actions";
+import type { ConfirmedFlight } from "../flights/confirmed-flight-store";
 import { FlightPlanner } from "../flights/flight-planner";
 import { summarizeFlying } from "../flights/flying-summary";
 import { PlannerProvider } from "../flights/planner-context";
-import { buildChallenges, buildSuggestionRoutes } from "../flights/planner-data";
+import {
+  buildChallenges,
+  buildSuggestionRoutes,
+} from "../flights/planner-data";
 import styles from "../home.module.css";
 
 export const metadata: Metadata = { title: "Flight Plan · Flight World" };
@@ -33,7 +38,7 @@ export default async function PlanPage(props: PageProps<"/plan">) {
     redirect("/login");
   }
 
-  const [{ data: flights }, { data: preferences }, searchParams] =
+  const [{ data: flights }, { data: preferences }, searchParams, confirmed] =
     await Promise.all([
       supabase
         .from("flights")
@@ -48,7 +53,22 @@ export default async function PlanPage(props: PageProps<"/plan">) {
           favourite_aircraft: string | null;
         }>(),
       props.searchParams,
+      // The flight confirmed on any of the user's devices (see
+      // ConfirmedFlightPanel).
+      supabase
+        .from("confirmed_flights")
+        .select("flight, updated_at")
+        .maybeSingle<{
+          flight: ConfirmedFlight | null;
+          updated_at: string;
+        }>(),
     ]);
+  // undefined: the account can't hold one yet (table not created).
+  const savedConfirmedFlight: SavedConfirmedFlight = confirmed.error
+    ? undefined
+    : confirmed.data
+      ? { flight: confirmed.data.flight, updatedAt: confirmed.data.updated_at }
+      : null;
 
   const flying = summarizeFlying(flights ?? []);
   const favouriteAirline = preferences?.favourite_airline ?? null;
@@ -67,8 +87,8 @@ export default async function PlanPage(props: PageProps<"/plan">) {
             Flight Plan
           </h1>
           <p className={`${styles.featureText} text-sm`}>
-            Look up an airport and its live weather, find a real-world route
-            to fly next, or take on a challenging one.
+            Look up an airport and its live weather, find a real-world route to
+            fly next, or take on a challenging one.
           </p>
         </div>
       </section>
@@ -88,6 +108,7 @@ export default async function PlanPage(props: PageProps<"/plan">) {
               : null
           }
           flownRouteKeys={flying.flownPairs}
+          savedConfirmedFlight={savedConfirmedFlight}
         />
       </div>
     </PlannerProvider>

@@ -38,7 +38,8 @@ export function CustomizableGlobe({
   arcs: GlobeArc[];
   details: Record<string, FlightDetails>;
   header: React.ReactNode;
-  userId: string;
+  /** The signed-in owner (thumbnail editing); none on a shared map. */
+  userId?: string;
   /** Start on the flat 2D map rather than the globe (?map=2d). */
   flat?: boolean;
 }) {
@@ -129,7 +130,7 @@ export function CustomizableGlobe({
       </div>
 
       <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 px-6 pb-3 lg:absolute lg:right-6 lg:top-6 lg:justify-end lg:p-0">
-        {airportCode && (
+        {airportCode && userId && (
           <Link
             href={`/plan?airport=${encodeURIComponent(airportCode)}`}
             className="rounded-full border border-white/20 bg-black/40 px-3 py-1 text-xs text-white/80 backdrop-blur transition-colors hover:bg-white/10"

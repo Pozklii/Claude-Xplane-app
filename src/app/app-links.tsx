@@ -1,13 +1,14 @@
 import Link from "next/link";
 import styles from "./home.module.css";
 
-// The app's three sections, each its own page, which need an account: the
+// The app's sections, each its own page, which need an account: the
 // flight map (the globe, and where signing in lands), the flight log
-// (logging and the list of flights) and the flight planner.
+// (logging and the list of flights), the flight planner and the stats.
 export const APP_LINKS = [
   { href: "/flights", label: "Flight Map", icon: "map" },
   { href: "/log", label: "Flight Log", icon: "log" },
   { href: "/plan", label: "Flight Plan", icon: "plan" },
+  { href: "/stats", label: "Flight Stats", icon: "stats" },
 ] as const;
 
 type IconName = (typeof APP_LINKS)[number]["icon"] | "lock";
@@ -35,6 +36,13 @@ function Icon({ name }: { name: IconName }) {
         <circle cx="3.8" cy="13.2" r="1.6" />
         <circle cx="12.2" cy="4.8" r="1.6" />
         <path d="M5.3 12.3c3.2-.6 1.6-4.3 5.3-6.6" strokeDasharray="1.6 1.6" />
+      </>
+    ),
+    // Three columns of a bar chart.
+    stats: (
+      <>
+        <path d="M3 15h10" />
+        <path d="M4.5 13V9M8 13V5M11.5 13V7.5" strokeWidth="2" />
       </>
     ),
     lock: (

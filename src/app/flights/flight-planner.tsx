@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { AirportExplorer } from "./airport-explorer";
 import { ChallengingFlights } from "./challenging-flights";
 import { ConfirmedFlightPanel } from "./confirmed-flight";
+import type { SavedConfirmedFlight } from "./confirmed-flight-actions";
 import { FlightSuggestions } from "./flight-suggestions";
 import type { ChallengeCardData, SuggestionRoute } from "./planner-data";
 import { PLANNER_ID, usePlanner, type PlannerTab } from "./planner-context";
@@ -22,6 +23,7 @@ export function FlightPlanner({
   defaultAircraft,
   favouriteAirline,
   flownRouteKeys,
+  savedConfirmedFlight,
 }: {
   quickCodes: string[];
   routes: SuggestionRoute[];
@@ -29,6 +31,9 @@ export function FlightPlanner({
   defaultAircraft: string;
   favouriteAirline: { name: string; iata: string | null } | null;
   flownRouteKeys: string[];
+  /** The confirmed flight saved with the account (see
+   * ConfirmedFlightPanel). */
+  savedConfirmedFlight?: SavedConfirmedFlight;
 }) {
   const { tab, setTab, visited } = usePlanner();
   // The airlines on the suggested routes (the favourite first), for the
@@ -53,7 +58,7 @@ export function FlightPlanner({
         Plan your next flight
       </h2>
 
-      <ConfirmedFlightPanel />
+      <ConfirmedFlightPanel saved={savedConfirmedFlight} />
       <RoutePlanner airlines={airlines} />
 
       <div className="flex">

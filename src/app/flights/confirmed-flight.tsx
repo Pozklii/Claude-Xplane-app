@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { KNOWN_AIRCRAFT } from "@/lib/aircraft";
 import { formatDuration, localToday } from "@/lib/dates";
 import { addFlight } from "./actions";
 import { AirlineLogo } from "./airline-logo";
+import type { SavedConfirmedFlight } from "./confirmed-flight-actions";
 import {
   setConfirmedFlight,
+  syncConfirmedFlight,
   useConfirmedFlight,
   type ConfirmedFlight,
 } from "./confirmed-flight-store";
@@ -40,11 +42,20 @@ type Logging = {
 };
 
 // The Flight Plan page's confirmed flight: once a planned route is
-// confirmed it waits here (kept in this browser, so it's still here after
-// going off to fly it), with a "Flight completed" button that opens the
+// confirmed it waits here (kept in this browser and saved with the
+// account, so it's still here after going off to fly it, on any device), with a "Flight completed" button that opens the
 // flight's Flight Log entry, filled in from the plan, to check and add.
-export function ConfirmedFlightPanel() {
+export function ConfirmedFlightPanel({
+  saved,
+}: {
+  /** The confirmed flight saved with the account, to bring this browser
+   * into step with (undefined: the account can't hold one yet). */
+  saved?: SavedConfirmedFlight;
+}) {
   const confirmed = useConfirmedFlight();
+  useEffect(() => {
+    if (saved !== undefined) syncConfirmedFlight(saved);
+  }, [saved]);
   const { loadPlan } = usePlanner();
   const [logging, setLogging] = useState<Logging | null>(null);
   const [cancelling, setCancelling] = useState(false);

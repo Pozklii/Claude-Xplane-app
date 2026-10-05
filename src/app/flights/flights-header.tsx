@@ -28,7 +28,7 @@ export function FlightsHeader({
         {countries > 0 &&
           ` · ${countries} ${countries === 1 ? "country" : "countries"}`}
         {averageRating !== null &&
-          ` · average rating ${averageRating.toFixed(1)}/10`}
+          ` · average flight rating ${averageRating.toFixed(1)}/10`}
       </p>
       {children}
     </div>
