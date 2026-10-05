@@ -80,7 +80,7 @@ const missingColumn = (code: string | undefined) =>
 const hasExtras = (extras: FlightExtras) =>
   Object.values(extras).some((value) => value !== null);
 const EXTRAS_NOT_SAVED =
-  "Saved, but without the extra details (times, landing rate, fuel, conditions, weather): the database needs the flight details migration first (supabase/migrations/20261005_flight_details.sql).";
+  "Saved, but without the extra details (times, landing rate, conditions, weather): the database needs the flight details migration first (supabase/migrations/20261005_flight_details.sql).";
 
 export async function addFlight(
   _prevState: FlightFormState,

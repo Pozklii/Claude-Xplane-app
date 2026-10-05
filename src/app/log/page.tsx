@@ -245,9 +245,8 @@ export default async function LogPage(props: PageProps<"/log">) {
                 `Landing ${shortTime(flight.landing_time)}`,
               flight.landing_rate_fpm != null &&
                 `${flight.landing_rate_fpm.toLocaleString("en-US")} fpm`,
-              flight.fuel_used != null &&
-                `${Number(flight.fuel_used).toLocaleString("en-US")} ${flight.fuel_unit ?? "kg"} fuel`,
               conditionsLabel(flight.conditions),
+              flight.weather,
             ].filter(Boolean) as string[];
             return (
               <FlightRow key={flight.id} id={flight.id}>
@@ -305,11 +304,6 @@ export default async function LogPage(props: PageProps<"/log">) {
                     {flight.notes && (
                       <p className="text-sm text-zinc-600 dark:text-zinc-400">
                         {flight.notes}
-                      </p>
-                    )}
-                    {flight.weather && (
-                      <p className="break-words font-mono text-[11px] text-zinc-500">
-                        {flight.weather}
                       </p>
                     )}
                     <StopPropagation>

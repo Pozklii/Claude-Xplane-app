@@ -32,8 +32,6 @@ export type FlightDetails = {
   };
   /** Logged flights' extra details, where filled in. */
   landingRateFpm?: number | null;
-  /** e.g. "2,400 kg". */
-  fuel?: string | null;
   /** e.g. "Night". */
   conditions?: string | null;
   weather?: string | null;
@@ -330,16 +328,6 @@ export function SelectedFlightCard({
                 </dd>
               </div>
             )}
-            {flight.fuel && (
-              <div className="flex flex-col gap-1">
-                <dt className={styles.label}>Fuel used</dt>
-                <dd
-                  className={`${styles.stat} text-base font-semibold tabular-nums`}
-                >
-                  {flight.fuel}
-                </dd>
-              </div>
-            )}
           </dl>
         </div>
         {aside && (
@@ -387,9 +375,7 @@ export function SelectedFlightCard({
           <p className={`${styles.soft} text-sm`}>No notes for this flight.</p>
         )}
         {flight.weather && (
-          <p className={`${styles.soft} break-words font-mono text-[11px]`}>
-            Weather: {flight.weather}
-          </p>
+          <p className={`${styles.soft} text-xs`}>Weather: {flight.weather}</p>
         )}
       </section>
 

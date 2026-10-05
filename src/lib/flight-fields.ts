@@ -2,6 +2,7 @@
 // route, aircraft and hours (see supabase/migrations/
 // 20261005_flight_details.sql): shared by the forms that log and edit
 // flights, the server actions that save them and the pages that show them.
+// (The migration's fuel columns are no longer used.)
 
 export const CONDITIONS = [
   ["day", "Day"],
@@ -10,8 +11,22 @@ export const CONDITIONS = [
 ] as const;
 export type Conditions = (typeof CONDITIONS)[number][0];
 
-export const FUEL_UNITS = ["kg", "lb"] as const;
-export type FuelUnit = (typeof FUEL_UNITS)[number];
+/** The weather to choose from (stored as the label). */
+export const WEATHER_OPTIONS = [
+  "Clear skies",
+  "Few clouds",
+  "Scattered clouds",
+  "Overcast",
+  "Low cloud (IMC)",
+  "Fog or mist",
+  "Light rain",
+  "Heavy rain",
+  "Thunderstorms",
+  "Snow",
+  "Freezing conditions",
+  "Gusty winds",
+  "Strong crosswind",
+] as const;
 
 export type FlightExtras = {
   /** "HH:MM" or "HH:MM:SS" (as Postgres returns a time). */
@@ -19,22 +34,18 @@ export type FlightExtras = {
   landing_time: string | null;
   /** Touchdown rate, in feet per minute (as a positive number). */
   landing_rate_fpm: number | null;
-  fuel_used: number | null;
-  fuel_unit: FuelUnit | null;
   conditions: Conditions | null;
-  /** The METAR, or a few words about the weather. */
+  /** One of WEATHER_OPTIONS (or, on older entries, any text). */
   weather: string | null;
 };
 
 export const EXTRA_COLUMNS =
-  "takeoff_time, landing_time, landing_rate_fpm, fuel_used, fuel_unit, conditions, weather";
+  "takeoff_time, landing_time, landing_rate_fpm, conditions, weather";
 
 export const NO_EXTRAS: FlightExtras = {
   takeoff_time: null,
   landing_time: null,
   landing_rate_fpm: null,
-  fuel_used: null,
-  fuel_unit: null,
   conditions: null,
   weather: null,
 };
@@ -84,33 +95,18 @@ export function parseExtras(
     return { error: "Landing rate must be a whole number of fpm, 0–5000." };
   }
 
-  const fuelText = text("fuelUsed").replace(/,/g, "");
-  const fuel = fuelText ? Number(fuelText) : null;
-  if (
-    fuel !== null &&
-    !(Number.isFinite(fuel) && fuel >= 0 && fuel < 10_000_000)
-  ) {
-    return { error: "Fuel used must be a positive number." };
-  }
-  const unitText = text("fuelUnit");
-  const unit = (FUEL_UNITS as readonly string[]).includes(unitText)
-    ? (unitText as FuelUnit)
-    : "kg";
-
   const conditionsText = text("conditions");
   const conditions = CONDITIONS.some(([id]) => id === conditionsText)
     ? (conditionsText as Conditions)
     : null;
 
-  const weather = text("weather").slice(0, 500);
+  const weather = text("weather").slice(0, 100);
 
   return {
     extras: {
       takeoff_time: takeoff,
       landing_time: landing,
       landing_rate_fpm: rate,
-      fuel_used: fuel === null ? null : Math.round(fuel * 10) / 10,
-      fuel_unit: fuel === null ? null : unit,
       conditions,
       weather: weather || null,
     },

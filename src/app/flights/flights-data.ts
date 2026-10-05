@@ -138,10 +138,6 @@ export function buildFlightDetails(
             }
           : undefined,
       landingRateFpm: flight.landing_rate_fpm,
-      fuel:
-        flight.fuel_used != null
-          ? `${Number(flight.fuel_used).toLocaleString("en-US")} ${flight.fuel_unit ?? "kg"}`
-          : null,
       conditions: conditionsLabel(flight.conditions),
       weather: flight.weather,
       thumbnailUrl: custom?.url ?? images[0]?.url ?? null,
