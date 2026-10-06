@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { estimateHours, KNOWN_AIRCRAFT } from "@/lib/aircraft";
 import { formatDuration } from "@/lib/dates";
-import { distanceNm, initialCourse } from "@/lib/geo";
+import { distanceNm } from "@/lib/geo";
 import { lookupAirport, type AirportLookup } from "./airport-actions";
 import { AirlineLogo } from "./airline-logo";
 import { CONFIRMED_FLIGHT_ID } from "./confirmed-flight";
@@ -98,8 +98,8 @@ const fieldClass =
   "w-full rounded-lg border border-black/[.08] bg-white px-3 py-2 text-sm text-black outline-none focus:border-black/30 dark:border-white/[.145] dark:bg-zinc-950 dark:text-zinc-50";
 
 // The Flight Plan page's route: a From and To airport, the airline and
-// aircraft, and the distance between the airports (great circle), with the
-// initial heading and a flight time for the aircraft. Choosing a suggested
+// aircraft, and the distance between the airports (great circle), with a
+// flight time for the aircraft. Choosing a suggested
 // route or a challenge further down the page loads it here (see loadPlan).
 // Each airport's details and weather are a click away, and once there's an
 // aircraft the flight can be confirmed (see confirmed-flight.tsx).
@@ -127,7 +127,6 @@ export function RoutePlanner({
       ? { a: fromLookup.airport, b: toLookup.airport }
       : null;
   const nm = both ? distanceNm(both.a, both.b) : null;
-  const course = both ? initialCourse(both.a, both.b) : null;
   // The chosen aircraft's own cruise speed and overheads, when it's one we
   // know; otherwise a typical airliner's average.
   const hours =
@@ -273,7 +272,7 @@ export function RoutePlanner({
         </div>
       </div>
 
-      {both && nm !== null && course !== null && hours !== null ? (
+      {both && nm !== null && hours !== null ? (
         <div className="flex flex-col gap-3 border-t border-black/[.06] pt-4 sm:flex-row sm:items-end sm:justify-between dark:border-white/[.08]">
           <div className="flex flex-col gap-1">
             <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
@@ -284,8 +283,7 @@ export function RoutePlanner({
             </p>
             <p className="text-sm tabular-nums text-zinc-500">
               {fmt(nm * KM_PER_NM)} km &middot; {fmt(nm * MI_PER_NM)} mi
-              &middot; initial heading{" "}
-              {String(Math.round(course) % 360).padStart(3, "0")}&deg; &middot;
+              &middot;{" "}
               about {formatDuration(hours)}{" "}
               {knownAircraft ? `in a ${knownAircraft}` : `at ${AVERAGE_KT} kt`}
             </p>
@@ -326,13 +324,13 @@ export function RoutePlanner({
               >
                 Confirm flight
               </button>
-              <p className="text-xs text-zinc-500">
-                {!aircraft.trim()
-                  ? "Choose an aircraft to confirm this flight."
-                  : confirmed
-                    ? `Replaces your confirmed ${confirmed.from} → ${confirmed.to}.`
-                    : "Then fly it, and log it when you're done."}
-              </p>
+              {(!aircraft.trim() || confirmed) && (
+                <p className="text-xs text-zinc-500">
+                  {!aircraft.trim()
+                    ? "Choose an aircraft to confirm this flight."
+                    : `Replaces your confirmed ${confirmed!.from} → ${confirmed!.to}.`}
+                </p>
+              )}
             </>
           )}
         </div>
