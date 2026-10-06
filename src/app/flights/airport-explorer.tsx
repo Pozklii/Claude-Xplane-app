@@ -11,8 +11,6 @@ import { lookupAirport, type AirportLookup } from "./airport-actions";
 import { Flag } from "./flag";
 import { usePlanner } from "./planner-context";
 
-const KM_PER_SM = 1.609344;
-
 const CATEGORY_STYLES: Record<FlightCategory, string> = {
   VFR: "bg-emerald-600 text-white",
   MVFR: "bg-blue-600 text-white",
@@ -44,11 +42,11 @@ function formatWind(metar: Metar) {
 }
 
 function formatVisibility(metar: Metar) {
-  if (metar.cavok) return "CAVOK — 10 km or more, no significant cloud";
+  if (metar.cavok) return "CAVOK — 6 SM or more, no significant cloud";
   const sm = metar.visibilitySm;
   if (sm === null) return "Not reported";
-  if (sm >= 10) return "10 km or more";
-  return `${sm < 1 ? sm.toFixed(2) : sm.toFixed(1)} SM (${(sm * KM_PER_SM).toFixed(1)} km)`;
+  if (sm >= 10) return "6 SM or more";
+  return `${sm < 1 ? sm.toFixed(2) : sm.toFixed(1)} SM`;
 }
 
 function formatClouds(metar: Metar) {

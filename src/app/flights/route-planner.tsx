@@ -14,7 +14,6 @@ import {
 import { Flag } from "./flag";
 import { ROUTE_PLAN_ID, usePlanner } from "./planner-context";
 
-const KM_PER_NM = 1.852;
 const MI_PER_NM = 1.15078;
 // A typical airliner's average ground speed over a whole trip, for a rough
 // flight time.
@@ -282,7 +281,7 @@ export function RoutePlanner({
               {fmt(nm)} nm
             </p>
             <p className="text-sm tabular-nums text-zinc-500">
-              {fmt(nm * KM_PER_NM)} km &middot; {fmt(nm * MI_PER_NM)} mi
+              {fmt(nm * MI_PER_NM)} mi
               &middot;{" "}
               about {formatDuration(hours)}{" "}
               {knownAircraft ? `in a ${knownAircraft}` : `at ${AVERAGE_KT} kt`}

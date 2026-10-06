@@ -45,7 +45,7 @@ export type FlightDetails = {
   images: ThumbnailChoice[];
 };
 
-const KM_PER_NM = 1.852;
+const MI_PER_NM = 1.15078;
 const COUNT_UP_MS = 900;
 
 const formatInteger = (n: number) => Math.round(n).toLocaleString("en-US");
@@ -155,7 +155,7 @@ export function SelectedFlightCard({
     return <p className={`${styles.hint} text-sm`}>{emptyHint}</p>;
   }
 
-  const distanceKm = flight.distanceNm * KM_PER_NM;
+  const distanceMi = flight.distanceNm * MI_PER_NM;
   const pickerOpen = pickerFlightId === selectedFlightId;
   const hasThumbnail = flight.thumbnailUrl !== null;
 
@@ -288,8 +288,8 @@ export function SelectedFlightCard({
               </dd>
               <dd className={`${styles.soft} text-[11px] tabular-nums`}>
                 <CountUp
-                  value={distanceKm}
-                  format={(n) => `${formatInteger(n)} km`}
+                  value={distanceMi}
+                  format={(n) => `${formatInteger(n)} mi`}
                 />
               </dd>
             </div>
