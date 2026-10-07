@@ -33,6 +33,11 @@ import { NewFlightForm } from "../flights/new-flight-form";
 import { RatingControl } from "../flights/rating-control";
 import { SelectionProvider } from "../flights/selection-context";
 import { StopPropagation } from "../flights/stop-propagation";
+import { TrackUpload } from "../flights/track-upload";
+import {
+  XplaneConnect,
+  type XplaneConnection,
+} from "../flights/xplane-connect";
 import styles from "../home.module.css";
 
 export const metadata = { title: "Flight Log · Flight World" };
@@ -54,6 +59,7 @@ export default async function LogPage(props: PageProps<"/log">) {
     { flights, error, mediaByFlight, details: flightDetails },
     { data: preferences },
     searchParams,
+    xplane,
   ] = await Promise.all([
     loadFlightLog(supabase, user.id),
     // Errors (e.g. the table not created yet) just mean no favourites.
@@ -62,7 +68,20 @@ export default async function LogPage(props: PageProps<"/log">) {
       .select("favourite_airline, favourite_aircraft")
       .maybeSingle<Preferences>(),
     props.searchParams,
+    // An error (the table not created yet) means it can't connect yet.
+    supabase
+      .from("xplane_tokens")
+      .select("created_at, last_used_at")
+      .maybeSingle<{ created_at: string; last_used_at: string | null }>(),
   ]);
+  const xplaneConnection: XplaneConnection = xplane.error
+    ? undefined
+    : xplane.data
+      ? {
+          createdAt: xplane.data.created_at,
+          lastUsedAt: xplane.data.last_used_at,
+        }
+      : null;
 
   // The search, filters and sort (see LogFilters), from the address.
   const query = parseLogQuery(searchParams);
@@ -137,6 +156,8 @@ export default async function LogPage(props: PageProps<"/log">) {
 
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-6 py-12">
         <NewFlightForm />
+
+        <XplaneConnect connection={xplaneConnection} />
 
         <section className="flex flex-col gap-4 rounded-2xl border border-black/[.08] p-4 dark:border-white/[.145]">
           <h2 className="text-lg font-semibold text-black dark:text-zinc-50">
@@ -346,6 +367,13 @@ export default async function LogPage(props: PageProps<"/log">) {
                     </StopPropagation>
                   </div>
                 </EditableFlight>
+
+                <StopPropagation>
+                  <TrackUpload
+                    flightId={flight.id}
+                    summary={flight.recording_summary}
+                  />
+                </StopPropagation>
 
                 <StopPropagation>
                   <FlightMedia

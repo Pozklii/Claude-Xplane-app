@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import type { SimbriefPlan } from "@/lib/simbrief";
 import { saveConfirmedFlightToAccount } from "./confirmed-flight-actions";
 
 /** A flight confirmed on the Flight Plan page, waiting to be flown and
@@ -19,6 +20,9 @@ export type ConfirmedFlight = {
   nm: number;
   /** The planned flight time. */
   hours: number;
+  /** The SimBrief plan it was confirmed with, if any; logged with the
+   * flight, to compare planned against actual. */
+  plan?: SimbriefPlan;
   /** When it was confirmed (ISO timestamp). */
   confirmedAt: string;
 };

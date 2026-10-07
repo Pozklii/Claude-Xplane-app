@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { parseExtras, type FlightExtras } from "@/lib/flight-fields";
+import { asSimbriefPlan } from "@/lib/simbrief";
 import { createClient } from "@/lib/supabase/server";
 
 export type FlightFormState =
@@ -82,6 +83,19 @@ const hasExtras = (extras: FlightExtras) =>
 const EXTRAS_NOT_SAVED =
   "Saved, but without the extra details (times, landing rate, conditions, weather): the database needs the flight details migration first (supabase/migrations/20261005_flight_details.sql).";
 
+const PLAN_NOT_SAVED =
+  "Saved, but without its SimBrief plan: the database needs the X-Plane and SimBrief migration first (supabase/migrations/20261007_xplane_and_simbrief.sql).";
+
+/** A SimBrief plan sent with the form (as JSON), or null. */
+function parsePlan(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !value || value.length > 12000) return null;
+  try {
+    return asSimbriefPlan(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
 export async function addFlight(
   _prevState: FlightFormState,
   formData: FormData,
@@ -98,16 +112,23 @@ export async function addFlight(
   const parsed = parseFlight(formData);
   if ("error" in parsed) return { error: parsed.error };
 
-  const insert = (withExtras: boolean) =>
+  // The SimBrief plan it was flown to (logging a confirmed flight).
+  const plan = parsePlan(formData.get("plan"));
+  const insert = (withExtras: boolean, withPlan: boolean) =>
     supabase.from("flights").insert({
       user_id: user.id,
       ...parsed.row,
       ...(withExtras ? parsed.extras : {}),
+      ...(withPlan && plan ? { plan } : {}),
     });
-  let { error } = await insert(true);
+  let { error } = await insert(true, true);
   let notice: string | undefined;
+  if (plan && missingColumn(error?.code)) {
+    ({ error } = await insert(true, false));
+    if (!error) notice = PLAN_NOT_SAVED;
+  }
   if (missingColumn(error?.code)) {
-    ({ error } = await insert(false));
+    ({ error } = await insert(false, false));
     if (!error && hasExtras(parsed.extras)) notice = EXTRAS_NOT_SAVED;
   }
 

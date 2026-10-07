@@ -5,6 +5,8 @@ import { findAirline } from "@/lib/airlines";
 import { findAirport } from "@/lib/airports";
 import { distanceNm } from "@/lib/geo";
 import { formatDate } from "@/lib/dates";
+import type { RecordingSummary } from "@/lib/recording";
+import { asSimbriefPlan, type SimbriefPlan } from "@/lib/simbrief";
 import {
   conditionsLabel,
   EXTRA_COLUMNS,
@@ -32,6 +34,11 @@ export type Flight = {
   hours: number;
   notes: string | null;
   rating: number | null;
+  /** The flown route's summary, if one was recorded or uploaded (the
+   * points themselves load when the flight is opened on the map). */
+  recording_summary: RecordingSummary | null;
+  /** The SimBrief plan it was flown to, if any. */
+  plan: SimbriefPlan | null;
 } & FlightExtras;
 
 export type Preferences = {
@@ -140,6 +147,8 @@ export function buildFlightDetails(
       landingRateFpm: flight.landing_rate_fpm,
       conditions: conditionsLabel(flight.conditions),
       weather: flight.weather,
+      plan: flight.plan,
+      recording: flight.recording_summary,
       thumbnailUrl: custom?.url ?? images[0]?.url ?? null,
       customThumbnailPath: custom?.path ?? null,
       images: images.map(({ path, name, url }) => ({ path, name, url })),
@@ -191,6 +200,7 @@ export function buildGlobeData(flights: Flight[]) {
         fromCode: from.code,
         toCode: to.code,
         label: `${flight.aircraft} · ${from.code} → ${to.code} · ${formatDate(flight.flown_on)}`,
+        hasTrack: flight.recording_summary !== null,
       });
     }
   }
@@ -210,9 +220,12 @@ const FLIGHT_COLUMNS =
 const missingColumn = (code: string | undefined) =>
   code === "42703" || code === "PGRST204";
 
-/** Loads the log, still working (without the extra details, and then
- * without ratings) on a database the newer migrations haven't been run on
- * yet. */
+// The flown route's summary only (not its points), and the plan.
+const RECORDING_COLUMNS = "recording_summary:recording->summary, plan";
+
+/** Loads the log, still working (without the recordings and plans, the
+ * extra details, and then ratings) on a database the newer migrations
+ * haven't been run on yet. */
 export async function loadFlights(
   supabase: Awaited<ReturnType<typeof createClient>>,
 ) {
@@ -222,7 +235,12 @@ export async function loadFlights(
       .select(columns)
       .order("flown_on", { ascending: false })
       .returns<Partial<Flight>[]>();
-  let result = await query(`${FLIGHT_COLUMNS}, rating, ${EXTRA_COLUMNS}`);
+  let result = await query(
+    `${FLIGHT_COLUMNS}, rating, ${EXTRA_COLUMNS}, ${RECORDING_COLUMNS}`,
+  );
+  if (missingColumn(result.error?.code)) {
+    result = await query(`${FLIGHT_COLUMNS}, rating, ${EXTRA_COLUMNS}`);
+  }
   if (missingColumn(result.error?.code)) {
     result = await query(`${FLIGHT_COLUMNS}, rating`);
   }
@@ -232,7 +250,14 @@ export async function loadFlights(
   return {
     data:
       result.data?.map(
-        (flight) => ({ rating: null, ...NO_EXTRAS, ...flight }) as Flight,
+        (flight) =>
+          ({
+            rating: null,
+            ...NO_EXTRAS,
+            ...flight,
+            recording_summary: flight.recording_summary ?? null,
+            plan: asSimbriefPlan(flight.plan),
+          }) as Flight,
       ) ?? null,
     error: result.error,
   };

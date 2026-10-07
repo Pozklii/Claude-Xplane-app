@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatDate, formatDuration } from "@/lib/dates";
+import type { RecordingSummary } from "@/lib/recording";
+import { formatAltitude, type SimbriefPlan } from "@/lib/simbrief";
 import { AirlineLogo } from "./airline-logo";
 import { Flag } from "./flag";
 import { useSelection } from "./selection-context";
@@ -35,6 +37,10 @@ export type FlightDetails = {
   /** e.g. "Night". */
   conditions?: string | null;
   weather?: string | null;
+  /** The SimBrief plan it was flown to, and the flown route's summary
+   * (logged flights), for planned against actual. */
+  plan?: SimbriefPlan | null;
+  recording?: RecordingSummary | null;
   notes: string | null;
   /** Signed URL of the thumbnail to show: the user's chosen one, else the
    * flight's first uploaded image, else null (a drawn route instead). */
@@ -366,6 +372,10 @@ export function SelectedFlightCard({
         )}
       </p>
 
+      {(flight.plan || flight.recording) && (
+        <PlannedVsFlown flight={flight} showLegend={prominent} />
+      )}
+
       <section
         className={`${styles.reveal} flex flex-col gap-1`}
         style={{ "--i": 3 } as React.CSSProperties}
@@ -391,5 +401,133 @@ export function SelectedFlightCard({
         </Link>
       )}
     </article>
+  );
+}
+
+const KG_TO_LB = 2.20462;
+
+// A logged flight's SimBrief plan against how it was flown (its logged
+// times and recorded route), row by row where either side is known; and,
+// on the Flight Map, a key to the flown route drawn beside the arc.
+function PlannedVsFlown({
+  flight,
+  showLegend,
+}: {
+  flight: FlightDetails;
+  showLegend: boolean;
+}) {
+  const { plan, recording } = flight;
+  const airborneMinutes =
+    flight.times?.takeoff != null && flight.times?.landing != null
+      ? (flight.times.landing - flight.times.takeoff + 1440) % 1440 || null
+      : null;
+  const fuelUnit = plan?.fuelUnit ?? "kg";
+  const fuel = (amount: number) =>
+    `${Math.round(amount).toLocaleString("en-US")} ${fuelUnit}`;
+  const fuelUsed =
+    recording?.fuelUsedKg != null
+      ? recording.fuelUsedKg * (fuelUnit === "lb" ? KG_TO_LB : 1)
+      : null;
+  const nm = (n: number) => `${formatInteger(n)} nm`;
+  const rows = (
+    [
+      [
+        "Block time",
+        plan?.blockMinutes != null
+          ? formatDuration(plan.blockMinutes / 60)
+          : null,
+        plan ? formatDuration(flight.hours) : null,
+      ],
+      [
+        "Time in the air",
+        plan?.eteMinutes != null ? formatDuration(plan.eteMinutes / 60) : null,
+        airborneMinutes !== null ? formatDuration(airborneMinutes / 60) : null,
+      ],
+      [
+        "Distance",
+        plan?.distanceNm != null ? nm(plan.distanceNm) : null,
+        recording ? nm(recording.distanceNm) : null,
+      ],
+      [
+        plan ? "Cruise" : "Highest",
+        plan?.cruiseAltitudeFt != null
+          ? formatAltitude(plan.cruiseAltitudeFt)
+          : null,
+        recording?.maxAltitudeFt != null
+          ? formatAltitude(recording.maxAltitudeFt)
+          : null,
+      ],
+      [
+        "Fuel burned",
+        plan?.fuelBurn != null ? fuel(plan.fuelBurn) : null,
+        fuelUsed !== null ? fuel(fuelUsed) : null,
+      ],
+    ] as [string, string | null, string | null][]
+  ).filter(([, planned, flown]) => planned !== null || flown !== null);
+
+  return (
+    <section
+      className={`${styles.reveal} flex flex-col gap-1.5`}
+      style={{ "--i": 3 } as React.CSSProperties}
+    >
+      <h3 className={styles.label}>
+        {plan ? "Planned vs flown" : "As flown"}
+        {plan ? " (SimBrief)" : ""}
+      </h3>
+      {rows.length > 0 && (
+        <table className="w-full text-xs tabular-nums">
+          {plan && (
+            <thead>
+              <tr className={styles.soft}>
+                <th className="py-0.5 text-left font-normal" />
+                <th className="py-0.5 text-right font-normal">Planned</th>
+                <th className="py-0.5 text-right font-normal">Flown</th>
+              </tr>
+            </thead>
+          )}
+          <tbody>
+            {rows.map(([label, planned, flown]) => (
+              <tr key={label}>
+                <th className={`${styles.soft} py-0.5 text-left font-normal`}>
+                  {label}
+                </th>
+                {plan && (
+                  <td className={`${styles.stat} py-0.5 text-right`}>
+                    {planned ?? "–"}
+                  </td>
+                )}
+                <td className={`${styles.stat} py-0.5 text-right font-semibold`}>
+                  {flown ?? "–"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {plan?.route && (
+        <p className={`${styles.soft} break-words font-mono text-[10px]`}>
+          {plan.route}
+        </p>
+      )}
+      {showLegend && recording && (
+        <p className={`${styles.soft} flex flex-wrap items-center gap-3 text-[11px]`}>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block h-0.5 w-4 rounded"
+              style={{ background: "rgb(255 214 140)" }}
+            />
+            Flown route
+            {recording.source === "xplane" ? " (X-Plane)" : ""}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block h-0.5 w-4 rounded"
+              style={{ background: "var(--arc-color)" }}
+            />
+            Great circle
+          </span>
+        </p>
+      )}
+    </section>
   );
 }

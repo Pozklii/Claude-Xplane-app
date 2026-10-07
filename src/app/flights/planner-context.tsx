@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import type { SimbriefPlan } from "@/lib/simbrief";
 
 export type PlannerTab = "airport" | "suggestions" | "challenges";
 
@@ -16,6 +17,9 @@ export type RoutePlan = {
   to: string;
   airline: string;
   aircraft: string;
+  /** An imported SimBrief plan; it applies while From and To are still
+   * its origin and destination. */
+  simbrief?: SimbriefPlan | null;
 };
 
 type PlannerContextValue = {

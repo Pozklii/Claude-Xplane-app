@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { FlightGlobe, type GlobeArc, type GlobePoint } from "./flight-globe";
+import type { TrackPoint } from "@/lib/recording";
 import { usePlanner } from "./planner-context";
+import { getFlightTrack } from "./recording-actions";
 import { ROUTE_COLORS, useRouteColor } from "./route-color";
 import { SelectedFlightCard, type FlightDetails } from "./selected-flight-card";
+import { useSelection } from "./selection-context";
 
 const VIEW_STORAGE_KEY = "flightworld:map-view";
 
@@ -55,6 +58,30 @@ export function CustomizableGlobe({
     viewThisSession ??
     (flat ? "map" : persistedView === "map" ? "map" : "globe");
   const { airportCode, openAirport } = usePlanner();
+
+  // The selected flight's flown route, fetched the first time it's
+  // selected (the owner's own flights only; a shared map has none).
+  const { selectedFlightId } = useSelection();
+  const [tracks, setTracks] = useState<Record<string, TrackPoint[]>>({});
+  const needsTrack =
+    userId !== undefined &&
+    selectedFlightId !== null &&
+    !Object.hasOwn(tracks, selectedFlightId) &&
+    arcs.some((arc) => arc.id === selectedFlightId && arc.hasTrack);
+  useEffect(() => {
+    if (!needsTrack || selectedFlightId === null) return;
+    let cancelled = false;
+    getFlightTrack(selectedFlightId)
+      .catch(() => null)
+      .then((points) => {
+        if (cancelled) return;
+        // Kept even when missing, so it isn't asked for again.
+        setTracks((prev) => ({ ...prev, [selectedFlightId]: points ?? [] }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsTrack, selectedFlightId]);
 
   // How far the header/card column reaches over the map (none once it
   // stacks above it, on narrow screens), so the globe centres beside it.
@@ -107,6 +134,7 @@ export function CustomizableGlobe({
           wholeGlobe
           flat={view === "map"}
           onAirportClick={(code) => openAirport(code, { scroll: false })}
+          tracks={tracks}
         />
       </div>
 

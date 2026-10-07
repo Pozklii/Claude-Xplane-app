@@ -16,6 +16,7 @@ import {
 import { Flag } from "./flag";
 import { FlightExtrasFields } from "./flight-extras-fields";
 import { usePlanner } from "./planner-context";
+import { SimbriefPlanSummary } from "./simbrief-import";
 
 export const CONFIRMED_FLIGHT_ID = "confirmed-flight";
 
@@ -131,6 +132,8 @@ export function ConfirmedFlightPanel({
         </p>
       </div>
 
+      {confirmed.plan && <SimbriefPlanSummary plan={confirmed.plan} />}
+
       {cancelling ? (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-zinc-700 dark:text-zinc-300">
@@ -167,6 +170,7 @@ export function ConfirmedFlightPanel({
                 to: confirmed.to,
                 airline: confirmed.airline,
                 aircraft: confirmed.aircraft,
+                simbrief: confirmed.plan ?? null,
               });
               setConfirmedFlight(null);
             }}
@@ -338,6 +342,9 @@ function LogCompletedFlight({
         )}
       </p>
 
+      {flight.plan && (
+        <input type="hidden" name="plan" value={JSON.stringify(flight.plan)} />
+      )}
       <FlightExtrasFields onUseHours={(value) => setHours(value.toFixed(1))} />
 
       <div className="flex flex-col gap-3 sm:flex-row">

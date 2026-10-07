@@ -29,7 +29,7 @@ export async function saveConfirmedFlightToAccount(
     (typeof flight === "object" &&
       typeof flight.from === "string" &&
       typeof flight.to === "string" &&
-      JSON.stringify(flight).length < 4000);
+      JSON.stringify(flight).length < 12000);
   const when = new Date(at);
   if (!valid || Number.isNaN(when.getTime())) return;
   await supabase.from("confirmed_flights").upsert({

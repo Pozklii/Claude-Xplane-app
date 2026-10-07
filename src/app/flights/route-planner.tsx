@@ -13,6 +13,7 @@ import {
 } from "./confirmed-flight-store";
 import { Flag } from "./flag";
 import { ROUTE_PLAN_ID, usePlanner } from "./planner-context";
+import { SimbriefImport, SimbriefPlanSummary } from "./simbrief-import";
 
 const MI_PER_NM = 1.15078;
 // A typical airliner's average ground speed over a whole trip, for a rough
@@ -110,6 +111,13 @@ export function RoutePlanner({
 }) {
   const { openAirport, plan, updatePlan, planLoads } = usePlanner();
   const { from, to, airline, aircraft } = plan;
+  // An imported SimBrief plan, while the route is still the plan's.
+  const simbrief =
+    plan.simbrief &&
+    from === plan.simbrief.origin &&
+    to === plan.simbrief.destination
+      ? plan.simbrief
+      : null;
   const setFrom = (value: string) => updatePlan({ from: value });
   const setTo = (value: string) => updatePlan({ to: value });
   const fromLookup = useAirport(from);
@@ -126,12 +134,15 @@ export function RoutePlanner({
       ? { a: fromLookup.airport, b: toLookup.airport }
       : null;
   const nm = both ? distanceNm(both.a, both.b) : null;
-  // The chosen aircraft's own cruise speed and overheads, when it's one we
-  // know; otherwise a typical airliner's average.
+  // SimBrief's planned block time; else the chosen aircraft's own cruise
+  // speed and overheads, when it's one we know; otherwise a typical
+  // airliner's average.
   const hours =
     nm === null
       ? null
-      : knownAircraft
+      : simbrief?.blockMinutes
+        ? simbrief.blockMinutes / 60
+        : knownAircraft
         ? estimateHours(knownAircraft, nm)
         : nm / AVERAGE_KT;
 
@@ -142,7 +153,8 @@ export function RoutePlanner({
     confirmed.from === both.a.code &&
     confirmed.to === both.b.code &&
     confirmed.airline === airline.trim() &&
-    confirmed.aircraft === aircraft.trim();
+    confirmed.aircraft === aircraft.trim() &&
+    JSON.stringify(confirmed.plan ?? null) === JSON.stringify(simbrief);
   const confirm = () => {
     if (!both || nm === null || hours === null || !aircraft.trim()) return;
     const place = (airport: AirportLookup) =>
@@ -159,6 +171,7 @@ export function RoutePlanner({
       aircraft: aircraft.trim(),
       nm,
       hours,
+      ...(simbrief ? { plan: simbrief } : {}),
       confirmedAt: new Date().toISOString(),
     });
     // Once it's drawn, bring the confirmed flight (just above) into view.
@@ -180,6 +193,8 @@ export function RoutePlanner({
       key={planLoads}
       className={`flex scroll-mt-6 flex-col gap-4 rounded-xl bg-zinc-50 p-4 dark:bg-zinc-900/60 ${planLoads > 0 ? "motion-safe:animate-[planLoaded_1.6s_ease-out]" : ""}`}
     >
+      <SimbriefImport />
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <AirportField
           label="From"
@@ -284,7 +299,11 @@ export function RoutePlanner({
               {fmt(nm * MI_PER_NM)} mi
               &middot;{" "}
               about {formatDuration(hours)}{" "}
-              {knownAircraft ? `in a ${knownAircraft}` : `at ${AVERAGE_KT} kt`}
+              {simbrief?.blockMinutes
+                ? "block time (SimBrief)"
+                : knownAircraft
+                  ? `in a ${knownAircraft}`
+                  : `at ${AVERAGE_KT} kt`}
             </p>
           </div>
           <div className="flex gap-2">
@@ -306,6 +325,8 @@ export function RoutePlanner({
           them.
         </p>
       )}
+
+      {simbrief && <SimbriefPlanSummary plan={simbrief} />}
 
       {both && (
         <div className="flex flex-wrap items-center gap-3">

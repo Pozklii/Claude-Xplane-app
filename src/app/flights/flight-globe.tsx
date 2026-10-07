@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArcLayer, LineLayer, ScatterplotLayer } from "@deck.gl/layers";
+import {
+  ArcLayer,
+  LineLayer,
+  PathLayer,
+  ScatterplotLayer,
+} from "@deck.gl/layers";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import {
   LngLatBounds,
@@ -11,6 +16,7 @@ import {
   type LngLatBoundsLike,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import type { TrackPoint } from "@/lib/recording";
 import { useSelection } from "./selection-context";
 import { DEFAULT_ARC_COLOR } from "./route-color";
 
@@ -31,6 +37,9 @@ export type GlobeArc = {
   fromCode: string;
   toCode: string;
   label: string;
+  /** Whether a flown route was recorded for it (drawn when it's selected,
+   * from the globe's `tracks`). */
+  hasTrack?: boolean;
 };
 
 // A free, no-API-key vector style, kept for its airport names and 3D
@@ -71,6 +80,11 @@ export { DEFAULT_ARC_COLOR };
 // point layer is still drawn fully transparent so airports stay clickable:
 // deck.gl's picking pass uses its own picking colors, not the fill alpha.
 const MARKER_HIT_TARGET: [number, number, number, number] = [0, 0, 0, 0];
+
+// The route actually flown (see `tracks`): warm white, so it reads apart
+// from the great-circle arc in any route colour.
+const TRACK_COLOR: [number, number, number, number] = [255, 214, 140, 245];
+const TRACK_GLOW: [number, number, number, number] = [255, 170, 60, 70];
 
 type Rgb = [number, number, number];
 
@@ -252,6 +266,7 @@ export function FlightGlobe({
   fill = false,
   insetLeft = 0,
   onAirportClick,
+  tracks,
 }: {
   points: GlobePoint[];
   arcs: GlobeArc[];
@@ -309,6 +324,9 @@ export function FlightGlobe({
   insetLeft?: number;
   /** Called with an airport's code when it's clicked (after flying in). */
   onAirportClick?: (code: string) => void;
+  /** Flown routes by flight id: the selected flight's is drawn along the
+   * ground beside its great-circle arc. */
+  tracks?: Record<string, TrackPoint[]>;
 }) {
   const { selectedFlightId: selectedId, setSelectedFlightId: onSelectId } =
     useSelection();
@@ -907,6 +925,44 @@ export function FlightGlobe({
                 widthUnits: "pixels",
               }),
             ];
+      // The selected flight's flown route, if it has one: a glow under a
+      // thin core, like the arcs, along the ground (holds, diversions and
+      // go-arounds show as flown).
+      const track = selectedArc ? tracks?.[selectedArc.id] : undefined;
+      const trackPath =
+        track && track.length > 1
+          ? track.map(([lng, lat]) => [lng, lat])
+          : null;
+      const trackLayers = trackPath
+        ? [
+            new PathLayer<number[][]>({
+              id: "flight-track-glow",
+              data: [trackPath],
+              pickable: false,
+              parameters: { cullMode: "none", depthWriteEnabled: false },
+              getPath: (d) => d as [number, number][],
+              getColor: TRACK_GLOW,
+              getWidth: 7,
+              widthUnits: "pixels",
+              jointRounded: true,
+              capRounded: true,
+              wrapLongitude: flatRef.current,
+            }),
+            new PathLayer<number[][]>({
+              id: "flight-track",
+              data: [trackPath],
+              pickable: false,
+              parameters: { cullMode: "none", depthWriteEnabled: false },
+              getPath: (d) => d as [number, number][],
+              getColor: TRACK_COLOR,
+              getWidth: 2,
+              widthUnits: "pixels",
+              jointRounded: true,
+              capRounded: true,
+              wrapLongitude: flatRef.current,
+            }),
+          ]
+        : [];
       const pointLayer = new ScatterplotLayer<GlobePoint>({
         id: "flight-points",
         data: points,
@@ -940,6 +996,7 @@ export function FlightGlobe({
               2.5 + 1.5 * pulse,
               9 + 16 * pulse,
             ),
+            ...trackLayers,
             pointLayer,
           ],
         });
@@ -1128,7 +1185,7 @@ export function FlightGlobe({
     // by then, so an update deferred to it would silently never apply.
     if (overlayRef.current) apply();
     else map.once("load", apply);
-  }, [arcs, points, selectedId, overviewMaxZoom, arcColor]);
+  }, [arcs, points, selectedId, overviewMaxZoom, arcColor, tracks]);
 
   return (
     <div
