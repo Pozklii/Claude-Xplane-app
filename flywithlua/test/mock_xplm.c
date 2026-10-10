@@ -118,6 +118,14 @@ void *XPLMFindDataRef(const char *name) {
   if (strcmp(name, "sim/joystick/joystick_button_values") == 0) return &joy_token;
   return ref_named(name);
 }
+/* Array datarefs other than the joystick buttons hold one value, at index 0. */
+int XPLMGetDatavf(void *r, float *values, int offset, int max) {
+  if (!r || r == &joy_token) return 0;
+  if (!values) return 1;
+  if (offset != 0 || max < 1) return 0;
+  values[0] = (float)((Ref *)r)->value;
+  return 1;
+}
 int XPLMGetDatavi(void *r, int *values, int offset, int max) {
   if (r != &joy_token) return 0;
   if (!values) return 3200;
