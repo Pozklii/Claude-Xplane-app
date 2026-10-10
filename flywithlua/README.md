@@ -10,7 +10,7 @@ Everything is in one file, [`Cinematic_Views.lua`](./Cinematic_Views.lua).
 2. Copy `Cinematic_Views.lua` to `X-Plane 12/Resources/plugins/FlyWithLua/Scripts/`, replacing any older copy.
 3. Start a flight, or use **Plugins → FlyWithLua → Reload all Lua script files** if X-Plane is already running.
 
-Open **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic Views: settings window**. The other macros (camera on/off, next view, new random view) work without opening it.
+Open **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic Views**. That's the script's only menu entry, and it opens and closes the window. Once your keys or joystick buttons are assigned, you don't need the window to film.
 
 Only run one camera script at a time. If you also have other cinematic camera scripts installed (for example `CineCam.lua` or `cinematic_camera.lua`), they'll fight over the camera.
 
@@ -23,7 +23,6 @@ The window is small and holds the basics:
   - **< Previous** and **Next >**
   - **Random**, for a new random view
   - **Save**, which keeps the random view on screen. On a saved shot it becomes **Delete**.
-- **The shot that's running**, and its zoom.
 - **Your controls:** a key or joystick button for **Camera on/off**, **Next view**, **Previous view** and **New random view**.
   - Press **Assign**, then the key or button you want. **Esc** cancels.
   - Assigned keys only control the camera, so X-Plane won't also act on them.
@@ -80,7 +79,7 @@ The eye point is your head position when filming starts in the cockpit, so start
 - the lens: wide to telephoto
 - the camera style: tripod, handheld or drone-smooth
 
-Some random views are passes, where you fly or roll past a fixed camera on the ground or in the air. Some are cameras mounted rigidly just off the airframe. In the cockpit, a random view is a slow look from one spot to another. The window shows each one's name, such as "Low rear-left orbit, telephoto" or "Ground pass, long lens".
+Some random views are passes, where you fly or roll past a fixed camera on the ground or in the air. Some are cameras mounted rigidly just off the airframe. In the cockpit, a random view is a slow look from one spot to another.
 
 Random views are drawn from ranges that frame the aircraft well, so they look deliberate, not chaotic. Like every shot, they can't clip through the aircraft:
 
@@ -91,7 +90,7 @@ If you like a random view, press **Save**. It joins **Next / Previous** after th
 
 ## Zoom
 
-- **Exterior shots:** + (or =) and − zoom the camera, top row or keypad. A tap zooms one step, holding zooms smoothly, and Shift zooms faster. The mouse wheel and X-Plane's zoom commands (for example on a joystick) zoom it too. Zoom is remembered for each shot, so a flyby keeps your zoom from one pass to the next.
+- **Exterior shots:** + (or =) and − zoom the camera, top row or keypad. The zoom is smooth like X-Plane's own: it glides rather than jumping. Holding zooms at a steady rate and eases to a stop when you let go, and Shift zooms faster. The mouse wheel and X-Plane's zoom commands (for example on a joystick) zoom it the same way. Zoom is remembered for each shot, so a flyby keeps your zoom from one pass to the next. Switching shots goes straight to the new shot's zoom.
 - **Cockpit shots:** +, − and the mouse wheel are X-Plane's own zoom, exactly as normal.
 - **When you're not filming,** the script doesn't touch +, − or the mouse wheel at all.
 
@@ -137,7 +136,7 @@ If something isn't working, look for lines starting with `Cinematic Views:` in X
 - Every exterior shot keeps the aircraft in frame and above ground, and the mounted cameras stay rigid.
 - Hundreds of random shots, across many random seeds, keep their target in frame, stay outside the aircraft and above the ground. Saved shots survive the settings file.
 - Cockpit shots, listed and random, never leave the safe space around the seat, through takeoff rolls, turbulence and firm landings.
-- Key and joystick assignments work, + and − and the mouse wheel do the right thing inside, outside and when not filming, and zoom is remembered per shot.
+- Key and joystick assignments work, and + and − and the mouse wheel do the right thing inside, outside and when not filming. Zoom glides with no jumps from frame to frame, and it's remembered per shot.
 - Cameras fit both an airliner and a glider, view changes hand the camera over correctly, and your head is restored.
 - Pause, replay, the window and saved settings work, and nothing is drawn over the picture.
 

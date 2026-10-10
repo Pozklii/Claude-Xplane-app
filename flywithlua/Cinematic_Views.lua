@@ -1,5 +1,5 @@
 -- =============================================================================
---  Cinematic Views for X-Plane 12                                        v3.1.0
+--  Cinematic Views for X-Plane 12                                        v3.2.0
 --  A FlyWithLua NG+ script: an automatic cinematic camera for screenshots
 --  and videos, outside and inside the aircraft.
 --
@@ -16,20 +16,21 @@
 --    well. Save the ones you like and they join Next / Previous.
 --  * Cameras fit the aircraft: they read its span and length (or estimate
 --    them from its weight), and remember a size correction per aircraft.
---  * Zoom: + and - (and the mouse wheel) zoom the exterior camera; in the
---    cockpit, and when you are not filming, they are X-Plane's own as usual.
+--  * Zoom: + and - (and the mouse wheel) zoom the exterior camera smoothly,
+--    like X-Plane's own zoom; in the cockpit, and when you are not filming,
+--    they are X-Plane's own as usual.
 --  * A small window: camera on/off, previous/next, random, save, your own key
 --    or joystick button for each, and a few sliders. Nothing is ever drawn
 --    over the picture.
 --
 --  Install: copy this file to  X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
---  Use:     Plugins > FlyWithLua > FlyWithLua Macros > Cinematic Views ...
+--  Use:     Plugins > FlyWithLua > FlyWithLua Macros > Cinematic Views
 --
 --  Requires FlyWithLua NG+ (LuaJIT with FFI). Settings are saved next to this
 --  file in Cinematic_Views.ini.
 -- =============================================================================
 
-local VERSION = "3.1.0"
+local VERSION = "3.2.0"
 local TAG = "Cinematic Views: "
 
 local function log(msg)
@@ -995,37 +996,7 @@ local function pick(list)   -- { { value, weight }, ... }
   return list[#list][1]
 end
 
-local SIDE_WORDS = { "front", "front-right", "right", "rear-right", "rear", "rear-left", "left", "front-left" }
-local MOTION_WORDS = { hold = "hold", orbit = "orbit", dolly = "push-in", crane = "crane", slide = "slide", sweep = "sweep" }
-
-local function side_word(az) return SIDE_WORDS[math.floor(((az % 360) + 22.5) / 45) % 8 + 1] end
-
-local function height_word(el)
-  if el < 6 then return "Low" elseif el < 25 then return "Level" elseif el < 45 then return "High" end
-  return "Overhead"
-end
-
-local function cockpit_word(h, p)
-  if p < -14 then return "panel" end
-  if h < -60 then return "left window" elseif h < -20 then return "left" elseif h <= 20 then return "ahead"
-  elseif h <= 60 then return "right" end
-  return "right window"
-end
-
-local function describe(r)
-  if r.kind == "int" then
-    return ("Cockpit: %s to %s"):format(cockpit_word(r.h0, r.p0), cockpit_word(r.h1, r.p1))
-  end
-  local target = (r.look ~= "centre") and (", on the " .. r.look) or ""
-  if r.anchor == "pass" then
-    return (r.ground == 1 and "Ground" or "Air") .. " pass" .. (r.frac < 0.33 and ", long lens" or "")
-  elseif r.anchor == "mount" then
-    local az, el = deg(atan2(r.mx, -r.mz)), deg(math.asin(clamp(r.my, -1, 1)))
-    return ("Mounted %s %s"):format(height_word(el):lower(), side_word(az)) .. target
-  end
-  local lens = (r.z0 >= 1.8) and ", telephoto" or (r.z0 < 1) and ", wide" or ""
-  return ("%s %s %s"):format(height_word(r.el0), side_word(r.az0), MOTION_WORDS[r.motion]) .. lens .. target
-end
+local MOTIONS = { hold = true, orbit = true, dolly = true, crane = true, slide = true, sweep = true }
 
 -- Keep every number of a recipe in its range (recipes also come from the
 -- settings file).
@@ -1050,7 +1021,7 @@ local function sanitize(r)
     num("az0", -720, 720, 150) num("az1", -720, 720, r.az0)
     num("el0", -6, 75, 8) num("el1", -6, 75, r.el0)
     num("d0", 1.5, 14, 3) num("d1", 1.5, 14, r.d0)
-    if not MOTION_WORDS[r.motion] then r.motion = "hold" end
+    if not MOTIONS[r.motion] then r.motion = "hold" end
   elseif r.anchor == "pass" then
     num("lead", 2, 12, 6) num("lat", 1.3, 8, 2) num("vert", -0.5, 2, 0.2) num("frac", 0.2, 0.6, 0.4)
     r.ground = (tonumber(r.ground) == 1) and 1 or 0
@@ -1168,8 +1139,8 @@ local function random_mount(r, o)
 end
 
 -- A shot from a recipe.
-local function make_def(r, id, name)
-  local def = { id = id, kind = r.kind, recipe = r, name = name or describe(r) }
+local function make_def(r, id)
+  local def = { id = id, kind = r.kind, recipe = r, name = (id:sub(1, 2) == "my") and "Saved shot" or "Random shot" }
   if r.kind == "int" then
     def.init = function() end
     def.head = function(st, o)
@@ -1215,7 +1186,7 @@ for _, text in ipairs(MY_RAW) do
   if r then add_my(r) end
 end
 
-RS.look_point, RS.describe, RS.parse = look_point, describe, parse_recipe
+RS.look_point, RS.parse = look_point, parse_recipe
 RS.exterior, RS.cockpit, RS.make_def, RS.add_my = random_exterior, random_cockpit, make_def, add_my
 end
 
@@ -1251,6 +1222,18 @@ local function use_adjustments(id)
 end
 local function reset_nudge() nudge.yaw, nudge.up, nudge.zoom = 0, 0, 1 end
 local function zoom_by(f) nudge.zoom = clamp(nudge.zoom * f, 0.4, 10) end
+
+-- Zoom is smooth, like X-Plane's own: every input (keys, wheel, commands)
+-- moves the zoom you ask for, and the camera glides to it. Holding a zoom key
+-- or button zooms at a steady rate; ZOOM.hold is its direction times speed.
+local ZOOM = { log = 0, vel = 0, hold = 0 }
+local ZOOM_RATE = 0.6                  -- per second, in log zoom (about x1.8 a second)
+local ZOOM_STEP = 0.04                 -- what a quick tap or a wheel click adds
+local function zoom_snap() ZOOM.log, ZOOM.vel = math.log(nudge.zoom), 0 end
+local function zoom_hold(dir, fast)
+  if dir ~= 0 and ZOOM.hold == 0 then zoom_by(exp(dir * ZOOM_STEP)) end
+  ZOOM.hold = dir * (fast and 3 or 1)
+end
 
 local clock = { last = nil, dt = 1 / 30 }
 local cam_clock = { last = nil }
@@ -1333,7 +1316,7 @@ local function run_shot(def, st, o, dt)
       o.rol = o.rol + rnd(-v, v) * 0.5
     end
   end
-  o.zoom = o.zoom * nudge.zoom
+  o.zoom = o.zoom * exp(ZOOM.log)
 end
 
 -- Would a straight glide between two camera positions pass through the aircraft?
@@ -1376,6 +1359,7 @@ local function camera_update(pos, losing)
     return 0
   end
   read_pose()
+  ZOOM.log, ZOOM.vel = spring(ZOOM.log, ZOOM.vel, math.log(nudge.zoom), 9, 1, dt)
 
   local st = cine.st
   st.t = st.t + dt
@@ -1522,9 +1506,9 @@ local function zoom_command(phase, refcon)
   local z = ZOOM_CMDS[tonumber(ffi.cast("intptr_t", refcon))]
   if not (z and filming_outside()) then return 1 end
   if phase == 0 then
-    zoom_by(exp(z.dir * z.rate * 0.05))                    -- a tap: one step
-  elseif phase == 1 then
-    zoom_by(exp(z.dir * z.rate * 0.8 * clock.dt))          -- held: smooth zoom
+    zoom_hold(z.dir, z.rate > 1)
+  elseif phase == 2 then
+    zoom_hold(0)
   end
   return 0
 end
@@ -1611,6 +1595,7 @@ local function begin_shot(id, how)
   cine.def, cine.st, cine.last_id = def, st, id
   if id:sub(1, 3) ~= "rnd" then cine.last_listed = id end
   use_adjustments(id)
+  zoom_snap()
   if def.kind == "int" and geti(REF.view_type) == VIEW_3D_COCKPIT then
     -- Already in the cockpit: place the head now, so the cut has no stray frame.
     cine.waiting = nil
@@ -1781,7 +1766,7 @@ M.nudge = function(kind, dir)
   elseif kind == "up" then
     nudge.up = clamp(nudge.up + dir * 0.6 * dt, -2, 3)
   elseif kind == "zoom" then
-    if cine.active and cine.def and cine.def.kind == "int" then native_zoom(dir) else zoom_by(exp(dir * 0.8 * dt)) end
+    if cine.active and cine.def and cine.def.kind == "int" then native_zoom(dir) else zoom_by(exp(dir * ZOOM_RATE * dt)) end
   end
 end
 M.reset_nudge = reset_nudge
@@ -1829,7 +1814,6 @@ local function zoom_key(vk, ch)
 end
 
 local keys_down = {}
-local zoom_held = nil                  -- { dir, fast, t } while + or - is held outside
 local capture = { action = nil, msg = nil, t = 0, base = nil }
 
 local JOY = { n = 0, all = nil, one = ffi.new("int[1]"), last = {} }
@@ -1910,12 +1894,9 @@ local function on_key()
 
   local dir = (not ctrl and not alt) and zoom_key(vk, ch) or nil
   if dir then
-    if not pressed then zoom_held = nil end
+    if not pressed then zoom_hold(0) end
     if filming_outside() then
-      if pressed and not zoom_held then
-        zoom_by(exp(dir * (shift and 0.15 or 0.05)))
-        zoom_held = { dir = dir, fast = shift, t = 0 }
-      end
+      if pressed then zoom_hold(dir, shift) end
       RESUME_KEY = true
     end
   end
@@ -1924,7 +1905,7 @@ end
 -- The mouse wheel zooms the exterior camera; otherwise it is X-Plane's.
 local function on_wheel()
   if filming_outside() and (tonumber(MOUSE_WHEEL_NUMBER) or 0) == 0 then
-    zoom_by(1.1 ^ (tonumber(MOUSE_WHEEL_CLICKS) or 0))
+    zoom_by(exp(ZOOM_STEP * 2 * (tonumber(MOUSE_WHEEL_CLICKS) or 0)))
     RESUME_MOUSE_WHEEL = true
   end
 end
@@ -1954,13 +1935,8 @@ local function buttons_tick(dt)
       JOY.last[b.n] = down
     end
   end
-  if zoom_held then
-    zoom_held.t = zoom_held.t + dt
-    if not filming_outside() then
-      zoom_held = nil
-    elseif zoom_held.t > 0.25 then
-      zoom_by(exp(zoom_held.dir * (zoom_held.fast and 2.4 or 0.8) * dt))
-    end
+  if ZOOM.hold ~= 0 then
+    if filming_outside() then zoom_by(exp(ZOOM.hold * ZOOM_RATE * dt)) else ZOOM.hold = 0 end
   end
 end
 
@@ -2095,11 +2071,7 @@ local function build_window()
   if imgui.Button(saved_shot and "Delete" or (def and def.saved_as) and "Saved" or "Save", 70, 30) then
     if saved_shot then M.delete_shot(def.id) elseif can_save then M.save_shot() end
   end
-  if def then
-    imgui.TextUnformatted(def.kind == "ext" and ("%s   (zoom %.1fx)"):format(def.name, nudge.zoom) or def.name)
-  else
-    text(COL_HINT, cine.message or "Camera off")
-  end
+  if cine.message and not on then text(COL_HINT, cine.message) end
 
   imgui.Separator()
   for _, a in ipairs(ACTIONS) do
@@ -2209,7 +2181,7 @@ M._state = function() return cine, A, S, BIND, function() return B end end
 M._shots = function() return SHOTS, SHOT_ORDER end
 M._random = function()
   return { MY = MY, look_point = RS.look_point, serialize = serialize_recipe, parse = RS.parse,
-           exterior = RS.exterior, cockpit = RS.cockpit, describe = RS.describe,
+           exterior = RS.exterior, cockpit = RS.cockpit,
            start = function(r) request(function() act_shot(remember_random(r)) end) end }
 end
 
@@ -2254,13 +2226,8 @@ for _, id in ipairs(SHOT_ORDER) do
   command("shot_" .. id, SHOTS[id].name .. " shot", "CinematicViews.shot('" .. id .. "')")
 end
 
-if add_macro then
-  add_macro("Cinematic Views: camera on/off", "CinematicViews.toggle()")
-  add_macro("Cinematic Views: next view", "CinematicViews.next_shot()")
-  add_macro("Cinematic Views: new random view", "CinematicViews.random_shot()")
-  add_macro("Cinematic Views: settings window", "CinematicViews.toggle_window()")
-end
+if add_macro then add_macro("Cinematic Views", "CinematicViews.toggle_window()") end
 
 if not CMD.external then log("no exterior view command found - exterior shots are off.") end
 if not (CMD.cockpit and HAS_HEAD) then log("no 3D cockpit view - cockpit shots are off.") end
-log("v" .. VERSION .. " ready - Plugins > FlyWithLua > Macros, or the FlyWithLua/cinematic_views/ commands.")
+log("v" .. VERSION .. " ready - Plugins > FlyWithLua > FlyWithLua Macros > Cinematic Views.")

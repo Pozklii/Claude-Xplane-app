@@ -291,6 +291,15 @@ dofile(SCRIPT)
 check(type(CinematicViews) == "table", "script did not create CinematicViews")
 check(#hooks.frame == 1 and #hooks.draw == 1 and #hooks.exit == 1, "frame/draw/exit hooks registered")
 check(#hooks.key == 1 and #hooks.wheel == 1, "key and wheel hooks registered")
+local macro_names = {}
+for name in pairs(macros) do macro_names[#macro_names + 1] = name end
+check(#macro_names == 1 and macros["Cinematic Views"] ~= nil, "one menu entry, Cinematic Views (" .. table.concat(macro_names, ", ") .. ")")
+if macros["Cinematic Views"] then
+  macros["Cinematic Views"]()
+  check(windows == 1, "it opens the window")
+  macros["Cinematic Views"]()
+  check(windows == 0, "and closes it")
+end
 check(commands["FlyWithLua/cinematic_views/toggle"] ~= nil, "toggle command exists")
 check(commands["FlyWithLua/cinematic_views/shot_pilot"] ~= nil, "per-shot commands exist")
 for _, l in ipairs(logs) do check(not l:find("not started") and not l:find("failed") and not l:find("off"), "log: " .. l) end
@@ -583,24 +592,53 @@ check(ini:find("bind.toggle = key:120:0:0:0", 1, true) ~= nil and ini:find("bind
       "assignments saved")
 
 -- ---------------------------------------------------------------------------
-section("+ and - zoom the exterior camera, held or tapped")
+section("+ and - zoom the exterior camera smoothly, like X-Plane's own zoom")
 CinematicViews.shot("chase")
 step(5)
 CinematicViews.reset_nudge()
-step(2)
+step(60)
+-- The biggest change in zoom from one frame to the next (in log terms) while
+-- running n frames: a smooth zoom never jumps.
+local function watch_zoom(n)
+  local prev, biggest = cam.zoom, 0
+  step(n, function()
+    biggest = math.max(biggest, math.abs(math.log(cam.zoom / prev)))
+    prev = cam.zoom
+  end)
+  return biggest
+end
 local z0 = cam.zoom
 check(key(0xB0, "=", "pressed") == true, "= kept from X-Plane while filming outside")
-step(60)
+local jump = watch_zoom(60)
 check(key(0xB0, "=", "released") == true, "and its release")
-step(2)
+local z_release = cam.zoom
+jump = math.max(jump, watch_zoom(60))
 check(cam.zoom > z0 * 1.5, ("holding = zooms in (%.2f -> %.2f)"):format(z0, cam.zoom))
+check(jump < 0.02, ("holding = zooms smoothly (largest change in a frame %.3f)"):format(jump))
+check(cam.zoom > z_release, "and eases to a stop after you let go")
 local z1 = cam.zoom
 tap(0x6D, "-")
-step(2)
-check(cam.zoom < z1 and cam.zoom > z1 * 0.9, ("keypad - taps out one step (%.2f -> %.2f)"):format(z1, cam.zoom))
+jump = watch_zoom(60)
+check(cam.zoom < z1 and cam.zoom > z1 * 0.9, ("a tap on keypad - zooms out a little (%.2f -> %.2f)"):format(z1, cam.zoom))
+check(jump < 0.01, ("a tap glides rather than jumps (%.3f)"):format(jump))
+local z2 = cam.zoom
 check(wheel(3) == true, "wheel kept from X-Plane while filming outside")
-step(2)
-check(X.mock_handler_count() == 4 and X.mock_press("sim/general/zoom_in", 0) == 0, "zoom commands (e.g. joystick) zoom the camera too")
+jump = watch_zoom(60)
+check(cam.zoom > z2 * 1.2 and jump < 0.03, ("the wheel zooms in, gliding (%.2f -> %.2f, %.3f)"):format(z2, cam.zoom, jump))
+local z3 = cam.zoom
+check(X.mock_handler_count() == 4 and X.mock_press("sim/general/zoom_out", 0) == 0, "zoom commands (e.g. joystick) zoom the camera too")
+jump = watch_zoom(45)
+X.mock_press("sim/general/zoom_out", 2)
+jump = math.max(jump, watch_zoom(60))
+check(cam.zoom < z3 * 0.75 and jump < 0.02, ("held zoom command zooms out smoothly (%.2f -> %.2f, %.3f)"):format(z3, cam.zoom, jump))
+local z4 = cam.zoom
+step(60)
+check(math.abs(cam.zoom - z4) < 0.01, "and stops when released")
+CinematicViews.shot("orbit")
+step(3)
+CinematicViews.shot("chase")
+jump = watch_zoom(3)
+check(math.abs(cam.zoom - z4) < 0.02, "switching shots snaps to the shot's zoom instead of zooming")
 
 section("in the cockpit, + / - and the wheel are X-Plane's own zoom")
 CinematicViews.shot("pilot")
@@ -798,7 +836,8 @@ for n = 1, 240 do
   end
   local r = RT.exterior()
   kinds[r.anchor] = kinds[r.anchor] + 1
-  names[RT.describe(r)] = true
+  local look = r.look .. (r.anchor == "orbit" and (r.motion .. math.floor(((r.az0 % 360) + 45) / 90)) or r.anchor)
+  names[look] = true
   RT.start(r)
   step(2)
   step(150, function()
@@ -830,7 +869,7 @@ for n = 1, 240 do
       if os.getenv("DEBUG_INSIDE") and not r._reported then
         r._reported = true
         print(("   inside: %s  body(%.1f, %.1f, %.1f)  Rs %.1f Rl %.1f  plane y %.1f psi %.0f phi %.0f  %s"):format(
-          RT.describe(r), lx, by, lz, A.Rs, A.Rl, plane.u, plane.psi, plane.phi, RT.serialize(r)))
+          r.anchor, lx, by, lz, A.Rs, A.Rl, plane.u, plane.psi, plane.phi, RT.serialize(r)))
       end
     end
     if cam.y < 0.3 then under = under + 1 end
@@ -840,7 +879,7 @@ local distinct = 0
 for _ in pairs(names) do distinct = distinct + 1 end
 check(kinds.orbit > 80 and kinds.pass > 20 and kinds.mount > 15,
       ("all kinds generated (orbit %d, pass %d, mount %d)"):format(kinds.orbit, kinds.pass, kinds.mount))
-check(distinct > 60, distinct .. " different shot names from 240 random shots")
+check(distinct > 40, distinct .. " different kinds of shot (movement, target, side) from 240 random shots")
 check(bad == 0, "random shots: camera missing or non-finite on " .. bad .. " frames")
 check(out <= frames * 0.03, ("random shots: target out of frame on %d/%d frames"):format(out, frames))
 if os.getenv("VERBOSE") or out > frames * 0.03 or inside > 0 then
@@ -908,7 +947,7 @@ step(3)
 check(cine.def.id == "flyby", "Next from a random shot carries on the list after Orbit (" .. cine.def.id .. ")")
 CinematicViews.random_shot("ext")
 step(3)
-local rname = cine.def.name
+local rrecipe = RT.serialize(cine.def.recipe)
 CinematicViews.toggle_window()
 build("Save")
 step(3)
@@ -922,7 +961,7 @@ CinematicViews.shot("fo")
 step(3)
 CinematicViews.next_shot()
 step(3)
-check(cine.def.id == RT.MY[1].id and cine.def.name == rname, "saved shot joins Next / Previous after the last listed shot")
+check(cine.def.id == RT.MY[1].id and RT.serialize(cine.def.recipe) == rrecipe, "saved shot joins Next / Previous after the last listed shot")
 CinematicViews.toggle_window()
 build("Delete")
 step(3)
