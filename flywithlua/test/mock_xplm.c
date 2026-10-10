@@ -35,6 +35,8 @@ static char last_cmd[128];
 static int cmd_count;
 static int probe_count;
 static char acf_name[256] = "A320.acf";
+static int joy_buttons[3200];
+static int joy_token;                 /* stands in for sim/joystick/joystick_button_values */
 
 typedef int (*CommandCallback)(void *cmd, int phase, void *refcon);
 typedef struct { void *cmd; CommandCallback cb; int before; void *refcon; int used; } Handler;
@@ -62,6 +64,7 @@ int mock_command_count(void) { return cmd_count; }
 int mock_probe_count(void) { return probe_count; }
 int mock_camera_controlled(void) { return cam_cb != NULL; }
 void mock_set_aircraft(const char *file_name) { snprintf(acf_name, sizeof acf_name, "%s", file_name); }
+void mock_set_button(int i, int down) { if (i >= 0 && i < 3200) joy_buttons[i] = down; }
 
 int mock_handler_count(void) {
   int n = 0;
@@ -111,7 +114,17 @@ int mock_render(double *out) {
 }
 
 /* ---- XPLM API ---- */
-void *XPLMFindDataRef(const char *name) { return ref_named(name); }
+void *XPLMFindDataRef(const char *name) {
+  if (strcmp(name, "sim/joystick/joystick_button_values") == 0) return &joy_token;
+  return ref_named(name);
+}
+int XPLMGetDatavi(void *r, int *values, int offset, int max) {
+  if (r != &joy_token) return 0;
+  if (!values) return 3200;
+  int n = 0;
+  for (int i = offset; i < 3200 && n < max; i++) values[n++] = joy_buttons[i];
+  return n;
+}
 int XPLMCanWriteDataRef(void *r) { return r != NULL; }
 int XPLMGetDatai(void *r) { return r ? (int)((Ref *)r)->value : 0; }
 float XPLMGetDataf(void *r) { return r ? (float)((Ref *)r)->value : 0.0f; }

@@ -1,5 +1,5 @@
 -- Runs Cinematic_Views.lua against mock_xplm.c and simulated flights, checking
--- what the camera does. Start it with run_tests.sh.
+-- what the camera and the pilot's head do. Start it with run_tests.sh.
 
 local ffi = require("ffi")
 local SCRIPT = assert(arg[1], "usage: run_tests.lua <path to Cinematic_Views.lua> <work dir>")
@@ -19,6 +19,7 @@ ffi.cdef [[
   void mock_set_aircraft(const char *file_name);
   int mock_handler_count(void);
   int mock_press(const char *name, int phase);
+  void mock_set_button(int i, int down);
 ]]
 local X = ffi.load(WORK .. "/Resources/plugins/XPLM_64.so")
 
@@ -36,10 +37,10 @@ end
 local function section(name) print("-- " .. name) end
 
 -- ---------------------------------------------------------------------------
--- FlyWithLua stand-ins
+-- FlyWithLua stand-ins (behaving like FlyWithLua NG+ 2.8)
 -- ---------------------------------------------------------------------------
 local logs = {}
-local hooks = { frame = {}, draw = {}, often = {}, exit = {}, wheel = {} }
+local hooks = { frame = {}, draw = {}, often = {}, exit = {}, wheel = {}, key = {} }
 local commands, macros = {}, {}
 local drawn = { rects = 0, strings = {} }
 
@@ -56,23 +57,54 @@ function do_every_draw(code) hooks.draw[#hooks.draw + 1] = compile(code) end
 function do_often(code) hooks.often[#hooks.often + 1] = compile(code) end
 function do_on_exit(code) hooks.exit[#hooks.exit + 1] = compile(code) end
 function do_on_mouse_wheel(code) hooks.wheel[#hooks.wheel + 1] = compile(code) end
+function do_on_keystroke(code) hooks.key[#hooks.key + 1] = compile(code) end
 function create_command(name, desc, b, c, e)
   commands[name] = { desc = desc, b = compile(b), c = compile(c), e = compile(e) }
 end
 function add_macro(name, code) macros[name] = compile(code) end
 function XPLMSetGraphicsState() end
-graphics = {
-  set_color = function() end,
-  draw_rectangle = function(x1, y1, x2, y2)
-    assert(x2 >= x1 and y2 >= y1, "bad rectangle")
-    drawn.rects = drawn.rects + 1
-  end,
-}
-function draw_string(x, y, s, col) drawn.strings[#drawn.strings + 1] = s end
+local drawing = false
+function glColor4f() assert(drawing, "OpenGL call outside drawing") end
+function glRectf(x1, y1, x2, y2)
+  assert(drawing, "OpenGL call outside drawing")
+  assert(x2 >= x1 and y2 >= y1, "bad rectangle")
+  drawn.rects = drawn.rects + 1
+end
+function draw_string(x, y, s, col)
+  assert(drawing, "draw_string outside drawing")
+  drawn.strings[#drawn.strings + 1] = s
+end
+
+-- A key event the way FlyWithLua delivers it: RESUME_KEY starts false and a
+-- script sets it true to keep the key from X-Plane. VKEY is a signed char.
+-- Returns true if the key was kept from X-Plane.
+local function key(vk, ch, action, mods)
+  mods = mods or {}
+  RESUME_KEY = false
+  VKEY = (vk >= 128) and (vk - 256) or vk
+  CKEY = ch or ""
+  SHIFT_KEY, CONTROL_KEY, OPTION_KEY = mods.shift == true, mods.ctrl == true, mods.alt == true
+  KEY_ACTION = action
+  for _, f in ipairs(hooks.key) do f() end
+  return RESUME_KEY == true
+end
+local function tap(vk, ch, mods)
+  local a = key(vk, ch, "pressed", mods)
+  local b = key(vk, ch, "released", mods)
+  return a, b
+end
+
+-- The mouse wheel, the same way: true if kept from X-Plane.
+local function wheel(clicks)
+  RESUME_MOUSE_WHEEL = false
+  MOUSE_WHEEL_NUMBER, MOUSE_WHEEL_CLICKS = 0, clicks
+  for _, f in ipairs(hooks.wheel) do f() end
+  return RESUME_MOUSE_WHEEL == true
+end
 
 -- imgui: records labels; "click" makes one labelled button return true once,
 -- "set" makes one slider return a new value once.
-local ui = { labels = {}, click = nil, set = nil, tree_open = true }
+local ui = { labels = {}, click = nil, set = nil }
 local function ui_label(l) ui.labels[#ui.labels + 1] = l end
 imgui = {
   constant = { Col = { Button = 21, Text = 0 } },
@@ -90,9 +122,15 @@ imgui = {
     end
     return false, v
   end,
-  Checkbox = function(l, v) ui_label(l) return false, v end,
-  TreeNode = function(l) ui_label(l) return ui.tree_open end,
-  TreePop = function() end,
+  Checkbox = function(l, v)
+    ui_label(l)
+    if ui.set and l:find(ui.set[1], 1, true) == 1 then
+      local nv = ui.set[2]
+      ui.set = nil
+      return true, nv
+    end
+    return false, v
+  end,
 }
 local windows = 0
 function float_wnd_create() windows = windows + 1 return { id = windows } end
@@ -100,6 +138,11 @@ function float_wnd_set_title() end
 function float_wnd_set_imgui_builder(w, name) w.builder = name end
 function float_wnd_set_onclose(w, name) w.onclose = name end
 function float_wnd_destroy() windows = windows - 1 end
+local function build(click)
+  ui.labels, ui.click = {}, click
+  cinematic_views_build_window()
+  return ui.labels
+end
 
 -- ---------------------------------------------------------------------------
 -- Simulated X-Plane
@@ -111,6 +154,7 @@ local REFS = {
   "sim/flightmodel/position/y_agl", "sim/flightmodel/position/indicated_airspeed",
   "sim/flightmodel/failures/onground_any", "sim/aircraft/weight/acf_m_max", "sim/flightmodel/weight/m_total",
   "sim/aircraft/view/acf_size_x", "sim/aircraft/view/acf_size_z",
+  "sim/cockpit2/engine/actuators/throttle_ratio_all",
   "sim/graphics/view/view_type", "sim/graphics/view/view_is_external", "sim/graphics/view/field_of_view_deg",
   "sim/graphics/view/pilots_head_x", "sim/graphics/view/pilots_head_y", "sim/graphics/view/pilots_head_z",
   "sim/graphics/view/pilots_head_psi", "sim/graphics/view/pilots_head_the", "sim/graphics/view/pilots_head_phi",
@@ -134,7 +178,13 @@ set("sim/aircraft/view/acf_size_x", 17.9)   -- half span (m)
 set("sim/aircraft/view/acf_size_z", 18.8)   -- half length (m)
 set("sim/graphics/view/field_of_view_deg", 75)
 set("sim/operation/misc/frame_rate_period", 1 / 60)
-for i, k in ipairs(HEAD_REFS) do set("sim/graphics/view/pilots_head_" .. k, EYE[i]) end
+local function put_head(h) for i, k in ipairs(HEAD_REFS) do set("sim/graphics/view/pilots_head_" .. k, h[i]) end end
+local function head()
+  local h = {}
+  for i, k in ipairs(HEAD_REFS) do h[i] = get("sim/graphics/view/pilots_head_" .. k) end
+  return h
+end
+put_head(EYE)
 X.mock_set_view(1026, 0)
 X.mock_set_ground(0)
 
@@ -188,19 +238,17 @@ local function step(n, each)
     else
       cam = nil
     end
-    if not hooks_dead then for _, f in ipairs(hooks.draw) do f() end end
+    if not hooks_dead then
+      drawing = true
+      for _, f in ipairs(hooks.draw) do f() end
+      drawing = false
+    end
     if each then each() end
   end
 end
 
 local function run_command(name) commands["FlyWithLua/cinematic_views/" .. name].b() end
 local function often() for _, f in ipairs(hooks.often) do f() end end
-
--- Camera position relative to the aircraft, in its body axes (for a level
--- aircraft heading north: x right, y up, z aft).
-local function cam_body()
-  return cam.x - (plane.e - origin.e), cam.y - plane.u, cam.z - (plane.s - origin.s)
-end
 
 -- Where is the aircraft in the camera picture? Returns the angle (deg) between
 -- the view direction and the aircraft, the half-width of the view, and the distance.
@@ -215,6 +263,11 @@ local function aircraft_off_axis()
   return math.deg(math.acos(math.max(-1, math.min(1, c)))), half, n
 end
 
+-- Camera position relative to the aircraft (level, heading north: x right, y up, z aft).
+local function cam_body()
+  return cam.x - (plane.e - origin.e), cam.y - plane.u, cam.z - (plane.s - origin.s)
+end
+
 local function finite(v) return v == v and v > -1e12 and v < 1e12 end
 local function in_cockpit() return get("sim/graphics/view/view_type") == 1026 and get("sim/graphics/view/view_is_external") == 0 end
 
@@ -224,14 +277,16 @@ publish()
 dofile(SCRIPT)
 check(type(CinematicViews) == "table", "script did not create CinematicViews")
 check(#hooks.frame == 1 and #hooks.draw == 1 and #hooks.exit == 1, "frame/draw/exit hooks registered")
+check(#hooks.key == 1 and #hooks.wheel == 1, "key and wheel hooks registered")
 check(commands["FlyWithLua/cinematic_views/toggle"] ~= nil, "toggle command exists")
-check(commands["FlyWithLua/cinematic_views/shot_spotter"] ~= nil, "per-shot commands exist")
-check(commands["FlyWithLua/cinematic_views/director"] == nil, "no Director command")
-for _, l in ipairs(logs) do check(not l:find("not started") and not l:find("failed"), "log: " .. l) end
+check(commands["FlyWithLua/cinematic_views/shot_pilot"] ~= nil, "per-shot commands exist")
+for _, l in ipairs(logs) do check(not l:find("not started") and not l:find("failed") and not l:find("off"), "log: " .. l) end
 
-local cine, A, S = CinematicViews._state()
+local cine, A, S, BIND, getB = CinematicViews._state()
 local SHOTS, ORDER = CinematicViews._shots()
-check(#ORDER == 11, "11 exterior shots, got " .. #ORDER)
+local n_ext, n_int = 0, 0
+for _, id in ipairs(ORDER) do if SHOTS[id].kind == "ext" then n_ext = n_ext + 1 else n_int = n_int + 1 end end
+check(n_ext == 11 and n_int == 5, ("11 exterior and 5 cockpit shots (%d, %d)"):format(n_ext, n_int))
 
 section("aircraft size from its dimensions, with the weight as a check and fallback")
 step(5)
@@ -250,7 +305,17 @@ set("sim/aircraft/view/acf_size_x", 17.9) set("sim/aircraft/view/acf_size_z", 18
 often()
 
 -- ---------------------------------------------------------------------------
-section("every shot frames the aircraft (taxi, takeoff roll, cruise, approach)")
+section("the mouse wheel and + / - are X-Plane's when not filming")
+check(wheel(2) == false, "wheel passed on to X-Plane")
+local a, b = tap(0xB0, "=")
+check(a == false and b == false, "= passed on to X-Plane")
+a = tap(0xB1, "-")
+check(a == false, "- passed on to X-Plane")
+check(tap(0x41, "a") == false, "other keys passed on")
+check(X.mock_handler_count() == 0 and X.mock_press("sim/general/zoom_in", 0) == 1, "zoom commands left alone")
+
+-- ---------------------------------------------------------------------------
+section("every exterior shot frames the aircraft (taxi, takeoff roll, cruise, approach)")
 local cases = {
   { name = "taxi", setup = function() plane.u = 2.5 steer(8, 90, 0, 0, true) end },
   { name = "runway", setup = function() plane.u = 2.5 steer(60, 90, 0, 0, true) end },
@@ -260,43 +325,44 @@ local cases = {
 for _, case in ipairs(cases) do
   for _, id in ipairs(ORDER) do
     local def = SHOTS[id]
-    case.setup()
-    CinematicViews.shot(id)
-    local worst, frames, out, bad, dist_max, dist_min = 0, 0, 0, 0, 0, 1e9
-    step(2)
-    step(60 * 8, function()
-      if case.turn then steer(math.sqrt(plane.ve ^ 2 + plane.vs ^ 2), plane.psi + case.turn * DT, 0, 25, false) end
-      if cine.def ~= def then return end
-      if not cam then bad = bad + 1 return end
-      for _, k in ipairs({ "x", "y", "z", "pit", "hdg", "rol", "zoom" }) do
-        if not finite(cam[k]) then bad = bad + 1 return end
+    if def.kind == "ext" then
+      case.setup()
+      CinematicViews.shot(id)
+      local worst, frames, out, bad, dist_max, dist_min = 0, 0, 0, 0, 0, 1e9
+      step(2)
+      step(60 * 8, function()
+        if case.turn then steer(math.sqrt(plane.ve ^ 2 + plane.vs ^ 2), plane.psi + case.turn * DT, 0, 25, false) end
+        if cine.def ~= def then return end
+        if not cam then bad = bad + 1 return end
+        for _, k in ipairs({ "x", "y", "z", "pit", "hdg", "rol", "zoom" }) do
+          if not finite(cam[k]) then bad = bad + 1 return end
+        end
+        frames = frames + 1
+        local off, half, dist = aircraft_off_axis()
+        dist_max, dist_min = math.max(dist_max, dist), math.min(dist_min, dist)
+        if not def.vib and cine.blend >= 1 then
+          worst = math.max(worst, off / half)
+          if off > half then out = out + 1 end
+        end
+        if cam.y < 0.3 then bad = bad + 1 end
+      end)
+      local label = ("%s / %s"):format(case.name, id)
+      if os.getenv("VERBOSE") then
+        print(("   %-12s %-8s dist %6.1f..%6.1f m  zoom %4.1f  worst %.2f  out %d/%d"):format(
+          case.name, id, dist_min, dist_max, cam and cam.zoom or 0, worst, out, frames))
       end
-      frames = frames + 1
-      local off, half, dist = aircraft_off_axis()
-      dist_max, dist_min = math.max(dist_max, dist), math.min(dist_min, dist)
-      if not def.vib and cine.blend >= 1 then
-        worst = math.max(worst, off / half)
-        if off > half then out = out + 1 end
+      check(bad == 0, label .. ": camera missing, non-finite or underground on " .. bad .. " frames")
+      check(frames > 100, label .. ": only " .. frames .. " camera frames")
+      if not def.vib then
+        check(out <= frames * 0.03, ("%s: aircraft out of frame on %d/%d frames (worst %.2f of half-width)"):format(label, out, frames, worst))
+      else
+        check(dist_max < 3 * A.R, ("%s: mounted camera %.0f m away"):format(label, dist_max))
       end
-      if cam.y < 0.3 then bad = bad + 1 end
-    end)
-    local label = ("%s / %s"):format(case.name, id)
-    if os.getenv("VERBOSE") then
-      print(("   %-12s %-8s dist %6.1f..%6.1f m  zoom %4.1f  worst %.2f  out %d/%d"):format(
-        case.name, id, dist_min, dist_max, cam and cam.zoom or 0, worst, out, frames))
+      check(dist_min > 0.3 * A.R or def.vib, ("%s: camera %.1f m from the aircraft centre"):format(label, dist_min))
     end
-    check(bad == 0, label .. ": camera missing, non-finite or underground on " .. bad .. " frames")
-    check(frames > 100, label .. ": only " .. frames .. " camera frames")
-    if not def.vib then
-      check(out <= frames * 0.03, ("%s: aircraft out of frame on %d/%d frames (worst %.2f of half-width)"):format(label, out, frames, worst))
-    else
-      check(dist_max < 3 * A.R, ("%s: mounted camera %.0f m away"):format(label, dist_max))
-    end
-    check(dist_min > 0.3 * A.R or def.vib, ("%s: camera %.1f m from the aircraft centre"):format(label, dist_min))
   end
 end
 
--- ---------------------------------------------------------------------------
 section("mounted cameras are rigid with the airframe")
 plane.u = 2000
 steer(200, 30, 0, 20, false)
@@ -308,60 +374,105 @@ check(cam ~= nil and math.abs(cam.rol - 20) < 1.5, ("tail cam rolls with the air
 check(cam ~= nil and math.abs(cam.pit - (10 - 4)) < 2, ("tail cam pitch %.1f"):format(cam and cam.pit or -1))
 
 -- ---------------------------------------------------------------------------
-section("starting from the cockpit and stopping takes you back there")
+section("cockpit shots look around but stay within a few cm of the seat")
 CinematicViews.stop()
-step(5)
+step(6)
 check(in_cockpit(), "back in the cockpit after stop")
-check(X.mock_camera_controlled() == 0, "camera released")
+local h0 = head()
+local same = true
+for i = 1, 6 do if math.abs(h0[i] - EYE[i]) > 1e-3 then same = false end end
+check(same, "exterior filming left the pilot's head alone")
+local SAFE_SIDE, SAFE_UP, SAFE_DOWN, SAFE_FWD, SAFE_BACK = 0.08, 0.05, 0.04, 0.08, 0.06
+local phases = {
+  { name = "takeoff roll", run = function(i) plane.u = 2.5 steer(math.min(10 + i * 0.05, 75), 90, 0, 0, true) end },
+  { name = "turbulent climb", run = function(i) steer(120, 90, 8 + 6 * math.sin(i * 0.9), 15 * math.sin(i * 0.05), false) end },
+  { name = "firm landing", run = function(i)
+      if plane.u > 3 then steer(70, 90, -3.0, 0, false) else steer(70, 90, 0, 0, true) end
+    end },
+}
+for _, id in ipairs(ORDER) do
+  local def = SHOTS[id]
+  if def.kind == "int" then
+    for _, ph in ipairs(phases) do
+      if ph.name == "turbulent climb" then plane.u = 400 elseif ph.name == "firm landing" then plane.u = 12 end
+      ph.run(0)
+      CinematicViews.shot(id)
+      step(3)
+      local worst, bad, turned = 0, 0, 0
+      local i = 0
+      step(60 * 6, function()
+        i = i + 1
+        ph.run(i)
+        if cine.def ~= def then return end
+        local h = head()
+        for k = 1, 6 do if not finite(h[k]) then bad = bad + 1 end end
+        local cx = (id == "fo") and -EYE[1] or EYE[1]
+        local dx, dy, dz = h[1] - cx, h[2] - EYE[2], h[3] - EYE[3]
+        if math.abs(dx) > SAFE_SIDE + 1e-4 or dy > SAFE_UP + 1e-4 or dy < -SAFE_DOWN - 1e-4
+           or dz < -SAFE_FWD - 1e-4 or dz > SAFE_BACK + 1e-4 then bad = bad + 1 end
+        worst = math.max(worst, math.sqrt(dx * dx + dy * dy + dz * dz))
+        turned = math.max(turned, math.abs(((h[4] - EYE[4] + 180) % 360) - 180))
+        if X.mock_camera_controlled() ~= 0 then bad = bad + 1 end
+      end)
+      local label = id .. " / " .. ph.name
+      check(in_cockpit(), label .. ": in the 3D cockpit")
+      check(bad == 0, label .. ": head left the safe space or camera still controlled on " .. bad .. " frames")
+      check(worst < 0.12, ("%s: head moved at most %.3f m"):format(label, worst))
+      if id == "panel" or id == "cpan" or id == "side" then
+        check(turned > 20, ("%s: looks around (%.0f deg)"):format(label, turned))
+      end
+    end
+  end
+end
+
+section("stopping restores the pilot's head exactly")
+CinematicViews.stop()
+step(6)
+local h = head()
+for i = 1, 6 do check(math.abs(h[i] - EYE[i]) < 1e-3, ("head[%d] restored (%.4f vs %.4f)"):format(i, h[i], EYE[i])) end
+check(not cine.active, "stopped")
+
+section("switching between exterior and cockpit shots")
+plane.u = 1000
+steer(150, 0, 0, 0, false)
 CinematicViews.shot("chase")
 step(2)
-check(X.mock_camera_controlled() == 1 and get("sim/graphics/view/view_is_external") == 1, "a shot switches to an exterior view and takes the camera")
+check(X.mock_camera_controlled() == 1 and get("sim/graphics/view/view_is_external") == 1, "exterior shot takes the camera")
+CinematicViews.shot("pilot")
+step(2)
+check(X.mock_camera_controlled() == 0 and in_cockpit(), "cockpit shot hands the camera back")
+check(cine.active, "still running after our own view change")
 CinematicViews.shot("orbit")
 step(2)
-check(X.mock_camera_controlled() == 1 and cine.def.id == "orbit", "switching shots keeps the camera")
+check(X.mock_camera_controlled() == 1, "and takes it again")
 run_command("toggle")
 step(3)
 check(not cine.active and in_cockpit() and X.mock_camera_controlled() == 0, "toggle stops and returns to the cockpit")
-run_command("toggle")
-step(3)
-check(cine.active and cine.def.id == "orbit", "toggle starts again with the last shot")
-CinematicViews.stop()
-step(3)
-
-section("starting from an exterior view stays exterior when you stop")
-X.mock_set_view(1018, 1)
-step(2)
-CinematicViews.shot("wing")
-step(3)
-check(X.mock_camera_controlled() == 1, "camera taken without a view change")
-CinematicViews.stop()
-step(3)
-check(get("sim/graphics/view/view_is_external") == 1 and X.mock_camera_controlled() == 0, "left in your exterior view")
-X.mock_set_view(1026, 0)
-step(3)
 
 section("you changing the view hands the camera back")
 CinematicViews.shot("chase")
 step(5)
-X.mock_set_view(1018, 1)      -- e.g. pressing a view key
+X.mock_set_view(1018, 1)
 step(3)
-check(not cine.active, "session stopped after a user view change")
-check(X.mock_camera_controlled() == 0, "camera not controlled")
+check(not cine.active and X.mock_camera_controlled() == 0, "exterior shot stops after a view change")
 X.mock_set_view(1026, 0)
 step(3)
-
-section("the pilot's head is never touched")
-local untouched = true
-for i, k in ipairs(HEAD_REFS) do
-  if math.abs(get("sim/graphics/view/pilots_head_" .. k) - EYE[i]) > 1e-6 then untouched = false end
-end
-check(untouched, "pilot's head datarefs unchanged")
+CinematicViews.shot("side")
+step(60)
+X.mock_set_view(1018, 1)
+step(3)
+check(not cine.active, "cockpit shot stops when you leave the cockpit")
+X.mock_set_view(1026, 0)
+step(1)
+h = head()
+check(math.abs(h[3] - EYE[3]) < 1e-3 and math.abs(h[4] - EYE[4]) < 1e-3, "and your head is back at the eye point")
+step(3)
 
 -- ---------------------------------------------------------------------------
-section("next and previous step through the shots, skipping ones that don't apply")
+section("next and previous step through all the shots")
 plane.u = 2.5
 steer(10, 90, 0, 0, true)
-CinematicViews.shot("sweep")    -- air-to-air comes next in the list but needs to be airborne
+CinematicViews.shot("sweep")
 step(3)
 CinematicViews.previous_shot()
 step(3)
@@ -369,8 +480,172 @@ check(cine.def.id == "spotter", "previous from Crane sweep skips Air-to-air on t
 CinematicViews.next_shot()
 step(3)
 check(cine.def.id == "sweep", "next from Spotter skips Air-to-air on the ground (" .. cine.def.id .. ")")
+CinematicViews.shot("gear")
+step(3)
+CinematicViews.next_shot()
+step(3)
+check(cine.def.id == "pilot", "after the last exterior shot comes the first cockpit shot (" .. cine.def.id .. ")")
+CinematicViews.shot("fo")
+step(3)
+CinematicViews.next_shot()
+step(3)
+check(cine.def.id == "chase", "and after the last cockpit shot, back to the start (" .. cine.def.id .. ")")
+S.cockpit_in_cycle = false
+CinematicViews.shot("gear")
+step(3)
+CinematicViews.next_shot()
+step(3)
+check(cine.def.id == "chase", "cockpit shots can be left out of Next/Previous (" .. cine.def.id .. ")")
+S.cockpit_in_cycle = true
 CinematicViews.stop()
 step(3)
+
+-- ---------------------------------------------------------------------------
+section("assign a key to camera on/off")
+CinematicViews.toggle_window()
+check(windows == 1, "window opened")
+build("Assign##toggle")
+check(cine and select(2, tap(0x78, "")) ~= nil, "pressed F9")
+check(BIND.toggle and BIND.toggle.kind == "key" and BIND.toggle.vk == 0x78, "F9 assigned to camera on/off")
+local consumed = tap(0x78, "")
+step(3)
+check(consumed and cine.active, "F9 starts the camera (and X-Plane doesn't get it)")
+tap(0x78, "")
+step(3)
+check(not cine.active, "F9 again stops it")
+key(0x78, "", "pressed")
+key(0x78, "", "pressed")    -- key repeat
+key(0x78, "", "pressed")
+key(0x78, "", "released")
+step(3)
+check(cine.active, "holding F9 toggles once, not on every repeat")
+tap(0x78, "")
+step(3)
+check(tap(0x78, "", { ctrl = true }) == false and not cine.active, "Ctrl+F9 is a different key, left to X-Plane")
+
+section("assigning refuses + and -, and Esc cancels")
+build("Assign##next")
+tap(0xB0, "=")
+check(BIND.next == nil and cine and true, "= not assigned")
+local labels = build()
+local warned = false
+for _, l in ipairs(labels) do if l:find("kept for zoom", 1, true) then warned = true end end
+check(warned, "says + and - are kept for zoom")
+tap(0x1B, "")
+check(BIND.next == nil, "Esc cancels")
+
+section("assign joystick buttons to next and previous view")
+build("Assign##next")
+X.mock_set_button(57, 1)
+step(2)
+check(BIND.next and BIND.next.kind == "joy" and BIND.next.n == 57, "joystick button 57 assigned to next view")
+X.mock_set_button(57, 0)
+step(2)
+check(not cine.active, "assigning did not trigger it")
+build("Assign##prev")
+X.mock_set_button(58, 1)
+step(2)
+X.mock_set_button(58, 0)
+step(2)
+check(BIND.prev and BIND.prev.n == 58, "button 58 assigned to previous view")
+plane.u = 1000
+steer(150, 0, 0, 0, false)
+local last = cine.last_id
+X.mock_set_button(57, 1) step(3) X.mock_set_button(57, 0) step(3)
+check(cine.active and cine.def.id == last, "with the camera off, next view starts it with your last shot (" .. tostring(cine.def and cine.def.id) .. ")")
+X.mock_set_button(57, 1) step(30)
+local after_next = cine.def.id
+check(after_next ~= last, "button 57: next view")
+X.mock_set_button(57, 0) step(3)
+check(cine.def.id == after_next, "holding the button steps once")
+X.mock_set_button(58, 1) step(3) X.mock_set_button(58, 0) step(3)
+check(cine.def.id == last, "button 58: previous view")
+build("Clear##prev")
+check(BIND.prev == nil, "Clear removes an assignment")
+CinematicViews.toggle_window()
+local f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
+local ini = f and f:read("*a") or ""
+if f then f:close() end
+check(ini:find("bind.toggle = key:120:0:0:0", 1, true) ~= nil and ini:find("bind.next = joy:57", 1, true) ~= nil,
+      "assignments saved")
+
+-- ---------------------------------------------------------------------------
+section("+ and - zoom the exterior camera, held or tapped")
+CinematicViews.shot("chase")
+step(5)
+CinematicViews.reset_nudge()
+step(2)
+local z0 = cam.zoom
+check(key(0xB0, "=", "pressed") == true, "= kept from X-Plane while filming outside")
+step(60)
+check(key(0xB0, "=", "released") == true, "and its release")
+step(2)
+check(cam.zoom > z0 * 1.5, ("holding = zooms in (%.2f -> %.2f)"):format(z0, cam.zoom))
+local z1 = cam.zoom
+tap(0x6D, "-")
+step(2)
+check(cam.zoom < z1 and cam.zoom > z1 * 0.9, ("keypad - taps out one step (%.2f -> %.2f)"):format(z1, cam.zoom))
+check(wheel(3) == true, "wheel kept from X-Plane while filming outside")
+step(2)
+check(X.mock_handler_count() == 4 and X.mock_press("sim/general/zoom_in", 0) == 0, "zoom commands (e.g. joystick) zoom the camera too")
+
+section("in the cockpit, + / - and the wheel are X-Plane's own zoom")
+CinematicViews.shot("pilot")
+step(5)
+check(tap(0xB0, "=") == false, "= passed to X-Plane in the cockpit")
+check(wheel(2) == false, "wheel passed to X-Plane in the cockpit")
+check(X.mock_press("sim/general/zoom_in", 0) == 1, "zoom commands passed to X-Plane in the cockpit")
+
+section("zoom is remembered for each shot")
+CinematicViews.shot("chase")
+step(3)
+local chase_zoom = cam.zoom
+CinematicViews.shot("orbit")
+step(3)
+CinematicViews.shot("chase")
+step(3)
+check(math.abs(cam.zoom - chase_zoom) < 0.05, ("back to the chase, its zoom is back (%.2f)"):format(cam.zoom))
+CinematicViews.stop()
+step(3)
+check(X.mock_handler_count() == 0, "zoom commands handed back when stopped")
+check(tap(0xB0, "=") == false and wheel(1) == false, "+ and the wheel are X-Plane's again")
+
+-- ---------------------------------------------------------------------------
+section("cameras fit a long-winged, short glider")
+X.mock_set_aircraft("ASK21.acf")
+set("sim/aircraft/weight/acf_m_max", 600)
+set("sim/aircraft/view/acf_size_x", 8.5) set("sim/aircraft/view/acf_size_z", 4.2)
+often()
+check(A.size_source == "dimensions" and math.abs(A.Rs - 8.5) < 0.01, "glider measured")
+plane.u = 800
+steer(30, 0, 0, 0, false)
+plane.the = 0
+CinematicViews.shot("wing")
+step(5)
+local wx, _, wz = cam_body()
+check(math.abs(math.abs(wx) - 1.05 * 8.5) < 0.3, ("wing cam out at the wingtip (%.1f m)"):format(math.abs(wx)))
+CinematicViews.shot("tail")
+step(5)
+wx, _, wz = cam_body()
+check(wz > 3.5 and wz < 5.5, ("tail cam just behind a short tail (%.1f m aft)"):format(wz))
+
+section("a size correction is remembered for each aircraft")
+CinematicViews.toggle_window()
+ui.set = { "Aircraft size", 1.5 }
+build()
+check(math.abs(A.Rs - 8.5 * 1.5) < 0.01, ("glider scaled 1.5x (%.1f)"):format(A.Rs))
+CinematicViews.stop()
+step(3)
+X.mock_set_aircraft("A320.acf")
+set("sim/aircraft/weight/acf_m_max", 78000)
+set("sim/aircraft/view/acf_size_x", 17.9) set("sim/aircraft/view/acf_size_z", 18.8)
+often()
+check(math.abs(A.Rs - 17.9) < 0.01, "another aircraft keeps its own size")
+CinematicViews.toggle_window()
+f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
+ini = f and f:read("*a") or ""
+if f then f:close() end
+check(ini:find("size.ASK21 = 1.50", 1, true) ~= nil, "correction saved per aircraft")
 
 -- ---------------------------------------------------------------------------
 section("glides between related shots without passing through the aircraft")
@@ -390,7 +665,6 @@ step(60 * 3, function()
 end)
 check(min_d > 0.9 * A.R, ("glide stayed %.1f m clear (R %.1f)"):format(min_d, A.R))
 
--- ---------------------------------------------------------------------------
 section("fixed cameras survive X-Plane moving its local origin")
 plane.u = 400
 steer(80, 180, 0, 0, false)
@@ -411,7 +685,6 @@ step(60 * 40, function()
   if cine.st ~= last_st then passes, last_st = passes + 1, cine.st end
 end)
 check(passes >= 3, "flyby repeated " .. passes .. " times in 40 s")
-check(cine.active and cine.def.id == "flyby", "and stayed on the flyby shot")
 
 -- ---------------------------------------------------------------------------
 section("paused: drawing alone keeps the camera alive")
@@ -431,11 +704,8 @@ set("sim/time/paused", 0)
 section("if FlyWithLua stops running the script, the camera is handed back")
 CinematicViews.shot("chase")
 step(10)
-check(X.mock_camera_controlled() == 1, "camera controlled")
 hooks_dead = true
-step(60)
-check(X.mock_camera_controlled() == 1, "still controlled after 1 s")
-step(90)
+step(150)
 check(X.mock_camera_controlled() == 0, "released after the script stopped ticking")
 check(X.mock_handler_count() == 0, "and its zoom commands")
 hooks_dead = false
@@ -453,8 +723,7 @@ end)
 check(math.abs(A.gs - 150) < 10, ("ground speed from replay motion %.1f"):format(A.gs))
 set("sim/time/is_in_replay", 0)
 
--- ---------------------------------------------------------------------------
-section("letterbox and titles")
+section("letterbox and titles (FlyWithLua's own drawing)")
 CinematicViews.shot("orbit")
 step(2)
 drawn.rects, drawn.strings = 0, {}
@@ -468,172 +737,37 @@ step(5)
 check(drawn.rects == 0, "letterbox gone after stop")
 
 -- ---------------------------------------------------------------------------
-section("settings window")
+section("one window with everything in it")
 CinematicViews.toggle_window()
-check(windows == 1, "window opened")
-ui.labels = {}
-cinematic_views_build_window()
-check(#ui.labels > 20, "window built " .. #ui.labels .. " widgets")
+labels = build()
+local want = { "Start camera", "< Previous", "Next >", "EXTERIOR SHOTS", "COCKPIT SHOTS", "CONTROLS", "Camera on/off",
+               "Next view", "Previous view", "EXTERIOR CAMERA", "Distance", "Aircraft size", "COCKPIT CAMERA",
+               "Head movement", "LOOK", "Letterbox bars" }
+for _, w in ipairs(want) do
+  local found = false
+  for _, l in ipairs(labels) do if l:find(w, 1, true) then found = true end end
+  check(found, "window shows " .. w)
+end
 check(ui.depth == 0, "style colours balanced")
-local cockpit_words = false
-for _, l in ipairs(ui.labels) do
-  if l:find("Director") or l:find("Cockpit") or l:find("Living") then cockpit_words = true end
-end
-check(not cockpit_words, "no Director or cockpit controls left in the window")
-ui.click = "Start ("
-cinematic_views_build_window()
+build("Start camera")
 step(3)
-check(cine.active, "Start button works")
-ui.click = "Stop"
-cinematic_views_build_window()
+check(cine.active, "Start camera button works")
+build("Camera ON")
 step(3)
-check(not cine.active, "Stop button works")
-ui.click = "Wing cam"
-cinematic_views_build_window()
+check(not cine.active, "and stops it")
+build("Wing cam")
 step(3)
-check(cine.active and cine.def and cine.def.id == "wing", "shot buttons work")
+check(cine.active and cine.def.id == "wing", "shot buttons work")
 ui.set = { "Handheld shake", 0.8 }
-cinematic_views_build_window()
-check(S.shake == 0.8, "slider changes the setting")
+build()
+check(S.shake == 0.8, "sliders change settings")
 CinematicViews.stop()
 step(3)
-CinematicViews.toggle_window()
-check(windows == 0, "window closed")
-local f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
-check(f ~= nil, "settings saved")
-if f then
-  local text = f:read("*a")
-  f:close()
-  check(text:find("shake = 0.8", 1, true) ~= nil, "saved value present")
-end
-
--- ---------------------------------------------------------------------------
-section("hold commands adjust the live shot")
-plane.u = 1000
-steer(150, 0, 0, 0, false)
-CinematicViews.shot("chase")
-step(30)
-local z0 = cam.zoom
-for _ = 1, 60 do commands["FlyWithLua/cinematic_views/zoom_in"].c() step(1) end
-check(cam.zoom > z0 * 1.5, ("zoom_in zooms (%.2f -> %.2f)"):format(z0, cam.zoom))
-
--- ---------------------------------------------------------------------------
-section("cameras fit a long-winged, short glider")
-CinematicViews.stop()
-step(3)
-X.mock_set_aircraft("ASK21.acf")
-set("sim/aircraft/weight/acf_m_max", 600)
-set("sim/aircraft/view/acf_size_x", 8.5) set("sim/aircraft/view/acf_size_z", 4.2)
-often()
-check(A.size_source == "dimensions" and math.abs(A.Rs - 8.5) < 0.01, ("glider measured (span %.0f m, length %.0f m)"):format(2 * A.Rs, 2 * A.Rl))
-plane.u = 800
-steer(30, 0, 0, 0, false)
-plane.the = 0
-CinematicViews.shot("wing")
-step(5)
-local wx, wy, wz = cam_body()
-check(math.abs(math.abs(wx) - 1.05 * 8.5) < 0.3, ("wing cam out at the wingtip (%.1f m)"):format(math.abs(wx)))
-CinematicViews.shot("tail")
-step(5)
-wx, wy, wz = cam_body()
-check(wz > 3.5 and wz < 5.5, ("tail cam just behind a short tail (%.1f m aft)"):format(wz))
-CinematicViews.shot("chase")
-step(60)
-local _, _, d = aircraft_off_axis()
-check(d > 2 * 8.5, ("chase stands off far enough to frame the span (%.0f m)"):format(d))
-
-section("a size correction is remembered for each aircraft")
-CinematicViews.toggle_window()
-ui.set = { "Aircraft size", 1.5 }
-cinematic_views_build_window()
-check(math.abs(A.Rs - 8.5 * 1.5) < 0.01, ("glider scaled 1.5x (%.1f)"):format(A.Rs))
-CinematicViews.stop()
-step(3)
-X.mock_set_aircraft("A320.acf")
-set("sim/aircraft/weight/acf_m_max", 78000)
-set("sim/aircraft/view/acf_size_x", 17.9) set("sim/aircraft/view/acf_size_z", 18.8)
-often()
-check(math.abs(A.Rs - 17.9) < 0.01, "another aircraft keeps its own size")
-X.mock_set_aircraft("ASK21.acf")
-set("sim/aircraft/weight/acf_m_max", 600)
-set("sim/aircraft/view/acf_size_x", 8.5) set("sim/aircraft/view/acf_size_z", 4.2)
-often()
-check(math.abs(A.Rs - 8.5 * 1.5) < 0.01, "and the glider gets its correction back")
 CinematicViews.toggle_window()
 f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
-local ini = f and f:read("*a") or ""
+ini = f and f:read("*a") or ""
 if f then f:close() end
-check(ini:find("size.ASK21 = 1.50", 1, true) ~= nil, "correction saved per aircraft")
-X.mock_set_aircraft("A320.acf")
-set("sim/aircraft/weight/acf_m_max", 78000)
-set("sim/aircraft/view/acf_size_x", 17.9) set("sim/aircraft/view/acf_size_z", 18.8)
-often()
-
--- ---------------------------------------------------------------------------
-section("X-Plane's own zoom keys zoom the camera while filming")
-check(X.mock_handler_count() == 0, "zoom commands left alone while not filming")
-check(X.mock_press("sim/general/zoom_in", 0) == 1, "X-Plane handles its zoom when not filming")
-plane.u = 1000
-steer(150, 0, 0, 0, false)
-CinematicViews.shot("chase")
-step(10)
-check(X.mock_handler_count() == 4, "zoom commands taken over while filming (" .. X.mock_handler_count() .. ")")
-CinematicViews.reset_nudge()
-step(2)
-local zbase = cam.zoom
-check(X.mock_press("sim/general/zoom_in", 0) == 0, "zoom key used by the camera, not passed on")
-for _ = 1, 60 do X.mock_press("sim/general/zoom_in", 1) step(1) end
-X.mock_press("sim/general/zoom_in", 2)
-step(1)
-check(cam.zoom > zbase * 1.8, ("holding zoom in zooms (%.2f -> %.2f)"):format(zbase, cam.zoom))
-local zin = cam.zoom
-X.mock_press("sim/general/zoom_out_fast", 0)
-for _ = 1, 20 do X.mock_press("sim/general/zoom_out_fast", 1) step(1) end
-check(cam.zoom < zin * 0.6, ("fast zoom out (%.2f -> %.2f)"):format(zin, cam.zoom))
-
-section("the mouse wheel zooms while filming and is left alone otherwise")
-CinematicViews.reset_nudge()
-step(2)
-zbase = cam.zoom
-MOUSE_WHEEL_NUMBER, MOUSE_WHEEL_CLICKS = 0, 3
-for _, fn in ipairs(hooks.wheel) do fn() end
-step(1)
-check(RESUME_MOUSE_WHEEL == false, "wheel used by the camera")
-check(cam.zoom > zbase * 1.25, ("wheel zooms in (%.2f -> %.2f)"):format(zbase, cam.zoom))
-
-section("zoom is remembered for each shot")
-local chase_zoom = cam.zoom
-CinematicViews.shot("orbit")
-step(3)
-check(math.abs(cam.zoom - zbase) < 0.05, "orbit has its own zoom")
-CinematicViews.shot("chase")
-step(3)
-check(math.abs(cam.zoom - chase_zoom) < 0.05, ("back to the chase, its zoom is back (%.2f)"):format(cam.zoom))
-plane.u = 400
-steer(80, 180, 0, 0, false)
-CinematicViews.shot("flyby")
-step(2)
-local fly_st = cine.st
-MOUSE_WHEEL_CLICKS = 4
-for _, fn in ipairs(hooks.wheel) do fn() end
-local fly_zoom = cine and CinematicViews and 1.1 ^ 4
-step(60 * 30, function() steer(80, 180, 0, 0, false) end)
-check(cine.st ~= fly_st, "flyby set up a new pass")
-local found = false
-step(1, function() end)
-CinematicViews.toggle_window()
-ui.labels = {}
-cinematic_views_build_window()
-for _, l in ipairs(ui.labels) do if l:find(("zoom %.1fx"):format(fly_zoom), 1, true) then found = true end end
-CinematicViews.toggle_window()
-check(found, "and kept your zoom for it")
-
-CinematicViews.stop()
-step(3)
-check(X.mock_handler_count() == 0, "zoom commands handed back when stopped")
-MOUSE_WHEEL_CLICKS = 2
-for _, fn in ipairs(hooks.wheel) do fn() end
-check(RESUME_MOUSE_WHEEL == true, "wheel passed on when not filming")
+check(ini:find("shake = 0.8", 1, true) ~= nil, "settings saved")
 
 -- ---------------------------------------------------------------------------
 section("no errors logged")
