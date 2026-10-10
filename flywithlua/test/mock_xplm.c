@@ -1,8 +1,9 @@
 /*
  * A stand-in for X-Plane's XPLM library, just enough of it to run
  * Cinematic_Views.lua under plain LuaJIT: datarefs, commands that change the
- * view, camera control (calling the script's FFI callback for real), a
- * terrain probe and world/local conversion with a movable local origin.
+ * view, command handlers, camera control (calling the script's FFI callbacks
+ * for real), the user's aircraft file name, a terrain probe and world/local
+ * conversion with a movable local origin.
  */
 #include <stdio.h>
 #include <string.h>
@@ -33,6 +34,11 @@ static double origin_x, origin_z;      /* local origin offset, in metres east/so
 static char last_cmd[128];
 static int cmd_count;
 static int probe_count;
+static char acf_name[256] = "A320.acf";
+
+typedef int (*CommandCallback)(void *cmd, int phase, void *refcon);
+typedef struct { void *cmd; CommandCallback cb; int before; void *refcon; int used; } Handler;
+static Handler handlers[64];
 
 static Ref *ref_named(const char *name) {
   for (int i = 0; i < nrefs; i++) if (strcmp(refs[i].name, name) == 0) return &refs[i];
@@ -55,6 +61,24 @@ const char *mock_last_command(void) { return last_cmd; }
 int mock_command_count(void) { return cmd_count; }
 int mock_probe_count(void) { return probe_count; }
 int mock_camera_controlled(void) { return cam_cb != NULL; }
+void mock_set_aircraft(const char *file_name) { snprintf(acf_name, sizeof acf_name, "%s", file_name); }
+
+int mock_handler_count(void) {
+  int n = 0;
+  for (int i = 0; i < 64; i++) n += handlers[i].used;
+  return n;
+}
+
+/* Run a command phase (0 begin, 1 continue, 2 end) through its handlers, as a
+   key press would. Returns 1 if X-Plane would go on to handle it itself. */
+int mock_press(const char *name, int phase) {
+  void *c = NULL;
+  for (int i = 0; i < ncmds; i++) if (strcmp(cmds[i].name, name) == 0) c = &cmds[i];
+  if (!c) return -1;
+  for (int i = 0; i < 64; i++)
+    if (handlers[i].used && handlers[i].cmd == c && !handlers[i].cb(c, phase, handlers[i].refcon)) return 0;
+  return 1;
+}
 
 static void lose_camera(void) {
   if (cam_cb) {
@@ -105,6 +129,27 @@ void XPLMCommandOnce(void *c) {
   cmd_count++;
   if (strcmp(name, "sim/view/3d_cockpit_cmnd_look") == 0) mock_set_view(1026, 0);
   else if (strcmp(name, "sim/view/chase") == 0) mock_set_view(1017, 1);
+}
+
+void XPLMRegisterCommandHandler(void *cmd, CommandCallback cb, int before, void *refcon) {
+  for (int i = 0; i < 64; i++)
+    if (!handlers[i].used) {
+      handlers[i] = (Handler){ cmd, cb, before, refcon, 1 };
+      return;
+    }
+}
+void XPLMUnregisterCommandHandler(void *cmd, CommandCallback cb, int before, void *refcon) {
+  for (int i = 0; i < 64; i++)
+    if (handlers[i].used && handlers[i].cmd == cmd && handlers[i].cb == cb && handlers[i].before == before && handlers[i].refcon == refcon) {
+      handlers[i].used = 0;
+      return;
+    }
+}
+
+void XPLMGetNthAircraftModel(int index, char *file_name, char *path) {
+  (void)index;
+  snprintf(file_name, 256, "%s", acf_name);
+  snprintf(path, 512, "/X-Plane 12/Aircraft/%s", acf_name);
 }
 
 void XPLMControlCamera(int how_long, CameraControl cb, void *refcon) {

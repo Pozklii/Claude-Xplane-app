@@ -1,6 +1,6 @@
 # Cinematic Views for X-Plane 12
 
-A [FlyWithLua NG+](https://github.com/X-Friese/FlyWithLua) script that works as a film crew for your flights. It films from outside and inside the aircraft. A **Director** picks shots to suit the phase of flight, so the replay looks edited, and you can also pick any shot yourself.
+A [FlyWithLua NG+](https://github.com/X-Friese/FlyWithLua) script with cinematic exterior cameras for your flights. You pick from 11 shots, and the cameras fit the aircraft you're flying, from a glider to an A380. X-Plane's own zoom keys and the mouse wheel zoom them.
 
 Everything is in one file, [`Cinematic_Views.lua`](./Cinematic_Views.lua).
 
@@ -10,73 +10,49 @@ Everything is in one file, [`Cinematic_Views.lua`](./Cinematic_Views.lua).
 2. Copy `Cinematic_Views.lua` to `X-Plane 12/Resources/plugins/FlyWithLua/Scripts/`.
 3. Start a flight, or use **Plugins → FlyWithLua → Reload all Lua script files** if X-Plane is already running.
 
-To start filming, choose **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic Views: Director on/off**. Run it again to stop and get your own view back. **Cinematic Views: settings window** opens the controls.
+To start filming, choose **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic Views: start/stop**. Run it again to stop and get your own view back. **Cinematic Views: next shot** moves on to the next shot, and **Cinematic Views: settings window** opens the controls.
 
-For one-key control, bind the commands in **Settings → Keyboard** (or Joystick) and search for `cinematic`. Good ones to bind are `FlyWithLua/cinematic_views/toggle`, `next_shot` and the hold-to-adjust `orbit_left`/`orbit_right`/`zoom_in`/`zoom_out`, for example on a hat switch.
+For one-key control, bind the commands in **Settings → Keyboard** (or Joystick) and search for `cinematic`. Good ones to bind are `FlyWithLua/cinematic_views/toggle`, `next_shot` and `previous_shot`, and the hold-to-adjust `orbit_left`/`orbit_right`/`camera_up`/`camera_down`, for example on a hat switch.
 
-## The Director
-
-The Director watches the flight phase and picks shots that fit it:
-
-| Phase | Favourite shots |
-| --- | --- |
-| Taxi | chase, orbit, gear cam, over the shoulder, pilot's eye |
-| Runway (takeoff roll and rollout) | spotter, chase, tail and wing cams, pilot's eye |
-| Departure | flyby, chase, air-to-air, tail cam |
-| En route | air-to-air, orbit, crane sweep, wing/tail/nose cams, side window |
-| Approach | spotter at the fence, flyby, chase, gear cam, pilot's eye |
-
-It never shows the same shot twice in a row and avoids shots used just before. It doesn't show air-to-air on the ground or the gear cam at cruise altitude. When the phase changes, for example when the takeoff roll starts, it cuts to something that suits the new phase. Flybys and spotter shots last until the aircraft has passed. Related shots glide into each other; other changes are hard cuts.
-
-**Hold shot** keeps the current shot until you resume. **Next** asks the Director for another shot now.
+Only run one camera script at a time. If you also have other cinematic camera scripts installed (for example `CineCam.lua` or `cinematic_camera.lua`), they will fight over the camera.
 
 ## Shots
 
-### Exterior
-
-All exterior shots use X-Plane's camera API. They're framed for a 60° lens whatever your FOV, and they scale to the size of the aircraft, from a Cessna to an A380.
+All shots use X-Plane's camera API. They're framed for a 60° lens whatever your FOV.
 
 | Shot | What it does |
 | --- | --- |
 | Chase | Follows behind and a little to one side. It swings out lazily in turns, follows climbs and descents, and banks a little with you. |
 | Orbit | Circles the aircraft slowly, rising and falling as it goes. |
-| Flyby | Sets up ahead of you, off to one side, and tracks you past with a zoom that keeps the aircraft a steady size in frame. |
-| Spotter | A handheld camera on the ground, up to 8× telephoto. Best on takeoff and landing. |
-| Air-to-air | A photo ship in loose formation. It drifts slowly around its slot and banks with you, the classic air-to-air look. |
-| Crane sweep | A slow, eased crane move around the aircraft along one of three paths. |
-| Tail, wing, nose, top and gear cams | Fixed to the airframe, rolling and pitching with it, with a little vibration from speed and runway roughness. |
+| Flyby | Sets up ahead of you, off to one side, and tracks you past with a zoom that keeps the aircraft a steady size in frame. When you've gone by, it sets up the next pass. |
+| Spotter | A handheld camera on the ground with up to 8× telephoto, also repeating pass after pass. Best on takeoff and landing. |
+| Air-to-air | A photo ship in loose formation. It drifts slowly around its slot and banks with you, the classic air-to-air look. Airborne only. |
+| Crane sweep | A slow, eased crane move around the aircraft along one of three paths, then back again. |
+| Tail, wing, nose, top and gear cams | Fixed to the airframe, rolling and pitching with it, with a little vibration from speed and runway roughness. The gear cam is for the ground and low flying. |
 
-### Cockpit
+Pick a shot from the settings window or with its command. You can also step through them with **Next** and **Previous**, which skip shots that don't apply right now, such as air-to-air on the ground. Related shots glide into each other; other changes are hard cuts.
 
-Cockpit shots move the pilot's head in the 3D cockpit, around the eye point the script captures when it starts.
+## Fitting the aircraft
 
-| Shot | What it does |
-| --- | --- |
-| Pilot's eye | Your seat, with natural glances out of the windows and down at the panel. |
-| Over the shoulder | Behind the pilots, easing slowly forward. |
-| Panel sweep | A slow pan across the instrument panel. |
-| Side window | Looking out of your side window, slowly scanning. |
-| First officer | From the other seat, looking across at you (two-seat cockpits). |
-| Cabin window | A passenger window over the wing. It's for airliners with a modelled cabin, so the Director only uses it if you allow it in the settings. |
+Cameras scale to the aircraft's size. The script reads its span and length from X-Plane, checks them against the aircraft's weight, and works out whether they're in metres or feet. If X-Plane doesn't provide usable dimensions, it estimates the size from the weight instead. Distances use the larger of span and length. Mounted cameras use each separately: the wing cam sits off the wingtip, and the tail, nose, top and gear cams follow the fuselage. That way a glider's wing cam is out at its long wingtip, and its tail cam is just behind its short tail.
 
-## Living cockpit
+The settings window shows the span and length the script is using and where they came from. If the cameras sit too close or too far away on an aircraft, adjust **Aircraft size**. The correction is remembered for that aircraft and saved.
 
-The living cockpit adds head motion while you fly. It's on by default and also runs in the cockpit shots.
+## Zoom
 
-- G-forces push your head back on the takeoff roll, down when you pull, and sideways in skids. Turbulence comes through naturally.
-- A firm landing bumps your head down with a nod. The harder the landing, the bigger the bump.
-- Runway and taxiway rumble grows with speed, and there's a faint engine buzz.
-- **Look into turns** turns your head into the turn. **Lean toward the horizon** tilts it slightly against the bank, as real pilots do.
+While a shot is running:
 
-The script removes its own offset from the head every frame, so mouse-look, snap views and presets keep working normally. You can turn the living cockpit off, or change its strength, in the settings window. With a head-tracking plugin such as TrackIR, the head tracking takes priority. Turn off any other head-motion plugin you use, so the two don't add up.
+- X-Plane's own zoom commands (`sim/general/zoom_in` and `zoom_out`, and their fast versions) zoom the camera. A tap zooms one step, and holding zooms smoothly.
+- The mouse wheel zooms too.
+- The settings window has **Zoom +** and **Zoom -** buttons, and there are `zoom_in` and `zoom_out` commands.
+
+Zoom, along with orbit-around and height adjustments, is remembered for each shot. Going back to a shot, or a flyby setting up its next pass, keeps the zoom you chose. **Reset adjustments** clears it for the current shot. When you're not filming, the zoom keys and mouse wheel work as normal.
 
 ## Settings window
 
-The settings window has the shot buttons and the Director controls, plus these settings:
+The window has the shot buttons, Start/Stop and Previous/Next, plus these settings:
 
-- **Director**: shot length, exterior and cockpit shots on or off, the share of cockpit shots, cabin window shots, and the glide time between shots (0 for hard cuts only).
-- **Exterior camera**: distance, orbit speed, handheld shake, telephoto limit and aircraft size. The size is estimated from the maximum weight; scale it if the mounted cameras sit too close or too far away. There are also buttons to nudge the live shot around, up and down, or in and out.
-- **Cockpit**: the living cockpit settings and an optional FOV for cockpit shots. **Use my current head position as the pilot's eye** resets the eye point if you started from a moved head.
+- **Camera**: distance, orbit speed, handheld shake, telephoto limit, glide time between shots (0 for hard cuts only), aircraft size, and lens framing. There are also buttons to adjust the live shot: around, up, down, in or out.
 - **Look**: letterbox bars (1.85:1, 2:1 or 2.39:1 scope) and shot titles.
 
 Settings are saved to `Cinematic_Views.ini` next to the script.
@@ -87,38 +63,40 @@ Every command starts with `FlyWithLua/cinematic_views/`.
 
 | Command | Action |
 | --- | --- |
-| `toggle` | Start the Director, or stop and hand the camera back |
-| `director` | Director on/off |
+| `toggle` | Start with the last shot, or stop and hand the camera back |
 | `stop` | Stop and return to your view |
-| `next_shot`, `previous_shot` | Step through shots (with the Director on, `next_shot` asks it for a new one) |
-| `hold_shot` | Hold the Director on the current shot, or resume |
-| `shot_<name>` | A specific shot: `chase`, `orbit`, `flyby`, `spotter`, `a2a`, `sweep`, `tail`, `wing`, `nose`, `top`, `gear`, `pilot`, `shoulder`, `panel`, `side`, `fo`, `cabin` |
+| `next_shot`, `previous_shot` | Step through the shots |
+| `shot_<name>` | A specific shot: `chase`, `orbit`, `flyby`, `spotter`, `a2a`, `sweep`, `tail`, `wing`, `nose`, `top`, `gear` |
 | `orbit_left`, `orbit_right`, `camera_up`, `camera_down`, `zoom_in`, `zoom_out` | Adjust the live shot while held |
-| `reset_adjustments` | Undo those adjustments |
-| `toggle_living_cockpit`, `toggle_letterbox`, `toggle_window` | Toggles |
+| `reset_adjustments` | Undo those adjustments for the current shot |
+| `toggle_letterbox`, `toggle_window` | Toggles |
 
 ## Tips
 
-- For video, fly or load a flight, then use X-Plane's replay with the Director on. The script reads the aircraft's motion directly in replays.
+- For video, fly or load a flight, then film X-Plane's replay. The script reads the aircraft's motion directly in replays.
 - The camera keeps moving while the sim is paused, so you can pause for screenshots.
-- If you change the view yourself (a view key, or the View menu), the script hands the camera straight back to you.
-- Cinematic shots and the living cockpit switch themselves off in VR.
+- If you start from the cockpit, stopping takes you back to it. If you change the view yourself (a view key, or the View menu), the script hands the camera straight back to you.
+- The script never moves the pilot's head or changes your FOV.
+- It switches itself off in VR.
 
 ## How it works
 
-Exterior shots use the SDK's `XPLMControlCamera` through LuaJIT's FFI. The camera callback reads the aircraft position itself, so the camera never lags the drawn aircraft. Fixed cameras are stored as latitude and longitude, so they stay put when X-Plane moves its local coordinate origin. A terrain probe keeps every camera above the ground. Cockpit shots and the living cockpit write the `sim/graphics/view/pilots_head_*` datarefs. When you stop, or reload scripts, the script releases the camera and puts the pilot's head and FOV back.
+Shots use the SDK's `XPLMControlCamera` through LuaJIT's FFI. The camera callback reads the aircraft position itself, so the camera never lags the drawn aircraft. Fixed cameras are stored as latitude and longitude, so they stay put when X-Plane moves its local coordinate origin. A terrain probe keeps every camera above the ground.
+
+The aircraft's dimensions come from `sim/aircraft/view/acf_size_x` and `acf_size_z`, with the maximum weight as a check and fallback. X-Plane's zoom commands are taken over with command handlers only while a shot runs.
+
+When you stop, or reload scripts, the script releases the camera and the zoom commands. If FlyWithLua stops running the script for any reason, it releases them on its own.
 
 If something isn't working, look for lines starting with `Cinematic Views:` in X-Plane's `Log.txt`.
 
 ## Tests
 
-`test/run_tests.sh` runs the script under LuaJIT against a small C stand-in for X-Plane's SDK (`test/mock_xplm.c`). It flies simulated taxi, takeoff, cruise, approach and landing segments and checks a range of behaviour:
+`test/run_tests.sh` runs the script under LuaJIT against a small C stand-in for X-Plane's SDK (`test/mock_xplm.c`). It flies simulated taxi, takeoff, cruise and approach segments and checks a range of behaviour:
 
-- Every exterior shot keeps the aircraft in frame and above ground, and the mounted cameras stay rigid.
-- Cockpit shots stay near the eye point, and stopping restores the head exactly.
-- View changes hand the camera over in both directions.
-- The Director varies its shots and keeps them right for the phase of flight.
-- The living cockpit settles, and never piles up while you drag the view.
+- Every shot keeps the aircraft in frame and above ground, and the mounted cameras stay rigid.
+- Cameras fit both an airliner and a glider. Dimensions in metres or feet, and missing or nonsense ones, are handled, and size corrections are kept per aircraft.
+- X-Plane's zoom commands and the mouse wheel zoom while filming and are left alone otherwise, and zoom is remembered per shot.
+- View changes hand the camera over correctly, and the pilot's head is never touched.
 - Pause, replay, the settings window and saved settings work.
 
 The tests need `cc` and `luajit`. Because they run against a mock, they check the script's logic but not X-Plane's own behaviour, so try changes in the sim too.

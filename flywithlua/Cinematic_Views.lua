@@ -1,21 +1,18 @@
 -- =============================================================================
---  Cinematic Views for X-Plane 12                                        v1.0.0
---  A FlyWithLua NG+ script: a virtual film crew for your flights.
+--  Cinematic Views for X-Plane 12                                        v2.0.0
+--  A FlyWithLua NG+ script: cinematic exterior cameras for your flights.
 --
---  * Director: automatic, flight-phase-aware camera work. It picks shots that
---    suit taxi, the takeoff roll, departure, cruise and approach, cuts or
---    glides between them, and never repeats itself back to back.
 --  * 11 exterior shots through X-Plane's camera API: chase, orbit, flyby,
 --    runway spotter (telephoto with zoom tracking), air-to-air photo ship,
 --    crane sweep, and tail, wing, nose, top and gear cams rigidly mounted
 --    on the airframe.
---  * 6 cockpit shots by moving the pilot's head: pilot's eye (with glances),
---    over the shoulder, panel sweep, side window, first officer, cabin window.
---  * Living cockpit: your head reacts to G-forces, turbulence, touchdowns and
---    runway rumble, looks into turns and leans against the bank. Works in
---    cinematic shots and, if you like, all the time while you fly.
---  * Handheld/telephoto lens behaviour, smooth blends, letterbox bars, shot
---    titles, a settings window, and commands for every function.
+--  * You pick the shot; related shots glide into each other.
+--  * Cameras fit the aircraft: they read its span and length (or estimate
+--    them from its weight), and remember a size correction per aircraft.
+--  * X-Plane's own zoom works while filming: its zoom keys/commands and the
+--    mouse wheel zoom the cinematic camera, remembered for each shot.
+--  * Handheld/telephoto lens behaviour, letterbox bars, shot titles, a
+--    settings window, and commands for every function.
 --
 --  Install: copy this file to  X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
 --  Use:     Plugins > FlyWithLua > FlyWithLua Macros > Cinematic Views ...
@@ -26,7 +23,7 @@
 --  file in Cinematic_Views.ini.
 -- =============================================================================
 
-local VERSION = "1.0.0"
+local VERSION = "2.0.0"
 local TAG = "Cinematic Views: "
 
 local function log(msg)
@@ -56,11 +53,9 @@ local DECLARATIONS = {
   "typedef int (*cv_CameraControl_f)(cv_CameraPosition_t *pos, int losing, void *refcon);",
   "typedef struct { int structSize; float locationX, locationY, locationZ, normalX, normalY, normalZ, velocityX, velocityY, velocityZ; int is_wet; } cv_ProbeInfo_t;",
   'void *cv_FindDataRef(const char *name) __asm__("XPLMFindDataRef");',
-  'int cv_CanWriteDataRef(void *ref) __asm__("XPLMCanWriteDataRef");',
   'int cv_GetDatai(void *ref) __asm__("XPLMGetDatai");',
   'float cv_GetDataf(void *ref) __asm__("XPLMGetDataf");',
   'double cv_GetDatad(void *ref) __asm__("XPLMGetDatad");',
-  'void cv_SetDataf(void *ref, float value) __asm__("XPLMSetDataf");',
   'void *cv_FindCommand(const char *name) __asm__("XPLMFindCommand");',
   'void cv_CommandOnce(void *cmd) __asm__("XPLMCommandOnce");',
   'void cv_ControlCamera(int howLong, cv_CameraControl_f func, void *refcon) __asm__("XPLMControlCamera");',
@@ -69,6 +64,10 @@ local DECLARATIONS = {
   'void cv_DestroyProbe(void *probe) __asm__("XPLMDestroyProbe");',
   'int cv_ProbeTerrainXYZ(void *probe, float x, float y, float z, cv_ProbeInfo_t *info) __asm__("XPLMProbeTerrainXYZ");',
   'void cv_WorldToLocal(double lat, double lon, double alt, double *x, double *y, double *z) __asm__("XPLMWorldToLocal");',
+  "typedef int (*cv_CommandCallback_f)(void *cmd, int phase, void *refcon);",
+  'void cv_RegisterCommandHandler(void *cmd, cv_CommandCallback_f handler, int before, void *refcon) __asm__("XPLMRegisterCommandHandler");',
+  'void cv_UnregisterCommandHandler(void *cmd, cv_CommandCallback_f handler, int before, void *refcon) __asm__("XPLMUnregisterCommandHandler");',
+  'void cv_GetNthAircraftModel(int index, char *fileName, char *path) __asm__("XPLMGetNthAircraftModel");',
   'void cv_LocalToWorld(double x, double y, double z, double *lat, double *lon, double *alt) __asm__("XPLMLocalToWorld");',
 }
 for _, decl in ipairs(DECLARATIONS) do
@@ -130,17 +129,11 @@ local REF_NAMES = {
   ias = "sim/flightmodel/position/indicated_airspeed",
   on_ground = "sim/flightmodel/failures/onground_any",
   m_max = "sim/aircraft/weight/acf_m_max",
+  size_x = "sim/aircraft/view/acf_size_x",
+  size_z = "sim/aircraft/view/acf_size_z",
   m_total = "sim/flightmodel/weight/m_total",
-  throttle = "sim/cockpit2/engine/actuators/throttle_ratio_all",
-  view_type = "sim/graphics/view/view_type",
   external = "sim/graphics/view/view_is_external",
   fov = "sim/graphics/view/field_of_view_deg",
-  head_x = "sim/graphics/view/pilots_head_x",
-  head_y = "sim/graphics/view/pilots_head_y",
-  head_z = "sim/graphics/view/pilots_head_z",
-  head_psi = "sim/graphics/view/pilots_head_psi",
-  head_the = "sim/graphics/view/pilots_head_the",
-  head_phi = "sim/graphics/view/pilots_head_phi",
   run_time = "sim/time/total_running_time_sec",
   frame_period = "sim/operation/misc/frame_rate_period",
   paused = "sim/time/paused",
@@ -149,8 +142,7 @@ local REF_NAMES = {
 }
 for key, name in pairs(REF_NAMES) do REF[key] = find_ref(name) end
 
-for _, key in ipairs({ "x", "y", "z", "psi", "the", "phi", "view_type", "external",
-                       "head_x", "head_y", "head_z", "head_psi", "head_the", "run_time" }) do
+for _, key in ipairs({ "x", "y", "z", "psi", "the", "phi", "external", "run_time" }) do
   if not REF[key] then
     log("dataref " .. REF_NAMES[key] .. " not found - not started.")
     return
@@ -160,9 +152,6 @@ end
 local function getf(r) if r then return XPLM.cv_GetDataf(r) end return 0 end
 local function getd(r) if r then return XPLM.cv_GetDatad(r) end return 0 end
 local function geti(r) if r then return XPLM.cv_GetDatai(r) end return 0 end
-local function setf(r, v) if r then XPLM.cv_SetDataf(r, v) end end
-
-local FOV_WRITABLE = REF.fov ~= nil and XPLM.cv_CanWriteDataRef(REF.fov) ~= 0
 
 local function find_cmd(...)
   for i = 1, select("#", ...) do
@@ -173,9 +162,18 @@ local function find_cmd(...)
 end
 
 local CMD = {
-  cockpit = find_cmd("sim/view/3d_cockpit_cmnd_look", "sim/view/default_view"),
   external = find_cmd("sim/view/chase", "sim/view/circle", "sim/view/free_camera"),
+  cockpit = find_cmd("sim/view/3d_cockpit_cmnd_look", "sim/view/default_view"),   -- to return you to it
 }
+
+-- X-Plane's own zoom commands. While a shot runs they zoom its camera.
+local ZOOM_CMDS = {
+  { name = "sim/general/zoom_in", dir = 1, rate = 1 },
+  { name = "sim/general/zoom_out", dir = -1, rate = 1 },
+  { name = "sim/general/zoom_in_fast", dir = 1, rate = 3 },
+  { name = "sim/general/zoom_out_fast", dir = -1, rate = 3 },
+}
+for _, z in ipairs(ZOOM_CMDS) do z.ref = find_cmd(z.name) end
 
 -- A view change while X-Plane hands the camera to us can call straight back
 -- into Lua (our camera callback). LuaJIT only allows that from interpreted
@@ -184,39 +182,25 @@ local function run_cmd(c)
   if c then XPLM.cv_CommandOnce(c) end
 end
 
-local VIEW_3D_COCKPIT = 1026
-
 -- -----------------------------------------------------------------------------
 -- Settings
 -- -----------------------------------------------------------------------------
 
 local DEFAULTS = {
-  shot_length = 12,       -- Director: average seconds per shot
-  cockpit_share = 0.3,    -- Director: share of cockpit shots
-  use_exterior = true,
-  use_cockpit = true,
-  use_cabin = false,      -- cabin window in the Director (best with a modelled cabin)
-  blend_time = 2.5,       -- glide between related exterior/cockpit shots (0 = always cut)
-  distance = 1.0,         -- exterior camera distance multiplier
+  blend_time = 2.5,       -- glide between related shots (0 = always cut)
+  distance = 1.0,         -- camera distance multiplier
   orbit_speed = 5,        -- degrees per second
   shake = 0.5,            -- handheld camera shake, 0..1
   max_zoom = 8,           -- telephoto limit for flyby and spotter shots
-  size_scale = 1.0,       -- multiplier on the estimated aircraft size
-  normalize_lens = true,  -- frame exterior shots as if the sim FOV were 60 degrees
-  living = true,          -- living cockpit (also while you fly yourself)
-  living_amount = 1.0,
-  look_into_turns = true,
-  horizon_lean = true,
-  cockpit_fov = 0,        -- FOV for cockpit shots, 0 = leave alone
+  normalize_lens = true,  -- frame shots as if the sim FOV were 60 degrees
   letterbox = true,
   aspect = 2.39,
   titles = true,
 }
 
 local RANGES = {
-  shot_length = { 5, 40 }, cockpit_share = { 0, 1 }, blend_time = { 0, 5 }, distance = { 0.5, 3 },
-  orbit_speed = { 1, 20 }, shake = { 0, 1 }, max_zoom = { 2, 15 }, size_scale = { 0.4, 2.5 },
-  living_amount = { 0, 2 }, cockpit_fov = { 0, 100 }, aspect = { 1.6, 2.8 },
+  blend_time = { 0, 5 }, distance = { 0.5, 3 }, orbit_speed = { 1, 20 }, shake = { 0, 1 },
+  max_zoom = { 2, 15 }, aspect = { 1.6, 2.8 },
 }
 
 local S = {}
@@ -225,10 +209,16 @@ for k, v in pairs(DEFAULTS) do S[k] = v end
 local SETTINGS_FILE = (type(SCRIPT_DIRECTORY) == "string" and SCRIPT_DIRECTORY or "") .. "Cinematic_Views.ini"
 local settings_dirty = false
 
+-- Size corrections you set, per aircraft (keyed by its .acf file name).
+local SIZE = { key = "default", scales = {} }
+
 local function load_settings()
   local f = io.open(SETTINGS_FILE, "r")
   if not f then return end
   for line in f:lines() do
+    local acf, sv = line:match("^%s*size%.([%w_%-]+)%s*=%s*(.-)%s*$")
+    local n = tonumber(sv)
+    if acf and n then SIZE.scales[acf] = math.max(0.4, math.min(2.5, n)) end
     local k, v = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
     local d = k and DEFAULTS[k]
     if type(d) == "boolean" then
@@ -253,6 +243,10 @@ local function save_settings()
   for k in pairs(DEFAULTS) do keys[#keys + 1] = k end
   table.sort(keys)
   for _, k in ipairs(keys) do f:write(k, " = ", tostring(S[k]), "\n") end
+  local acfs = {}
+  for k, v in pairs(SIZE.scales) do if math.abs(v - 1) > 1e-3 then acfs[#acfs + 1] = k end end
+  table.sort(acfs)
+  for _, k in ipairs(acfs) do f:write("size.", k, " = ", ("%.2f"):format(SIZE.scales[k]), "\n") end
   f:close()
   settings_dirty = false
 end
@@ -306,16 +300,6 @@ local function body_to_world(bx, by, bz, psi, the, phi)
   local y2, z2 = y1 * ct - bz * st, y1 * st + bz * ct
   local cp, sp = cos(p), sin(p)
   return x1 * cp - z2 * sp, y2, x1 * sp + z2 * cp
-end
-
-local function world_to_body(wx, wy, wz, psi, the, phi)
-  local p, t, r = rad(psi), rad(the), rad(phi)
-  local cp, sp = cos(p), sin(p)
-  local x1, z1 = wx * cp + wz * sp, -wx * sp + wz * cp
-  local ct, st = cos(t), sin(t)
-  local y2, z2 = wy * ct + z1 * st, -wy * st + z1 * ct
-  local cr, sr = cos(r), sin(r)
-  return x1 * cr - y2 * sr, x1 * sr + y2 * cr, z2
 end
 
 -- A level frame turned to heading h: x right, y up, z behind.
@@ -376,12 +360,12 @@ end
 local A = {
   x = 0, y = 0, z = 0, psi = 0, the = 0, phi = 0,
   vx = 0, vy = 0, vz = 0,            -- smoothed velocity (m/s, local axes)
-  rvx = 0, rvy = 0, rvz = 0,         -- last raw velocity
-  ax = 0, ay = 0, az = 0,            -- smoothed acceleration (m/s2, local axes)
-  gs = 0, vs = 0, trk = 0, agl = 100, ias = 0, yaw_rate = 0, throttle = 0,
+  gs = 0, vs = 0, trk = 0, agl = 100, ias = 0,
   on_ground = false, paused = false, replay = false,
-  R = 10,                            -- characteristic aircraft size (m, about half the span or length)
-  have_pos = false, have_v = false,
+  Rs = 10, Rl = 10,                  -- half the span and half the length (m)
+  R = 10,                            -- the larger of the two: how far cameras need to stand off
+  size_source = "weight",
+  have_pos = false,
 }
 
 local function read_pose()
@@ -389,25 +373,56 @@ local function read_pose()
   A.psi, A.the, A.phi = getf(REF.psi), getf(REF.the), getf(REF.phi)
 end
 
--- Size from the maximum weight: aircraft are close enough to geometrically
--- similar that the cube root tracks half the span/length well, from a Cessna
--- 172 (about 5 m) to an A380 (about 40 m). The settings window can scale it.
-local function estimate_size()
+local name_buf, path_buf = ffi.new("char[1024]"), ffi.new("char[2048]")
+local HAS_ACF_NAME = pcall(function() return XPLM.cv_GetNthAircraftModel end)
+
+local function aircraft_key()
+  if not HAS_ACF_NAME then return "default" end
+  name_buf[0] = 0
+  XPLM.cv_GetNthAircraftModel(0, name_buf, path_buf)
+  local name = ffi.string(name_buf):gsub("%.acf$", ""):gsub("[^%w_%-]", "_")
+  return name ~= "" and name or "default"
+end
+
+-- How big is the aircraft? From its dimensions (half span and half length)
+-- when X-Plane gives them, else from its maximum weight: aircraft are close
+-- enough to geometrically similar that the cube root tracks half the span or
+-- length well, from a Cessna 172 (about 5 m) to an A380 (about 40 m). The
+-- weight estimate also sanity-checks the dimensions and tells metres from
+-- feet. Your size correction for this aircraft is applied on top.
+local function measure_aircraft()
   local m = getf(REF.m_max)
   if not (m > 50) then m = getf(REF.m_total) end
   if not (m > 50) then m = 1200 end
-  return clamp(0.48 * m ^ (1 / 3), 3.5, 45) * S.size_scale
+  local est = clamp(0.48 * m ^ (1 / 3), 3.5, 45)
+  local span, len, source = est, est, "weight"
+  local sx, sz = getf(REF.size_x), getf(REF.size_z)
+  if finite(sx) and finite(sz) and sx > 0.5 and sz > 0.5 then
+    local g = max(sx, sz)
+    for _, unit in ipairs({ 1, 0.3048 }) do
+      if g * unit >= 0.45 * est and g * unit <= 2.6 * est then
+        span, len, source = sx * unit, sz * unit, "dimensions"
+        break
+      end
+    end
+  end
+  local big = max(span, len)
+  span, len = max(span, 0.3 * big), max(len, 0.3 * big)
+  SIZE.key = aircraft_key()
+  local scale = SIZE.scales[SIZE.key] or 1
+  A.Rs, A.Rl = span * scale, len * scale
+  A.R = max(A.Rs, A.Rl)
+  A.size_source = source
 end
 
 local function update_dynamics(dt)
-  local px, py, pz, ppsi = A.x, A.y, A.z, A.psi
+  local px, py, pz = A.x, A.y, A.z
   read_pose()
   A.paused = geti(REF.paused) ~= 0
   A.replay = geti(REF.replay) ~= 0
   A.on_ground = geti(REF.on_ground) ~= 0
   A.agl = REF.agl and getf(REF.agl) or 100
   A.ias = getf(REF.ias)
-  A.throttle = getf(REF.throttle)
 
   local vx, vy, vz
   if A.replay or not REF.vx then
@@ -422,21 +437,8 @@ local function update_dynamics(dt)
   A.have_pos = true
 
   if vx and dt > 0 and not A.paused then
-    if A.have_v then
-      local ax, ay, az = (vx - A.rvx) / dt, (vy - A.rvy) / dt, (vz - A.rvz) / dt
-      local m = sqrt(ax * ax + ay * ay + az * az)
-      if m > 50 then ax, ay, az = ax * 50 / m, ay * 50 / m, az * 50 / m end
-      local k = 1 - exp(-dt / 0.06)
-      A.ax, A.ay, A.az = A.ax + (ax - A.ax) * k, A.ay + (ay - A.ay) * k, A.az + (az - A.az) * k
-    end
-    A.rvx, A.rvy, A.rvz, A.have_v = vx, vy, vz, true
     local k = 1 - exp(-dt / 0.2)
     A.vx, A.vy, A.vz = A.vx + (vx - A.vx) * k, A.vy + (vy - A.vy) * k, A.vz + (vz - A.vz) * k
-    local kr = 1 - exp(-dt / 0.3)
-    A.yaw_rate = A.yaw_rate + (clamp(wrap180(A.psi - ppsi) / dt, -60, 60) - A.yaw_rate) * kr
-  elseif dt > 0 then
-    local k = exp(-dt / 0.2)
-    A.ax, A.ay, A.az, A.yaw_rate = A.ax * k, A.ay * k, A.az * k, A.yaw_rate * k
   end
 
   A.gs = sqrt(A.vx * A.vx + A.vz * A.vz)
@@ -444,193 +446,21 @@ local function update_dynamics(dt)
   A.trk = (A.gs > 2) and deg(atan2(A.vx, -A.vz)) or A.psi
 end
 
--- Flight phase, debounced so a bump or a gust does not flip it.
-local PHASE_NAMES = { taxi = "Taxi", runway = "Runway", departure = "Departure",
-                      cruise = "En route", approach = "Approach", low = "Low level" }
-local PH = { cur = "taxi", cand = nil, since = 0, changed = false }
-
-local function raw_phase()
-  if A.on_ground then return (A.gs > 15) and "runway" or "taxi" end
-  if A.agl < 450 then
-    if A.vs < -1.2 then return "approach" end
-    if A.vs > 1.2 then return "departure" end
-    return "low"
-  end
-  return "cruise"
-end
-
-local function update_phase(dt)
-  local p = raw_phase()
-  if p == PH.cur then PH.cand = nil return end
-  if p ~= PH.cand then PH.cand, PH.since = p, 0 end
-  PH.since = PH.since + dt
-  if PH.since >= ((p == "runway") and 1.0 or 2.5) then
-    PH.cur, PH.cand, PH.changed = p, nil, true
-  end
-end
-
--- -----------------------------------------------------------------------------
--- Living cockpit: head motion from the forces you would feel
--- -----------------------------------------------------------------------------
-
-local HP = {
-  x = 0, y = 0, z = 0, vx = 0, vy = 0, vz = 0,        -- head offset spring (m)
-  pit = 0, pv = 0, rol = 0, rv = 0, yaw = 0, yv = 0,  -- head angle springs (deg)
-  was_ground = true, last_vs = 0, rumble = 0,
-  nx = 0, ny = 0, np = 0, nr = 0, n_t = 0,            -- runway rumble noise
-  out = { 0, 0, 0, 0, 0, 0 },                         -- dx, dy, dz, dpsi, dthe, dphi
-}
-
-local function update_head_physics(dt)
-  local o = HP.out
-  if dt <= 0 then return end
-  local amt = S.living_amount
-  local g = 9.81
-
-  -- Felt (specific) force in the aircraft's axes, minus the 1 g of sitting still.
-  local fx, fy, fz = world_to_body(A.ax, A.ay + g, A.az, A.psi, A.the, A.phi)
-  fy = fy - g
-  local K = 0.0035 * amt
-  local tx, ty, tz = clamp(-K * fx, -0.08, 0.08), clamp(-K * fy, -0.10, 0.06), clamp(-K * fz, -0.08, 0.10)
-  HP.x, HP.vx = spring(HP.x, HP.vx, tx, 8, 0.55, dt)
-  HP.y, HP.vy = spring(HP.y, HP.vy, ty, 8, 0.5, dt)
-  HP.z, HP.vz = spring(HP.z, HP.vz, tz, 7, 0.6, dt)
-
-  -- Touchdown: a firm landing bumps your head down and nods it.
-  if A.on_ground and not HP.was_ground and HP.last_vs < -0.3 then
-    local sink = clamp(-HP.last_vs, 0, 6)
-    HP.vy = HP.vy - sink * 0.10 * amt
-    HP.pv = HP.pv - sink * 9 * amt
-  end
-  HP.was_ground = A.on_ground
-  HP.last_vs = A.vs
-
-  -- Head angles: nod under load and acceleration, roll with side force,
-  -- look into turns, and lean against the bank toward the horizon.
-  local tp = clamp((-0.9 * fy / g - 1.4 * fz / g) * amt, -6, 6)
-  local tr = clamp(-2.0 * fx / g * amt, -6, 6)
-  local ty_ = 0
-  if S.look_into_turns then
-    ty_ = clamp(A.yaw_rate * (A.on_ground and 1.2 or 2.4), -20, 20) * min(amt, 1.2)
-    if A.on_ground and A.gs < 1 then ty_ = 0 end
-  end
-  if S.horizon_lean and not A.on_ground then
-    tr = tr + clamp(-0.22 * A.phi, -9, 9) * min(amt, 1.2)
-  end
-  HP.pit, HP.pv = spring(HP.pit, HP.pv, tp, 6, 0.6, dt)
-  HP.rol, HP.rv = spring(HP.rol, HP.rv, tr, 3, 0.9, dt)
-  HP.yaw, HP.yv = spring(HP.yaw, HP.yv, ty_, 2.2, 1, dt)
-
-  -- Runway and taxiway rumble, stronger with speed; a little engine buzz.
-  local rumble = 0
-  if not A.paused then
-    if A.on_ground and A.gs > 0.5 then rumble = min(A.gs / 35, 1) * 0.0045 * amt end
-    rumble = rumble + clamp(A.throttle, 0, 1) * 0.0005 * amt
-  end
-  HP.n_t = HP.n_t + dt
-  if HP.n_t > 1 / 24 then
-    HP.n_t = 0
-    HP.nx, HP.ny, HP.np, HP.nr = rnd(-1, 1), rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)
-  end
-  local k = 1 - exp(-dt / 0.03)
-  HP.rumble = HP.rumble + (rumble - HP.rumble) * k
-
-  o[1] = HP.x + HP.nx * HP.rumble * 0.4
-  o[2] = HP.y + HP.ny * HP.rumble
-  o[3] = HP.z
-  o[4] = HP.yaw
-  o[5] = HP.pit + HP.np * HP.rumble * 45
-  o[6] = HP.rol + HP.nr * HP.rumble * 30
-  for i = 1, 6 do
-    if not finite(o[i]) then
-      o[i] = 0
-      HP.x, HP.y, HP.z, HP.vx, HP.vy, HP.vz = 0, 0, 0, 0, 0, 0
-      HP.pit, HP.pv, HP.rol, HP.rv, HP.yaw, HP.yv = 0, 0, 0, 0, 0, 0
-    end
-  end
-end
-
--- -----------------------------------------------------------------------------
--- Pilot's head
--- -----------------------------------------------------------------------------
-
-local function read_head()
-  return getf(REF.head_x), getf(REF.head_y), getf(REF.head_z),
-         getf(REF.head_psi), getf(REF.head_the), getf(REF.head_phi)
-end
-
-local function write_head(x, y, z, psi, the, phi)
-  if not (finite(x) and finite(y) and finite(z) and finite(psi) and finite(the) and finite(phi)) then return end
-  setf(REF.head_x, x) setf(REF.head_y, y) setf(REF.head_z, z)
-  setf(REF.head_psi, psi) setf(REF.head_the, the)
-  if REF.head_phi then setf(REF.head_phi, phi) end
-end
-
--- The living cockpit adds an offset on top of wherever the head is. Each frame
--- it takes back exactly the offset it added the frame before, so anything you
--- (or the mouse, or a plugin) changed in between is kept, and its own motion
--- can never pile up. A sudden big jump (a snap view or a preset) is taken as
--- a new head position as it stands.
-local LV = { on = false, off = { 0, 0, 0, 0, 0, 0 }, last = { 0, 0, 0, 0, 0, 0 } }
-
--- The head pose without any living-cockpit offset in it.
-local function head_without_offset()
-  local cur = { read_head() }
-  if LV.on then
-    local jumped = false
-    for i = 1, 6 do
-      if abs(cur[i] - LV.last[i]) > ((i <= 3) and 0.25 or 15) then jumped = true end
-    end
-    if not jumped then
-      for i = 1, 6 do cur[i] = cur[i] - LV.off[i] end
-    end
-  end
-  return cur
-end
-
-local function living_tick(active)
-  if not active then
-    if LV.on then
-      local base = head_without_offset()
-      write_head(base[1], base[2], base[3], base[4], base[5], base[6])
-      LV.on = false
-    end
-    return
-  end
-  local base, o = head_without_offset(), HP.out
-  for i = 1, 6 do
-    LV.off[i] = o[i]
-    LV.last[i] = base[i] + o[i]
-  end
-  local l = LV.last
-  write_head(l[1], l[2], l[3], l[4], l[5], l[6])
-  LV.on = true
-end
-
 -- -----------------------------------------------------------------------------
 -- Shots
 --
--- Exterior shots set o.x/y/z (camera position, local axes) and either a target
--- to look at (o.tx/ty/tz) or angles (o.hdg/pit/rol), plus o.zoom. Cockpit
--- shots set the head pose relative to the aircraft (o.x/y/z, o.psi/the/phi)
--- from the captured pilot's eye point B.
+-- Each shot sets o.x/y/z (camera position, local axes) and either a target to
+-- look at (o.tx/ty/tz) or angles (o.hdg/pit/rol), plus o.zoom.
 -- -----------------------------------------------------------------------------
 
 local SHOTS, SHOT_ORDER = {}, {}
 local function shot(def)
-  def.len = def.len or 1
   SHOTS[def.id] = def
   SHOT_ORDER[#SHOT_ORDER + 1] = def.id
 end
 
-local B = nil             -- pilot's eye point (head pose captured in the 3D cockpit)
-local BASE_FOV = 60       -- the lens the exterior framings are designed for
-
-local function seat_side()
-  if not B then return 0 end
-  if B[1] < -0.12 then return -1 elseif B[1] > 0.12 then return 1 end
-  return 0
-end
+local BASE_FOV = 60       -- the lens the framings are designed for
+local SWEEP_TIME = 16     -- seconds for one crane move (it then goes back)
 
 local function track_or_heading() return (A.gs > 12) and A.trk or A.psi end
 
@@ -670,6 +500,8 @@ local function fixed_place(st, o, dt, frame_frac, lead)
   o.rol, o.zoom = 0, st.zoom
 end
 
+-- Once the aircraft has gone past and away, the pass is over (and a new one
+-- is set up).
 local function pass_done(st)
   if st.t < st.t_pass + 2 then return false end
   local x, _, z = to_local(st.lat, st.lon, st.alt)
@@ -677,25 +509,23 @@ local function pass_done(st)
   return dx * A.vx + dz * A.vz > 0 and dx * dx + dz * dz > (12 * A.R) ^ 2
 end
 
--- Rigidly mounted on the airframe: position and view direction in body axes,
--- in units of the aircraft size.
-local function mount(o, bx, by, bz, fx, fy, fz)
-  local R = A.R
-  local wx, wy, wz = body_to_world(bx * R, by * R, bz * R, A.psi, A.the, A.phi)
+-- Rigidly mounted on the airframe: a position and a point it looks at, in
+-- body axes, in units of half the aircraft's length (across: half its span
+-- for wing mounts), so mounts sit right on short and long, narrow and wide
+-- aircraft alike.
+local function mount(o, px, py, pz, tx, ty, tz, span_x)
+  local W, L = span_x and A.Rs or A.Rl, A.Rl
+  local bx, by, bz = px * W, py * L, pz * L
+  local wx, wy, wz = body_to_world(bx, by, bz, A.psi, A.the, A.phi)
   o.x, o.y, o.z = A.x + wx, A.y + wy, A.z + wz
-  local dx, dy, dz = body_to_world(fx, fy, fz, A.psi, A.the, A.phi)
+  local dx, dy, dz = body_to_world(tx * W - bx, ty * L - by, tz * L - bz, A.psi, A.the, A.phi)
   local ux, uy, uz = body_to_world(0, 1, 0, A.psi, A.the, A.phi)
   o.hdg, o.pit, o.rol = orient(dx, dy, dz, ux, uy, uz)
   o.zoom = 1
 end
 
-local function airborne() return not A.on_ground and A.agl > 15 end
-
--- Exterior -------------------------------------------------------------------
-
 shot {
-  id = "chase", name = "Chase", kind = "ext", rel = true, shake = 0.35, aim = 6,
-  weights = { taxi = 3, runway = 3, departure = 3, cruise = 2, approach = 3, low = 2 },
+  id = "chase", name = "Chase", rel = true, shake = 0.35, aim = 6,
   init = function(st)
     st.h, st.hv = track_or_heading(), 0
     st.side = rnd(0.15, 0.45) * sign_rnd()
@@ -715,8 +545,7 @@ shot {
 }
 
 shot {
-  id = "orbit", name = "Orbit", kind = "ext", rel = true, shake = 0.2, len = 1.3,
-  weights = { taxi = 2, cruise = 3, low = 1 },
+  id = "orbit", name = "Orbit", rel = true, shake = 0.2,
   init = function(st)
     st.ang = A.psi + rnd(120, 160) * sign_rnd()
     st.dir = sign_rnd()
@@ -734,38 +563,28 @@ shot {
 }
 
 shot {
-  id = "flyby", name = "Flyby", kind = "ext", shake = 0.6, aim = 7,
-  weights = { runway = 2, departure = 3, cruise = 2, approach = 3, low = 3 },
+  id = "flyby", name = "Flyby", shake = 0.6, aim = 7,
   init = function(st)
     plan_pass(st, rnd(4, 6), 1.4, 2.4, false, rnd(-0.3, 0.5))
     st.max_zoom = min(S.max_zoom, 4)
   end,
-  duration = function(st) return clamp(st.t_pass + 4, 6, 25) end,
   place = function(st, o, dt) fixed_place(st, o, dt, 0.45, 2 / 7) end,
   done = pass_done,
 }
 
 shot {
-  id = "spotter", name = "Spotter", kind = "ext", shake = 1.0, aim = 5,
-  weights = { taxi = 1, runway = 5, departure = 2, approach = 4, low = 1 },
-  available = function()
-    if PH.cur == "departure" then return A.agl < 200 end
-    if PH.cur == "approach" or PH.cur == "low" then return A.agl < 350 end
-    return true
-  end,
+  id = "spotter", name = "Spotter", shake = 1.0, aim = 5,
   init = function(st)
     plan_pass(st, rnd(6, 8), 3.5, 6.5, true, 0)
     st.max_zoom = S.max_zoom
   end,
-  duration = function(st) return clamp(st.t_pass + 5, 7, 30) end,
   place = function(st, o, dt) fixed_place(st, o, dt, 0.35, 2 / 5) end,
   done = pass_done,
 }
 
 shot {
-  id = "a2a", name = "Air-to-air", kind = "ext", rel = true, shake = 0.5, aim = 4, len = 1.2,
-  weights = { departure = 2, cruise = 4, approach = 1, low = 2 },
-  available = airborne,
+  id = "a2a", name = "Air-to-air", rel = true, shake = 0.5, aim = 4,
+  available = function() return not A.on_ground and A.agl > 15 end,
   init = function(st)
     local side = sign_rnd()
     st.bx, st.by, st.bz = side * rnd(1.9, 2.6), rnd(-0.15, 0.45), rnd(-0.9, 0.6)
@@ -795,8 +614,7 @@ local SWEEPS = {
 }
 
 shot {
-  id = "sweep", name = "Crane sweep", kind = "ext", rel = true, shake = 0.25, aim = 5, len = 1.3,
-  weights = { taxi = 1, departure = 1, cruise = 3, low = 1 },
+  id = "sweep", name = "Crane sweep", rel = true, shake = 0.25, aim = 5,
   init = function(st)
     st.path = SWEEPS[random(#SWEEPS)]
     st.side = sign_rnd()
@@ -804,8 +622,7 @@ shot {
   end,
   place = function(st, o, dt)
     st.h, st.hv = spring_angle(st.h, st.hv, track_or_heading(), 1.4, 1, dt)
-    local T = max(st.T or 14, 4)
-    local u = (st.t / T) % 2
+    local u = (st.t / SWEEP_TIME) % 2
     if u > 1 then u = 2 - u end
     local s = smoother(u)
     local a, b, c = (1 - s) * (1 - s), 2 * (1 - s) * s, s * s
@@ -822,150 +639,34 @@ shot {
 }
 
 shot {
-  id = "tail", name = "Tail cam", kind = "ext", rel = true, vib = 1,
-  weights = { taxi = 1, runway = 2, departure = 2, cruise = 2, approach = 2, low = 1 },
+  id = "tail", name = "Tail cam", rel = true, vib = 1,
   init = function() end,
-  place = function(st, o) mount(o, 0, 0.45, 1.10, 0, -0.07, -1) end,
+  place = function(st, o) mount(o, 0, 0.45, 1.10, 0, 0.38, 0.10) end,
 }
 
 shot {
-  id = "wing", name = "Wing cam", kind = "ext", rel = true, vib = 1,
-  weights = { taxi = 1, runway = 2, departure = 2, cruise = 2, approach = 1, low = 1 },
+  id = "wing", name = "Wing cam", rel = true, vib = 1,
   init = function(st) st.side = sign_rnd() end,
-  place = function(st, o) mount(o, st.side * 1.05, 0.30, 0.15, -st.side * 1.05, -0.30, -1.05) end,
+  place = function(st, o) mount(o, st.side * 1.05, 0.30, 0.15, 0, 0, -0.90, true) end,
 }
 
 shot {
-  id = "nose", name = "Nose cam", kind = "ext", rel = true, vib = 1,
-  weights = { departure = 1, cruise = 2, low = 1 },
+  id = "nose", name = "Nose cam", rel = true, vib = 1,
   init = function(st) st.side = sign_rnd() end,
-  place = function(st, o) mount(o, st.side * 0.18, 0.12, -1.45, -st.side * 0.18, -0.04, 0.65) end,
+  place = function(st, o) mount(o, st.side * 0.18, 0.12, -1.45, 0, 0.08, -0.80) end,
 }
 
 shot {
-  id = "top", name = "Top cam", kind = "ext", rel = true, vib = 1,
-  weights = { departure = 1, cruise = 1 },
+  id = "top", name = "Top cam", rel = true, vib = 1,
   init = function() end,
-  place = function(st, o) mount(o, 0, 0.34, -0.55, 0, -0.19, 1.65) end,
+  place = function(st, o) mount(o, 0, 0.34, -0.55, 0, 0.15, 1.10) end,
 }
 
 shot {
-  id = "gear", name = "Gear cam", kind = "ext", rel = true, vib = 1.5, ground_margin = 0.35,
-  weights = { taxi = 2, runway = 2, approach = 2 },
+  id = "gear", name = "Gear cam", rel = true, vib = 1.5, ground_margin = 0.35,
   available = function() return A.on_ground or A.agl < 300 end,
   init = function(st) st.side = sign_rnd() end,
-  place = function(st, o) mount(o, st.side * 0.12, -0.20, 0.55, -st.side * 0.12, -0.08, -1.95) end,
-}
-
--- Cockpit --------------------------------------------------------------------
-
-local GLANCES = { { 0, 0, 4 }, { -35, -3, 1 }, { 35, -3, 1 }, { "side", -6, 1 }, { 0, -22, 1 }, { "other", -2, 1 } }
-
-shot {
-  id = "pilot", name = "Pilot's eye", kind = "int",
-  weights = { taxi = 3, runway = 3, departure = 2, cruise = 2, approach = 3, low = 2 },
-  init = function(st)
-    st.gh, st.ghv, st.gp, st.gpv = 0, 0, 0, 0
-    st.th, st.tp, st.next, st.last = 0, 0, rnd(2.5, 4.5), 1
-  end,
-  head = function(st, o, dt)
-    if st.t >= st.next then
-      local side = (seat_side() ~= 0) and seat_side() or -1
-      local total = 0
-      for i, gl in ipairs(GLANCES) do if i ~= st.last then total = total + gl[3] end end
-      local pick, acc = random() * total, 0
-      for i, gl in ipairs(GLANCES) do
-        if i ~= st.last then
-          acc = acc + gl[3]
-          if pick <= acc then
-            local h = gl[1]
-            if h == "side" then h = side * 72 elseif h == "other" then h = -side * 48 end
-            st.th, st.tp, st.last = h, gl[2], i
-            break
-          end
-        end
-      end
-      st.next = st.t + rnd(3.5, 7.5)
-    end
-    st.gh, st.ghv = spring(st.gh, st.ghv, st.th, 2.4, 1, dt)
-    st.gp, st.gpv = spring(st.gp, st.gpv, st.tp, 2.4, 1, dt)
-    o.x = B[1] + sin(rad(st.gh)) * 0.05
-    o.y = B[2] + 0.005 * wob(st.t * 0.25, 2)
-    o.z = B[3] - abs(sin(rad(st.gh))) * 0.03
-    o.psi, o.the, o.phi = B[4] + st.gh, B[5] + st.gp, B[6]
-  end,
-}
-
-shot {
-  id = "shoulder", name = "Over the shoulder", kind = "int",
-  weights = { taxi = 2, runway = 2, departure = 1, cruise = 2, approach = 2, low = 1 },
-  init = function() end,
-  head = function(st, o)
-    local seat = seat_side()
-    local s = smoother(st.t / max(st.T or 12, 4))
-    local single = (seat == 0)
-    o.x = B[1] - seat * 0.30 + 0.015 * wob(st.t * 0.3, 1)
-    o.y = B[2] + (single and 0.14 or 0.10) + 0.01 * wob(st.t * 0.21, 2)
-    o.z = B[3] + lerp(0.68, 0.52, s) * (single and 0.55 or 1)
-    o.psi = B[4] + seat * 7 + 2 * wob(st.t * 0.12, 3)
-    o.the = B[5] - 8 + 1.5 * wob(st.t * 0.1, 4)
-    o.phi = B[6]
-  end,
-}
-
-shot {
-  id = "panel", name = "Panel sweep", kind = "int",
-  weights = { taxi = 1, cruise = 1 },
-  init = function(st) st.dir = sign_rnd() end,
-  head = function(st, o)
-    local s = smoother(st.t / max(st.T or 12, 4))
-    o.x, o.y, o.z = B[1], B[2] - 0.03, B[3] - 0.10 * s
-    o.psi = B[4] + st.dir * lerp(-32, 32, s)
-    o.the = B[5] + lerp(-24, -17, s)
-    o.phi = B[6]
-  end,
-}
-
-shot {
-  id = "side", name = "Side window", kind = "int",
-  weights = { taxi = 1, departure = 1, cruise = 2, low = 1 },
-  init = function() end,
-  head = function(st, o)
-    local side = (seat_side() ~= 0) and seat_side() or -1
-    o.x, o.y, o.z = B[1] + side * 0.08, B[2], B[3] + 0.03
-    o.psi = B[4] + side * (76 + 8 * sin(st.t * 0.12))
-    o.the = B[5] - 7 + 3 * sin(st.t * 0.09 + 1)
-    o.phi = B[6]
-  end,
-}
-
-shot {
-  id = "fo", name = "First officer", kind = "int",
-  weights = { taxi = 1, cruise = 1, approach = 1 },
-  available = function() return seat_side() ~= 0 end,
-  init = function() end,
-  head = function(st, o)
-    local seat = seat_side()
-    o.x, o.y, o.z = -B[1], B[2], B[3]
-    o.psi = B[4] + seat * 38 + 4 * wob(st.t * 0.1, 5)
-    o.the = B[5] - 9 + wob(st.t * 0.13, 6)
-    o.phi = B[6]
-  end,
-}
-
-shot {
-  id = "cabin", name = "Cabin window", kind = "int",
-  weights = { departure = 1, cruise = 1, approach = 1 },
-  available = function() return S.use_cabin and A.R >= 11 end,
-  init = function() end,
-  head = function(st, o)
-    local side = (seat_side() ~= 0) and seat_side() or -1
-    local half_width = 0.09 * A.R + 0.25
-    o.x, o.y, o.z = side * half_width * 0.78, B[2] - 0.25, 0.12 * A.R
-    o.psi = side * (100 + 6 * sin(st.t * 0.1))
-    o.the = -9 + 2 * sin(st.t * 0.07)
-    o.phi = 0
-  end,
+  place = function(st, o) mount(o, st.side * 0.12, -0.20, 0.55, 0, -0.28, -1.40) end,
 }
 
 -- -----------------------------------------------------------------------------
@@ -973,26 +674,32 @@ shot {
 -- -----------------------------------------------------------------------------
 
 local cine = {
-  active = false, director = false, hold = false,
+  active = false,
   def = nil, st = nil,                  -- current shot
-  prev_def = nil, prev_st = nil,        -- exterior shot being blended from
+  prev_def = nil, prev_st = nil,        -- shot being glided from
   blend = 1, blend_len = 0, blend_check = false,
-  int_from = nil,                       -- cockpit pose being blended from
-  shot_time = 0, shot_len = 12,
   ext_on = false, expect_release = false, override = false,
-  waiting = nil, wait = 0,              -- "ext" / "int" while a view change is under way
-  origin_internal = true,
-  history = {},
+  waiting = false, wait = 0,            -- switching to an exterior view
+  origin_internal = true,               -- you started in the cockpit
+  last_id = "chase",
   title = "", title_t = 0,
-  fov_saved = nil,
-  restore_frames = 0,
-  head_moved = false,                   -- a cockpit shot has moved the pilot's head
-  last_head = nil,                      -- last cockpit pose written by a shot
   message = nil,
 }
 
+-- Your adjustments (zoom, orbit around, height), kept for each shot so going
+-- back to a shot, or a flyby setting up its next pass, keeps them.
+local adjustments = {}
 local nudge = { yaw = 0, up = 0, zoom = 1 }
+local function use_adjustments(id)
+  local a = adjustments[id]
+  if not a then
+    a = { yaw = 0, up = 0, zoom = 1 }
+    adjustments[id] = a
+  end
+  nudge = a
+end
 local function reset_nudge() nudge.yaw, nudge.up, nudge.zoom = 0, 0, 1 end
+local function zoom_by(f) nudge.zoom = clamp(nudge.zoom * f, 0.4, 10) end
 
 local clock = { last = nil, dt = 1 / 30 }
 local cam_clock = { last = nil }
@@ -1007,18 +714,14 @@ end
 
 local function vr_on() return REF.vr ~= nil and geti(REF.vr) ~= 0 end
 
-local function show_title(text)
-  cine.title, cine.title_t = text, 4
-end
-
 -- -----------------------------------------------------------------------------
--- Exterior camera: X-Plane calls this every frame while we have the camera.
--- It reads the aircraft pose itself so the camera never lags the drawn aircraft.
+-- The camera: X-Plane calls this every frame while we have the camera. It
+-- reads the aircraft pose itself so the camera never lags the drawn aircraft.
 -- -----------------------------------------------------------------------------
 
 local work_a, work_b = {}, {}
 
-local function run_exterior(def, st, o, dt)
+local function run_shot(def, st, o, dt)
   o.tx, o.hdg, o.pit, o.rol, o.zoom = nil, 0, 0, 0, 1
   def.place(st, o, dt)
 
@@ -1082,6 +785,7 @@ local function lens_factor()
 end
 
 local last_good = nil
+local hook_zoom          -- defined with the zoom handling below
 
 local function camera_update(pos, losing)
   if losing ~= 0 then
@@ -1090,7 +794,7 @@ local function camera_update(pos, losing)
     cine.expect_release = false
     return 0
   end
-  if not (cine.active and cine.def and cine.def.kind == "ext") then return 0 end
+  if not (cine.active and cine.def) then return 0 end
 
   local t, dt = sim_dt(cam_clock.last)
   cam_clock.last = t
@@ -1099,6 +803,7 @@ local function camera_update(pos, losing)
   -- after the Lua state is gone.
   if clock.last and t - clock.last > 2 then
     cine.ext_on, cine.override = false, true
+    hook_zoom(false)
     return 0
   end
   read_pose()
@@ -1106,13 +811,13 @@ local function camera_update(pos, losing)
   local st = cine.st
   st.t = st.t + dt
   local o = work_a
-  run_exterior(cine.def, st, o, dt)
+  run_shot(cine.def, st, o, dt)
 
   if cine.prev_def then
     local pst = cine.prev_st
     pst.t = pst.t + dt
     local b = work_b
-    run_exterior(cine.prev_def, pst, b, dt)
+    run_shot(cine.prev_def, pst, b, dt)
     if cine.blend_check then
       cine.blend_check = false
       if not path_clear(b, o) then cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1 end
@@ -1191,68 +896,48 @@ local function release_camera()
 end
 
 -- -----------------------------------------------------------------------------
--- Cockpit shots, run from the per-frame tick
+-- X-Plane's zoom while filming: its zoom commands (keys, joystick buttons)
+-- are taken over only while a shot runs and handed straight back after.
 -- -----------------------------------------------------------------------------
 
-local head_out = {}
+local zoom_hooked = false
 
-local function run_cockpit(dt)
-  local def, st, o = cine.def, cine.st, head_out
-  st.t = st.t + dt
-  def.head(st, o, dt)
-  local x, y, z, psi, the, phi = o.x, o.y, o.z, o.psi, o.the, o.phi
+local function zoom_command(phase, refcon)
+  local z = ZOOM_CMDS[tonumber(ffi.cast("intptr_t", refcon))]
+  if not (z and cine.active) then return 1 end
+  if phase == 0 then
+    zoom_by(exp(z.dir * z.rate * 0.05))                    -- a tap: one step
+  elseif phase == 1 then
+    zoom_by(exp(z.dir * z.rate * 0.8 * clock.dt))          -- held: smooth zoom
+  end
+  return 0
+end
 
-  if cine.int_from then
-    cine.blend = cine.blend + dt / max(cine.blend_len, 0.05)
-    if cine.blend >= 1 then
-      cine.int_from = nil
-    else
-      local f, s = cine.int_from, smoother(cine.blend)
-      x, y, z = lerp(f[1], x, s), lerp(f[2], y, s), lerp(f[3], z, s)
-      psi = f[4] + wrap180(psi - f[4]) * s
-      the, phi = lerp(f[5], the, s), lerp(f[6], phi, s)
+local zoom_cb = ffi.cast("cv_CommandCallback_f", function(cmd, phase, refcon)
+  local ok, res = pcall(zoom_command, phase, refcon)
+  if ok then return res end
+  return 1
+end)
+
+hook_zoom = function(on)
+  if on == zoom_hooked then return end
+  for i, z in ipairs(ZOOM_CMDS) do
+    if z.ref then
+      if on then
+        XPLM.cv_RegisterCommandHandler(z.ref, zoom_cb, 1, ffi.cast("void *", i))
+      else
+        XPLM.cv_UnregisterCommandHandler(z.ref, zoom_cb, 1, ffi.cast("void *", i))
+      end
     end
   end
-
-  psi, the = psi + nudge.yaw, the + nudge.up * 10
-  z = z - (nudge.zoom - 1) * 0.25
-  cine.last_head = { x, y, z, psi, the, phi }
-  cine.head_moved = true
-
-  if S.living then
-    local h = HP.out
-    x, y, z, psi, the, phi = x + h[1], y + h[2], z + h[3], psi + h[4], the + h[5], phi + h[6]
-  end
-  -- A little breathing so a held cockpit shot never looks frozen.
-  local b = S.shake * 0.25
-  psi = psi + b * wob(st.t * 0.5, 21)
-  the = the + b * 0.7 * wob(st.t * 0.6, 22)
-  write_head(x, y, z, psi, the, phi)
-end
-
-local function capture_eye_point()
-  B = head_without_offset()
-  LV.on = false
-end
-
-local function set_cockpit_fov(on)
-  if not FOV_WRITABLE then return end
-  if on and S.cockpit_fov >= 20 then
-    if not cine.fov_saved then cine.fov_saved = getf(REF.fov) end
-    setf(REF.fov, S.cockpit_fov)
-  elseif cine.fov_saved then
-    setf(REF.fov, cine.fov_saved)
-    cine.fov_saved = nil
-  end
+  zoom_hooked = on
 end
 
 -- -----------------------------------------------------------------------------
--- Switching shots
+-- Switching shots, starting and stopping
 -- -----------------------------------------------------------------------------
 
 local function shot_available(def)
-  if def.kind == "int" and (vr_on() or not CMD.cockpit) then return false end
-  if def.kind == "ext" and not CMD.external then return false end
   return not def.available or def.available()
 end
 
@@ -1261,159 +946,61 @@ local function begin_shot(id, how)
   if not def then return end
   local prev_def, prev_st = cine.def, cine.st
   local st = { t = 0 }
+  def.init(st)
 
-  if def.kind == "ext" then
-    def.init(st)
-    cine.int_from = nil
-    if prev_def and prev_def.kind == "ext" and cine.ext_on then
-      if S.blend_time > 0.05 and how ~= "cut" and prev_def.rel and def.rel then
-        cine.prev_def, cine.prev_st = prev_def, prev_st
-        cine.blend, cine.blend_len, cine.blend_check = 0, S.blend_time, true
-      else
-        cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1
-      end
-      cine.waiting = nil
+  if prev_def and cine.ext_on then
+    if S.blend_time > 0.05 and how ~= "cut" and prev_def.rel and def.rel then
+      cine.prev_def, cine.prev_st = prev_def, prev_st
+      cine.blend, cine.blend_len, cine.blend_check = 0, S.blend_time, true
     else
       cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1
-      cine.waiting, cine.wait = "ext", 0
-      if geti(REF.external) == 0 then run_cmd(CMD.external) end
-      if geti(REF.external) ~= 0 then
-        cine.waiting = nil
-        take_camera()
-      end
     end
-    set_cockpit_fov(false)
+    cine.waiting = false
   else
-    def.init(st)
-    cine.prev_def, cine.prev_st = nil, nil
-    if prev_def and prev_def.kind == "int" and cine.last_head and S.blend_time > 0.05 and how ~= "cut" then
-      cine.int_from, cine.blend, cine.blend_len = cine.last_head, 0, S.blend_time
-    else
-      cine.int_from, cine.blend = nil, 1
-    end
-    if cine.ext_on then
-      cine.expect_release = true
-      run_cmd(CMD.cockpit)
-      release_camera()
-    end
-    if geti(REF.view_type) ~= VIEW_3D_COCKPIT then
-      cine.waiting, cine.wait = "int", 0
-      run_cmd(CMD.cockpit)
-    else
-      cine.waiting = nil
+    -- Switch to an exterior view, then take the camera (now, if the switch
+    -- already happened, or as soon as it does).
+    cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1
+    cine.waiting, cine.wait = true, 0
+    if geti(REF.external) == 0 then run_cmd(CMD.external) end
+    if geti(REF.external) ~= 0 then
+      cine.waiting = false
+      take_camera()
     end
   end
 
-  cine.def, cine.st = def, st
-  cine.shot_time = 0
-  cine.shot_len = def.duration and def.duration(st) or S.shot_length * def.len * rnd(0.8, 1.25)
-  st.T = cine.shot_len
-  reset_nudge()
-  local h = cine.history
-  h[#h + 1] = id
-  if #h > 4 then table.remove(h, 1) end
-  if def.kind == "int" then
-    set_cockpit_fov(true)
-    -- Already in the cockpit: place the head now, so the cut has no stray frame.
-    if geti(REF.view_type) == VIEW_3D_COCKPIT then
-      cine.waiting = nil
-      if not B then capture_eye_point() end
-      run_cockpit(0)
-    end
-  end
-  show_title(def.name)
+  cine.def, cine.st, cine.last_id = def, st, id
+  use_adjustments(id)
+  cine.title, cine.title_t = def.name, 4
 end
-
-local function recently_used(id, n)
-  local h = cine.history
-  for i = max(1, #h - n + 1), #h do if h[i] == id then return true end end
-  return false
-end
-
-local function choose_shot()
-  local phase = PH.cur
-  local want_int
-  if S.use_cockpit and S.use_exterior then
-    want_int = random() < S.cockpit_share
-  else
-    want_int = S.use_cockpit
-  end
-  -- Pick by weight, relaxing the rules step by step if nothing qualifies.
-  for pass = 1, 4 do
-    local pool, total = {}, 0
-    for _, id in ipairs(SHOT_ORDER) do
-      local def = SHOTS[id]
-      local w = def.weights[phase] or 0
-      if pass >= 3 and w == 0 then w = 0.5 end
-      local kind_ok = (pass >= 4) or ((def.kind == "int") == want_int)
-      if w > 0 and kind_ok and shot_available(def)
-         and not (pass <= 2 and recently_used(id, pass == 1 and 2 or 1)) and id ~= (cine.def and cine.def.id) then
-        pool[#pool + 1], total = { id, w }, total + w
-      end
-    end
-    if total > 0 then
-      local pick, acc = random() * total, 0
-      for _, e in ipairs(pool) do
-        acc = acc + e[2]
-        if pick <= acc then return e[1] end
-      end
-      return pool[#pool][1]
-    end
-  end
-  return "chase"
-end
-
--- -----------------------------------------------------------------------------
--- Starting and stopping
--- -----------------------------------------------------------------------------
 
 local function start_session()
   if cine.active then return true end
   if vr_on() then
-    log("cinematic shots are off in VR.")
+    log("cinematic views are off in VR.")
     cine.message = "Not available in VR"
     return false
   end
-  if not CMD.external and not CMD.cockpit then
-    log("could not find X-Plane's view commands.")
+  if not CMD.external then
+    log("could not find X-Plane's exterior view command.")
     return false
   end
-  cine.active, cine.override, cine.history, cine.head_moved = true, false, {}, false
+  cine.active, cine.override, cine.message = true, false, nil
   cine.origin_internal = geti(REF.external) == 0
-  cine.message = nil
-  A.R = estimate_size()
-  PH.cur, PH.cand, PH.changed = raw_phase(), nil, false
-  if geti(REF.view_type) == VIEW_3D_COCKPIT then capture_eye_point() end
+  measure_aircraft()
+  hook_zoom(true)
   return true
 end
 
 local function stop_session(restore_view)
   if not cine.active then return end
-  local was_int = cine.def and cine.def.kind == "int"
-  cine.active, cine.director, cine.hold = false, false, false
-  if restore_view then
-    if cine.origin_internal then
-      if cine.ext_on or geti(REF.view_type) ~= VIEW_3D_COCKPIT then
-        cine.expect_release = true
-        run_cmd(CMD.cockpit)
-      end
-    elseif was_int then
-      run_cmd(CMD.external)
-    end
+  cine.active = false
+  if restore_view and cine.origin_internal and CMD.cockpit then
+    cine.expect_release = true
+    run_cmd(CMD.cockpit)
   end
   release_camera()
-  cine.def, cine.st, cine.prev_def, cine.prev_st, cine.int_from = nil, nil, nil, nil, nil
-  cine.waiting, cine.last_head = nil, nil
-  set_cockpit_fov(false)
-  if B and cine.head_moved then
-    -- Put the head back now (X-Plane keeps it for when you return to the
-    -- cockpit) and for a few frames in case the view change resets it.
-    write_head(B[1], B[2], B[3], B[4], B[5], B[6])
-    cine.restore_frames = 3
-  end
-  cine.head_moved = false
-  LV.on = false
-  reset_nudge()
+  hook_zoom(false)
+  cine.def, cine.st, cine.prev_def, cine.prev_st, cine.waiting = nil, nil, nil, nil, false
 end
 
 for _, f in ipairs({ run_cmd, take_camera, release_camera, begin_shot, stop_session }) do
@@ -1429,23 +1016,11 @@ local function request(fn) queue[#queue + 1] = fn end
 
 local LB = { amount = 0 }
 
-local function director_tick()
-  if not cine.director or cine.hold or cine.waiting then return end
-  local def, change = cine.def, false
-  if not def or cine.shot_time >= cine.shot_len then change = true end
-  if def and def.done and def.done(cine.st) then change = true end
-  if def and PH.changed and cine.shot_time > 3 and (def.weights[PH.cur] or 0) == 0 then change = true end
-  if def and def.available and cine.shot_time > 2 and not def.available() then change = true end
-  if change then begin_shot(choose_shot(), "director") end
-end
-
 local function tick()
   local t, dt = sim_dt(clock.last)
   clock.last, clock.dt = t, dt
 
   update_dynamics(dt)
-  update_phase(dt)
-  update_head_physics(dt)
 
   -- Commands, macros and window buttons, run here with this frame's state.
   local q = queue
@@ -1456,63 +1031,31 @@ local function tick()
   end
 
   if cine.override then
+    -- You changed the view yourself: the camera is yours again.
     cine.override = false
     if cine.active then stop_session(false) end
   end
-
-  local in_cockpit = geti(REF.view_type) == VIEW_3D_COCKPIT
   if cine.active and vr_on() then stop_session(false) end
 
   if cine.active and cine.def then
-    local def = cine.def
-    cine.shot_time = cine.shot_time + dt
-    if def.kind == "ext" then
-      if cine.waiting == "ext" then
-        if geti(REF.external) ~= 0 then
-          cine.waiting = nil
-          take_camera()
-        else
-          cine.wait = cine.wait + 1
-          if cine.wait % 30 == 0 then run_cmd(CMD.external) end
-          if cine.wait > 150 then
-            log("could not switch to an exterior view.")
-            stop_session(true)
-          end
-        end
-      elseif not cine.ext_on and not cine.override then
+    if cine.waiting then
+      if geti(REF.external) ~= 0 then
+        cine.waiting = false
         take_camera()
-      end
-    else
-      if in_cockpit then
-        if cine.waiting == "int" or not B then
-          cine.waiting = nil
-          if not B then capture_eye_point() end
-        end
-        run_cockpit(dt)
-      elseif cine.waiting == "int" then
+      else
         cine.wait = cine.wait + 1
-        if cine.wait % 30 == 0 then run_cmd(CMD.cockpit) end
+        if cine.wait % 30 == 0 then run_cmd(CMD.external) end
         if cine.wait > 150 then
-          log("could not switch to the 3D cockpit.")
+          log("could not switch to an exterior view.")
           stop_session(true)
         end
-      else
-        -- You changed the view yourself: hand the camera back.
-        stop_session(false)
       end
+    elseif not cine.ext_on then
+      take_camera()
     end
-    if cine.active then director_tick() end
-    if PH.changed then PH.changed = false end
-    if cine.active and not cine.director and def.done and def.done(cine.st) then
-      begin_shot(def.id, "cut")          -- manual flyby/spotter: set up the next pass
-    end
-  else
-    PH.changed = false
-    if cine.restore_frames > 0 then
-      cine.restore_frames = cine.restore_frames - 1
-      if B and in_cockpit then write_head(B[1], B[2], B[3], B[4], B[5], B[6]) end
-    else
-      living_tick(S.living and in_cockpit and not vr_on())
+    local def = cine.def
+    if cine.active and def and def.done and def.done(cine.st) then
+      begin_shot(def.id, "cut")          -- flyby/spotter: set up the next pass
     end
   end
 
@@ -1560,8 +1103,6 @@ local function on_draw()
   if S.titles and cine.active and cine.title_t > 0 and draw_string then
     local y = (bar > 24) and (bar / 2 - 4) or 30
     draw_string(30, y, cine.title, "white")
-    local mode = cine.director and (cine.hold and "DIRECTOR - HOLD" or "DIRECTOR") or "MANUAL"
-    draw_string(W - 30 - #mode * 8, y, mode, "white")
   end
 end
 
@@ -1569,27 +1110,13 @@ end
 -- Public actions (commands, macros and the window all go through these)
 -- -----------------------------------------------------------------------------
 
-local function act_director()
-  if cine.active and cine.director then
-    stop_session(true)
-  elseif start_session() then
-    cine.director, cine.hold = true, false
-    begin_shot(choose_shot(), "cut")
-  end
-end
-
 local function act_shot(id)
   if not SHOTS[id] then return end
   if not cine.active and not start_session() then return end
-  cine.director = false
   begin_shot(id, "manual")
 end
 
 local function act_step(step)
-  if cine.active and cine.director then
-    begin_shot(choose_shot(), "director")
-    return
-  end
   local cur, n = cine.def and cine.def.id, #SHOT_ORDER
   local idx = (step > 0) and 0 or 1
   for i, id in ipairs(SHOT_ORDER) do if id == cur then idx = i end end
@@ -1601,20 +1128,27 @@ local function act_step(step)
 end
 
 local function act_toggle()
-  if cine.active then stop_session(true) else act_director() end
+  if cine.active then stop_session(true) else act_shot(cine.last_id) end
 end
 
 local M = {}
 M.version = VERSION
 M.toggle = function() request(act_toggle) end
-M.toggle_director = function() request(act_director) end
 M.stop = function() request(function() stop_session(true) end) end
 M.next_shot = function() request(function() act_step(1) end) end
 M.previous_shot = function() request(function() act_step(-1) end) end
 M.shot = function(id) request(function() act_shot(id) end) end
-M.toggle_hold = function() if cine.director then cine.hold = not cine.hold end end
-M.toggle_living = function() S.living = not S.living settings_dirty = true end
 M.toggle_letterbox = function() S.letterbox = not S.letterbox settings_dirty = true end
+
+-- The mouse wheel zooms the camera while a shot runs; otherwise it is left alone.
+M._wheel = function()
+  if cine.active and cine.ext_on and (tonumber(MOUSE_WHEEL_NUMBER) or 0) == 0 then
+    zoom_by(1.1 ^ (tonumber(MOUSE_WHEEL_CLICKS) or 0))
+    RESUME_MOUSE_WHEEL = false
+  else
+    RESUME_MOUSE_WHEEL = true
+  end
+end
 
 M.nudge = function(kind, dir)
   local dt = clock.dt
@@ -1623,7 +1157,7 @@ M.nudge = function(kind, dir)
   elseif kind == "up" then
     nudge.up = clamp(nudge.up + dir * 0.6 * dt, -2, 3)
   elseif kind == "zoom" then
-    nudge.zoom = clamp(nudge.zoom * exp(dir * 0.8 * dt), 0.4, 10)
+    zoom_by(exp(dir * 0.8 * dt))
   end
 end
 M.reset_nudge = reset_nudge
@@ -1635,20 +1169,17 @@ local wnd = nil
 local COL_ACTIVE = 0xFFD08A2A    -- imgui colours are 0xAABBGGRR
 local COL_MUTED = 0xFF9A9A9A
 
-local function shot_buttons(kind)
-  local col = 0
-  for _, id in ipairs(SHOT_ORDER) do
+local function shot_buttons()
+  for i, id in ipairs(SHOT_ORDER) do
     local def = SHOTS[id]
-    if def.kind == kind then
-      if col > 0 then imgui.SameLine() end
-      local current = cine.active and cine.def == def
-      if current then imgui.PushStyleColor(imgui.constant.Col.Button, COL_ACTIVE) end
-      if not shot_available(def) then imgui.PushStyleColor(imgui.constant.Col.Text, COL_MUTED) end
-      if imgui.Button(def.name .. "##" .. id, 112, 26) then M.shot(id) end
-      if not shot_available(def) then imgui.PopStyleColor() end
-      if current then imgui.PopStyleColor() end
-      col = (col + 1) % 4
-    end
+    if (i - 1) % 4 > 0 then imgui.SameLine() end
+    local current = cine.active and cine.def == def
+    local usable = shot_available(def)
+    if current then imgui.PushStyleColor(imgui.constant.Col.Button, COL_ACTIVE) end
+    if not usable then imgui.PushStyleColor(imgui.constant.Col.Text, COL_MUTED) end
+    if imgui.Button(def.name .. "##" .. id, 112, 26) then M.shot(id) end
+    if not usable then imgui.PopStyleColor() end
+    if current then imgui.PopStyleColor() end
   end
 end
 
@@ -1672,53 +1203,40 @@ end
 
 local function build_window()
   if cine.active and cine.def then
-    local left = max(0, cine.shot_len - cine.shot_time)
-    local mode = cine.director and (cine.hold and "Director (holding)" or ("Director - next cut in " .. math.floor(left + 0.5) .. " s")) or "Manual"
-    imgui.TextUnformatted(cine.def.name .. "   |   " .. mode .. "   |   " .. PHASE_NAMES[PH.cur])
+    imgui.TextUnformatted(("Filming: %s   |   zoom %.1fx"):format(cine.def.name, nudge.zoom))
   else
-    imgui.TextUnformatted((cine.message or "Camera is yours") .. "   |   " .. PHASE_NAMES[PH.cur])
+    imgui.TextUnformatted(cine.message or "Camera is yours")
   end
 
-  local on = cine.active and cine.director
+  local on = cine.active
   if on then imgui.PushStyleColor(imgui.constant.Col.Button, COL_ACTIVE) end
-  if imgui.Button(on and "Director ON" or "Start Director", 130, 30) then M.toggle_director() end
+  if imgui.Button(on and "Stop" or ("Start (" .. SHOTS[cine.last_id].name .. ")"), 160, 30) then M.toggle() end
   if on then imgui.PopStyleColor() end
   imgui.SameLine()
-  if imgui.Button(cine.hold and "Resume" or "Hold shot", 90, 30) then M.toggle_hold() end
+  if imgui.Button("< Previous", 100, 30) then M.previous_shot() end
   imgui.SameLine()
-  if imgui.Button("<##prev", 34, 30) then M.previous_shot() end
-  imgui.SameLine()
-  if imgui.Button(">##next", 34, 30) then M.next_shot() end
-  imgui.SameLine()
-  if imgui.Button("Stop", 70, 30) then M.stop() end
+  if imgui.Button("Next >", 100, 30) then M.next_shot() end
 
   imgui.Separator()
-  imgui.TextUnformatted("Exterior")
-  shot_buttons("ext")
-  imgui.TextUnformatted("Cockpit")
-  shot_buttons("int")
+  shot_buttons()
   imgui.Separator()
 
-  if imgui.TreeNode("Director") then
-    slider("Shot length (s)", "shot_length", 5, 40, "%.0f")
-    checkbox("Exterior shots", "use_exterior")
-    imgui.SameLine()
-    checkbox("Cockpit shots", "use_cockpit")
-    slider("Cockpit share", "cockpit_share", 0, 1, "%.2f")
-    checkbox("Cabin window shots (aircraft with a modelled cabin)", "use_cabin")
-    slider("Glide between shots (s, 0 = cut)", "blend_time", 0, 5, "%.1f")
-    imgui.TreePop()
-  end
-
-  if imgui.TreeNode("Exterior camera") then
+  if imgui.TreeNode("Camera") then
     slider("Distance", "distance", 0.5, 3, "%.2fx")
     slider("Orbit speed (deg/s)", "orbit_speed", 1, 20, "%.0f")
     slider("Handheld shake", "shake", 0, 1, "%.2f")
     slider("Telephoto limit", "max_zoom", 2, 15, "%.0fx")
-    if slider("Aircraft size", "size_scale", 0.4, 2.5, "%.2fx") then A.R = estimate_size() end
-    muted(("   estimated size %.0f m (about half the span or length)"):format(A.R))
+    slider("Glide between shots (s, 0 = cut)", "blend_time", 0, 5, "%.1f")
+    local changed, v = imgui.SliderFloat("Aircraft size", SIZE.scales[SIZE.key] or 1, 0.4, 2.5, "%.2fx")
+    if changed then
+      SIZE.scales[SIZE.key], settings_dirty = v, true
+      measure_aircraft()
+    end
+    muted(("   %.0f m span x %.0f m long, %s"):format(2 * A.Rs, 2 * A.Rl,
+      A.size_source == "dimensions" and "from the aircraft's dimensions" or "estimated from its weight"))
+    muted("   a size correction is remembered for each aircraft")
     checkbox("Frame shots for a 60 deg lens whatever the sim FOV", "normalize_lens")
-    imgui.TextUnformatted("Adjust the live shot:")
+    imgui.TextUnformatted("Adjust the live shot (zoom: mouse wheel or X-Plane's zoom keys):")
     if imgui.Button("Orbit <", 70, 24) then nudge.yaw = wrap180(nudge.yaw - 15) end
     imgui.SameLine()
     if imgui.Button("Orbit >", 70, 24) then nudge.yaw = wrap180(nudge.yaw + 15) end
@@ -1727,24 +1245,12 @@ local function build_window()
     imgui.SameLine()
     if imgui.Button("Down", 50, 24) then nudge.up = clamp(nudge.up - 0.25, -2, 3) end
     imgui.SameLine()
-    if imgui.Button("Zoom +", 62, 24) then nudge.zoom = clamp(nudge.zoom * 1.25, 0.4, 10) end
+    if imgui.Button("Zoom +", 62, 24) then zoom_by(1.25) end
     imgui.SameLine()
-    if imgui.Button("Zoom -", 62, 24) then nudge.zoom = clamp(nudge.zoom / 1.25, 0.4, 10) end
+    if imgui.Button("Zoom -", 62, 24) then zoom_by(1 / 1.25) end
     if imgui.Button("Reset adjustments", 150, 24) then reset_nudge() end
-    imgui.TreePop()
-  end
-
-  if imgui.TreeNode("Cockpit") then
-    checkbox("Living cockpit (G-forces, turbulence, touchdown, rumble)", "living")
-    slider("Strength", "living_amount", 0, 2, "%.2f")
-    checkbox("Look into turns", "look_into_turns")
     imgui.SameLine()
-    checkbox("Lean toward the horizon", "horizon_lean")
-    if FOV_WRITABLE then slider("Cockpit shot FOV (0 = leave)", "cockpit_fov", 0, 100, "%.0f") end
-    if imgui.Button("Use my current head position as the pilot's eye", 340, 24) then
-      request(function() if geti(REF.view_type) == VIEW_3D_COCKPIT and not cine.active then capture_eye_point() end end)
-    end
-    muted(B and ("   pilot's eye at x %.2f  y %.2f  z %.2f m"):format(B[1], B[2], B[3]) or "   captured the first time the cockpit is used")
+    muted(("zoom %.1fx"):format(nudge.zoom))
     imgui.TreePop()
   end
 
@@ -1763,7 +1269,7 @@ local function build_window()
     imgui.TreePop()
   end
 
-  if vr_on() then muted("VR is on: cinematic shots and the living cockpit are paused.") end
+  if vr_on() then muted("VR is on: cinematic views are paused.") end
   muted("Cinematic Views " .. VERSION .. "  -  every button is also a command under FlyWithLua/cinematic_views/")
 end
 
@@ -1790,7 +1296,7 @@ M.toggle_window = function()
     log("the settings window needs FlyWithLua NG 2.7 or later; the commands still work.")
     return
   end
-  wnd = float_wnd_create(520, 640, 1, true)
+  wnd = float_wnd_create(500, 460, 1, true)
   float_wnd_set_title(wnd, "Cinematic Views")
   float_wnd_set_imgui_builder(wnd, "cinematic_views_build_window")
   float_wnd_set_onclose(wnd, "cinematic_views_window_closed")
@@ -1807,7 +1313,7 @@ M._draw = function()
   if not ok then log("draw error: " .. tostring(err)) end
 end
 M._often = function()
-  if not cine.active then A.R = estimate_size() end
+  if not cine.active then measure_aircraft() end
   if settings_dirty then save_settings() end
 end
 
@@ -1818,18 +1324,18 @@ M.shutdown = function()
   pcall(stop_session, false)
   pcall(release_camera)
   pcall(XPLM.cv_DontControlCamera)
-  if cine.fov_saved then pcall(set_cockpit_fov, false) end
-  if LV.on then pcall(living_tick, false) end
+  pcall(hook_zoom, false)
   if probe then pcall(XPLM.cv_DestroyProbe, probe) probe = nil end
   if wnd and float_wnd_destroy then pcall(float_wnd_destroy, wnd) wnd = nil end
   if settings_dirty then pcall(save_settings) end
   pcall(function() camera_cb:free() end)
+  pcall(function() zoom_cb:free() end)
 end
 
-A.R = estimate_size()
+measure_aircraft()
 
 -- For testing and for other scripts.
-M._state = function() return cine, A, S, PH, B, HP end
+M._state = function() return cine, A, S end
 M._shots = function() return SHOTS, SHOT_ORDER end
 
 CinematicViews = M
@@ -1842,6 +1348,7 @@ do_every_frame("CinematicViews._frame()")
 do_every_draw("CinematicViews._draw()")
 do_often("CinematicViews._often()")
 do_on_exit("CinematicViews.shutdown()")
+if do_on_mouse_wheel then do_on_mouse_wheel("CinematicViews._wheel()") end
 
 local P = "FlyWithLua/cinematic_views/"
 local function command(name, desc, code)
@@ -1851,13 +1358,10 @@ local function hold_command(name, desc, code)
   create_command(P .. name, "Cinematic Views: " .. desc, "", code, "")
 end
 
-command("toggle", "start the Director, or stop and hand the camera back", "CinematicViews.toggle()")
-command("director", "start/stop the Director (automatic shots)", "CinematicViews.toggle_director()")
+command("toggle", "start (with the last shot) or stop and hand the camera back", "CinematicViews.toggle()")
 command("stop", "stop and return to your view", "CinematicViews.stop()")
 command("next_shot", "next shot", "CinematicViews.next_shot()")
 command("previous_shot", "previous shot", "CinematicViews.previous_shot()")
-command("hold_shot", "Director: hold the current shot / resume", "CinematicViews.toggle_hold()")
-command("toggle_living_cockpit", "living cockpit on/off", "CinematicViews.toggle_living()")
 command("toggle_letterbox", "letterbox bars on/off", "CinematicViews.toggle_letterbox()")
 command("toggle_window", "settings window", "CinematicViews.toggle_window()")
 command("reset_adjustments", "reset orbit, height and zoom adjustments", "CinematicViews.reset_nudge()")
@@ -1865,18 +1369,17 @@ hold_command("orbit_left", "move the camera around the aircraft to the left (hol
 hold_command("orbit_right", "move the camera around the aircraft to the right (hold)", "CinematicViews.nudge('yaw', 1)")
 hold_command("camera_up", "raise the camera (hold)", "CinematicViews.nudge('up', 1)")
 hold_command("camera_down", "lower the camera (hold)", "CinematicViews.nudge('up', -1)")
-hold_command("zoom_in", "zoom in (hold)", "CinematicViews.nudge('zoom', 1)")
+hold_command("zoom_in", "zoom in (hold; X-Plane's own zoom commands work too)", "CinematicViews.nudge('zoom', 1)")
 hold_command("zoom_out", "zoom out (hold)", "CinematicViews.nudge('zoom', -1)")
 for _, id in ipairs(SHOT_ORDER) do
   command("shot_" .. id, SHOTS[id].name .. " shot", "CinematicViews.shot('" .. id .. "')")
 end
 
 if add_macro then
-  add_macro("Cinematic Views: Director on/off", "CinematicViews.toggle_director()")
+  add_macro("Cinematic Views: start/stop", "CinematicViews.toggle()")
+  add_macro("Cinematic Views: next shot", "CinematicViews.next_shot()")
   add_macro("Cinematic Views: settings window", "CinematicViews.toggle_window()")
-  add_macro("Cinematic Views: living cockpit on/off", "CinematicViews.toggle_living()")
 end
 
-if not CMD.external then log("no exterior view command found - exterior shots are off.") end
-if not CMD.cockpit then log("no 3D cockpit view command found - cockpit shots are off.") end
+if not CMD.external then log("no exterior view command found - cinematic views are off.") end
 log("v" .. VERSION .. " ready - Plugins > FlyWithLua > Macros, or the FlyWithLua/cinematic_views/ commands.")
