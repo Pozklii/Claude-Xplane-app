@@ -1,6 +1,6 @@
 # Cinematic Views for X-Plane 12
 
-A [FlyWithLua NG+](https://github.com/X-Friese/FlyWithLua) script for screenshots and videos. It's an automatic cinematic camera that works outside and inside the aircraft. Pick a shot and the camera works on its own: it follows, zooms and frames the aircraft for you.
+A [FlyWithLua NG+](https://github.com/X-Friese/FlyWithLua) script for screenshots and videos. It's an automatic cinematic camera that works outside and inside the aircraft. Step through 16 shots or generate endless random ones, and the camera works on its own: it follows, zooms and frames the aircraft for you. Nothing is ever drawn over the picture.
 
 Everything is in one file, [`Cinematic_Views.lua`](./Cinematic_Views.lua).
 
@@ -10,26 +10,33 @@ Everything is in one file, [`Cinematic_Views.lua`](./Cinematic_Views.lua).
 2. Copy `Cinematic_Views.lua` to `X-Plane 12/Resources/plugins/FlyWithLua/Scripts/`, replacing any older copy.
 3. Start a flight, or use **Plugins → FlyWithLua → Reload all Lua script files** if X-Plane is already running.
 
-Open **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic Views: settings window**. Everything is in that one window.
+Open **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic Views: settings window**. The other macros (camera on/off, next view, new random view) work without opening it.
 
 Only run one camera script at a time. If you also have other cinematic camera scripts installed (for example `CineCam.lua` or `cinematic_camera.lua`), they'll fight over the camera.
 
 ## The window
 
-The window has these sections, from top to bottom:
+The window is small and holds the basics:
 
-- **Start camera / Camera ON**, **< Previous** and **Next >**, plus the shot that's running and its zoom.
-- **Exterior shots** and **Cockpit shots**: a button for each shot. You can also choose whether **Next / Previous** include the cockpit shots.
-- **Controls**: your own key or joystick button for **Camera on/off**, **Next view** and **Previous view**.
+- **A row of buttons:**
+  - **Camera ON/OFF**
+  - **< Previous** and **Next >**
+  - **Random**, for a new random view
+  - **Save**, which keeps the random view on screen. On a saved shot it becomes **Delete**.
+- **The shot that's running**, and its zoom.
+- **Your controls:** a key or joystick button for **Camera on/off**, **Next view**, **Previous view** and **New random view**.
   - Press **Assign**, then the key or button you want. **Esc** cancels.
   - Assigned keys only control the camera, so X-Plane won't also act on them.
   - X-Plane still sees joystick buttons, so pick ones that have no X-Plane assignment.
   - + and − can't be assigned, because they're kept for zoom.
-- **Exterior camera**: distance, orbit speed, handheld shake, telephoto limit, glide time between shots, aircraft size and lens framing. There are also buttons to adjust the live shot: around, up, down, in or out.
-- **Cockpit camera**: how much the head moves, and the pilot's eye point.
-- **Look**: letterbox bars (1.85:1, 2:1 or 2.39:1 scope) and shot titles.
+- **Sliders:**
+  - **Camera distance**
+  - **Camera shake**
+  - **Shot transition:** the glide between related shots, 0 for a hard cut
+  - **Cockpit head movement**
+  - **Aircraft size:** a correction for the aircraft you're flying, remembered for it
 
-Settings, assignments and size corrections save automatically to `Cinematic_Views.ini` next to the script.
+Everything saves automatically to `Cinematic_Views.ini` next to the script.
 
 ## Shots
 
@@ -45,7 +52,7 @@ Settings, assignments and size corrections save automatically to `Cinematic_View
 | Crane sweep | A slow, eased crane move around the aircraft along one of three paths, then back again. |
 | Tail, wing, nose, top and gear cams | Fixed to the airframe, rolling and pitching with it, with a little vibration from speed and runway roughness. The gear cam is for the ground and low flying. |
 
-Exterior shots fit the aircraft. The script reads its span and length from X-Plane, checks them against its weight, and works out whether they're in metres or feet. If X-Plane doesn't provide usable dimensions, it estimates the size from the weight instead. Distances use the larger of span and length. Mounted cameras use each separately: the wing cam sits off the wingtip, and the tail, nose, top and gear cams follow the fuselage. The window shows what the script is using. If an aircraft looks off, adjust **Aircraft size**; the correction is remembered for that aircraft.
+Exterior shots fit the aircraft. The script reads its span and length from X-Plane, checks them against its weight, and works out whether they're in metres or feet. If X-Plane doesn't provide usable dimensions, it estimates the size from the weight instead. Distances use the larger of span and length. Mounted cameras use each separately: the wing cam sits off the wingtip, and the tail, nose, top and gear cams follow the fuselage. If the cameras sit too close or too far on an aircraft, adjust **Aircraft size**. The correction is remembered for that aircraft.
 
 ### Cockpit
 
@@ -59,9 +66,28 @@ Exterior shots fit the aircraft. The script reads its span and length from X-Pla
 
 Cockpit shots look around rather than move around, so they can't clip through the aircraft. The head never moves more than 8 cm sideways, 5 cm up, 4 cm down, 8 cm forward or 6 cm back from the seat. That keeps the view inside the cockpit, clear of the panel, the seat and the walls.
 
-Inside that space there's a little natural motion: a lean into a glance, a nudge from G-forces, turbulence and a firm touchdown, and some runway rumble. **Head movement** sets how much, and at 0 the head doesn't move from the seat at all.
+Inside that space there's a little natural motion: a lean into a glance, a nudge from G-forces, turbulence and a firm touchdown, and some runway rumble. **Cockpit head movement** sets how much, and at 0 the head doesn't move from the seat at all.
 
-The eye point is your head position when filming starts in the cockpit, so start from your normal seat view. **Use my current head position as the pilot's eye** resets it. When you stop, your head goes back exactly where it was.
+The eye point is your head position when filming starts in the cockpit, so start from your normal seat view. When you stop, your head goes back exactly where it was.
+
+## Random shots
+
+**Random** (or your assigned key or button) makes a new view every time. It's a fresh mix of:
+
+- where the camera is: high or low, any side, close or far
+- how it moves: holding still, orbiting, pushing in, craning up or down, sliding sideways or sweeping
+- what it looks at: the centre, the cockpit, the nose, the tail or a wingtip
+- the lens: wide to telephoto
+- the camera style: tripod, handheld or drone-smooth
+
+Some random views are passes, where you fly or roll past a fixed camera on the ground or in the air. Some are cameras mounted rigidly just off the airframe. In the cockpit, a random view is a slow look from one spot to another. The window shows each one's name, such as "Low rear-left orbit, telephoto" or "Ground pass, long lens".
+
+Random views are drawn from ranges that frame the aircraft well, so they look deliberate, not chaotic. Like every shot, they can't clip through the aircraft:
+
+- Exterior cameras are kept outside a box around the airframe and above the ground.
+- Cockpit views stay in the safe space around the seat.
+
+If you like a random view, press **Save**. It joins **Next / Previous** after the built-in shots and is kept between sessions. **Next** from a random view carries on through the list from the last listed shot you watched.
 
 ## Zoom
 
@@ -77,11 +103,13 @@ You can also bind commands in X-Plane's **Settings → Keyboard** or **Joystick*
 | --- | --- |
 | `toggle` | Camera on (with your last shot) or off |
 | `stop` | Stop and return to your view |
-| `next_shot`, `previous_shot` | Next or previous view; with the camera off they start it with your last shot |
+| `next_shot`, `previous_shot` | Next or previous view, including your saved shots; with the camera off they start it with your last shot |
+| `random_view`, `random_exterior`, `random_cockpit` | A new random view (exterior or cockpit, or either) |
+| `save_shot` | Save the random view on screen |
 | `shot_<name>` | A specific shot: `chase`, `orbit`, `flyby`, `spotter`, `a2a`, `sweep`, `tail`, `wing`, `nose`, `top`, `gear`, `pilot`, `panel`, `side`, `cpan`, `fo` |
 | `orbit_left`, `orbit_right`, `camera_up`, `camera_down`, `zoom_in`, `zoom_out` | Adjust the live shot while held |
 | `reset_adjustments` | Undo those adjustments for the current shot |
-| `toggle_letterbox`, `toggle_window` | Toggles |
+| `toggle_window` | Show or hide the window |
 
 ## Tips
 
@@ -96,7 +124,7 @@ Exterior shots use the SDK's `XPLMControlCamera` through LuaJIT's FFI. The camer
 
 Cockpit shots write the `sim/graphics/view/pilots_head_*` datarefs, clamped to the safe space around the seat.
 
-Keys, the mouse wheel and joystick buttons use FlyWithLua's own key and wheel hooks and X-Plane's joystick button values. The script only holds back a key or the wheel when it uses them. X-Plane's zoom commands are taken over only during exterior shots. The letterbox uses FlyWithLua's built-in drawing.
+Keys, the mouse wheel and joystick buttons use FlyWithLua's own key and wheel hooks and X-Plane's joystick button values. The script only holds back a key or the wheel when it uses them. X-Plane's zoom commands are taken over only during exterior shots. The script draws nothing on screen.
 
 When you stop, or reload scripts, the script releases the camera and the zoom commands and puts your head back. If FlyWithLua stops running the script for any reason, it releases them on its own.
 
@@ -107,9 +135,10 @@ If something isn't working, look for lines starting with `Cinematic Views:` in X
 `test/run_tests.sh` runs the script under LuaJIT against a small C stand-in for X-Plane's SDK (`test/mock_xplm.c`). Keys and the wheel are delivered the way FlyWithLua 2.8 delivers them. The tests fly simulated taxi, takeoff, cruise, approach and landing segments and check a range of behaviour:
 
 - Every exterior shot keeps the aircraft in frame and above ground, and the mounted cameras stay rigid.
-- Cockpit shots never leave the safe space around the seat, through takeoff rolls, turbulence and firm landings.
+- Hundreds of random shots, across many random seeds, keep their target in frame, stay outside the aircraft and above the ground. Saved shots survive the settings file.
+- Cockpit shots, listed and random, never leave the safe space around the seat, through takeoff rolls, turbulence and firm landings.
 - Key and joystick assignments work, + and − and the mouse wheel do the right thing inside, outside and when not filming, and zoom is remembered per shot.
 - Cameras fit both an airliner and a glider, view changes hand the camera over correctly, and your head is restored.
-- Pause, replay, the window and saved settings work.
+- Pause, replay, the window and saved settings work, and nothing is drawn over the picture.
 
 The tests need `cc` and `luajit`. Because they run against a mock, they check the script's logic but not X-Plane's own behaviour, so try changes in the sim too.

@@ -269,11 +269,24 @@ local function cam_body()
 end
 
 local function finite(v) return v == v and v > -1e12 and v < 1e12 end
+
+-- X-Plane local axes to the aircraft's body axes (x right, y up, z aft).
+local function world_to_body(wx, wy, wz, psi, the, phi)
+  local p, t, r = math.rad(psi), math.rad(the), math.rad(phi)
+  local x1, z1 = wx * math.cos(p) + wz * math.sin(p), -wx * math.sin(p) + wz * math.cos(p)
+  local y2, z2 = wy * math.cos(t) + z1 * math.sin(t), -wy * math.sin(t) + z1 * math.cos(t)
+  return x1 * math.cos(r) - y2 * math.sin(r), x1 * math.sin(r) + y2 * math.cos(r), z2
+end
 local function in_cockpit() return get("sim/graphics/view/view_type") == 1026 and get("sim/graphics/view/view_is_external") == 0 end
 
 -- ---------------------------------------------------------------------------
 section("loading")
 publish()
+if os.getenv("SEED") then
+  -- Reproduce a run: the script seeds its random numbers from os.time().
+  local seed, real_time = tonumber(os.getenv("SEED")), os.time
+  os.time = function(...) if select("#", ...) == 0 then return seed end return real_time(...) end
+end
 dofile(SCRIPT)
 check(type(CinematicViews) == "table", "script did not create CinematicViews")
 check(#hooks.frame == 1 and #hooks.draw == 1 and #hooks.exit == 1, "frame/draw/exit hooks registered")
@@ -723,51 +736,209 @@ end)
 check(math.abs(A.gs - 150) < 10, ("ground speed from replay motion %.1f"):format(A.gs))
 set("sim/time/is_in_replay", 0)
 
-section("letterbox and titles (FlyWithLua's own drawing)")
-CinematicViews.shot("orbit")
-step(2)
-drawn.rects, drawn.strings = 0, {}
-step(60)
-check(drawn.rects > 0, "letterbox bars drawn while active")
-check(#drawn.strings > 0 and drawn.strings[1] == "Orbit", "shot title drawn")
-CinematicViews.stop()
-step(120)
-drawn.rects = 0
-step(5)
-check(drawn.rects == 0, "letterbox gone after stop")
+section("nothing is ever drawn over the picture")
+check(drawn.rects == 0 and #drawn.strings == 0, ("no bars or text drawn (%d, %d)"):format(drawn.rects, #drawn.strings))
 
 -- ---------------------------------------------------------------------------
-section("one window with everything in it")
+section("a small window with the basics")
+CinematicViews.stop()
+step(3)
 CinematicViews.toggle_window()
 labels = build()
-local want = { "Start camera", "< Previous", "Next >", "EXTERIOR SHOTS", "COCKPIT SHOTS", "CONTROLS", "Camera on/off",
-               "Next view", "Previous view", "EXTERIOR CAMERA", "Distance", "Aircraft size", "COCKPIT CAMERA",
-               "Head movement", "LOOK", "Letterbox bars" }
+local want = { "Camera OFF", "< Previous", "Next >", "Random", "Save", "Camera on/off", "Next view", "Previous view",
+               "New random view", "Camera distance", "Camera shake", "Shot transition", "Cockpit head movement",
+               "Aircraft size" }
 for _, w in ipairs(want) do
   local found = false
   for _, l in ipairs(labels) do if l:find(w, 1, true) then found = true end end
   check(found, "window shows " .. w)
 end
+local gone = { "Letterbox", "EXTERIOR SHOTS", "Orbit speed", "Telephoto", "Wing cam", "Use my current head" }
+for _, w in ipairs(gone) do
+  local found = false
+  for _, l in ipairs(labels) do if l:find(w, 1, true) then found = true end end
+  check(not found, "window no longer has " .. w)
+end
+check(#labels < 40, "window kept small (" .. #labels .. " items)")
 check(ui.depth == 0, "style colours balanced")
-build("Start camera")
+build("Camera OFF")
 step(3)
-check(cine.active, "Start camera button works")
+check(cine.active, "Camera OFF button starts it")
 build("Camera ON")
 step(3)
-check(not cine.active, "and stops it")
-build("Wing cam")
-step(3)
-check(cine.active and cine.def.id == "wing", "shot buttons work")
-ui.set = { "Handheld shake", 0.8 }
+check(not cine.active, "Camera ON button stops it")
+ui.set = { "Camera shake", 0.8 }
 build()
 check(S.shake == 0.8, "sliders change settings")
-CinematicViews.stop()
-step(3)
 CinematicViews.toggle_window()
 f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
 ini = f and f:read("*a") or ""
 if f then f:close() end
 check(ini:find("shake = 0.8", 1, true) ~= nil, "settings saved")
+check(not ini:find("letterbox", 1, true), "no letterbox setting any more")
+
+-- ---------------------------------------------------------------------------
+section("random exterior shots: endless, framed, never inside the aircraft or the ground")
+local RT = CinematicViews._random()
+plane.u = 1500
+steer(150, 0, 0, 0, false)
+local kinds = { orbit = 0, pass = 0, mount = 0 }
+local frames, out, inside, under, bad, names = 0, 0, 0, 0, 0, {}
+local scenes = {
+  function() plane.u = 2.5 steer(40, 90, 0, 0, true) end,
+  function() plane.u = 1500 steer(150, 30, 0, 20, false) end,
+  function() plane.u = 200 steer(70, 270, -3.5, 0, false) end,
+}
+local by_kind = {}
+for n = 1, 240 do
+  if n % 80 == 1 then
+    scenes[math.floor(n / 80) + 1]()        -- a new scene: give the cameras time to settle on it
+    CinematicViews.shot("chase")
+    step(240)
+  end
+  local r = RT.exterior()
+  kinds[r.anchor] = kinds[r.anchor] + 1
+  names[RT.describe(r)] = true
+  RT.start(r)
+  step(2)
+  step(150, function()
+    if not cam then bad = bad + 1 return end
+    for _, k in ipairs({ "x", "y", "z", "pit", "hdg", "rol", "zoom" }) do if not finite(cam[k]) then bad = bad + 1 return end end
+    if cine.blend < 1 then return end
+    frames = frames + 1
+    -- the target point is in the picture
+    local tx, ty, tz = RT.look_point(r)
+    if r.anchor == "pass" then tx, ty, tz = plane.e - origin.e, plane.u, plane.s - origin.s end
+    local ax, ay, az = tx - cam.x, ty - cam.y, tz - cam.z
+    local d = math.sqrt(ax * ax + ay * ay + az * az)
+    local hh, pp = math.rad(cam.hdg), math.rad(cam.pit)
+    local c = (ax * math.sin(hh) * math.cos(pp) + ay * math.sin(pp) - az * math.cos(hh) * math.cos(pp)) / d
+    local half = math.deg(math.atan(math.tan(math.rad(37.5)) / cam.zoom))
+    local key = r.anchor .. "/" .. r.look
+    by_kind[key] = by_kind[key] or { 0, 0 }
+    by_kind[key][1] = by_kind[key][1] + 1
+    if math.deg(math.acos(math.max(-1, math.min(1, c)))) > half then
+      out = out + 1
+      by_kind[key][2] = by_kind[key][2] + 1
+    end
+    -- outside the box around the airframe, in the aircraft's own axes
+    local lx, by, lz = world_to_body(cam.x - (plane.e - origin.e), cam.y - plane.u, cam.z - (plane.s - origin.s),
+                                     plane.psi, plane.the, plane.phi)
+    if math.abs(lx) < A.Rs * 0.95 and math.abs(by) < A.Rl * 0.3 and math.abs(lz) < A.Rl * 0.95 then
+      inside = inside + 1
+      by_kind[key][3] = (by_kind[key][3] or 0) + 1
+      if os.getenv("DEBUG_INSIDE") and not r._reported then
+        r._reported = true
+        print(("   inside: %s  body(%.1f, %.1f, %.1f)  Rs %.1f Rl %.1f  plane y %.1f psi %.0f phi %.0f  %s"):format(
+          RT.describe(r), lx, by, lz, A.Rs, A.Rl, plane.u, plane.psi, plane.phi, RT.serialize(r)))
+      end
+    end
+    if cam.y < 0.3 then under = under + 1 end
+  end)
+end
+local distinct = 0
+for _ in pairs(names) do distinct = distinct + 1 end
+check(kinds.orbit > 80 and kinds.pass > 20 and kinds.mount > 15,
+      ("all kinds generated (orbit %d, pass %d, mount %d)"):format(kinds.orbit, kinds.pass, kinds.mount))
+check(distinct > 60, distinct .. " different shot names from 240 random shots")
+check(bad == 0, "random shots: camera missing or non-finite on " .. bad .. " frames")
+check(out <= frames * 0.03, ("random shots: target out of frame on %d/%d frames"):format(out, frames))
+if os.getenv("VERBOSE") or out > frames * 0.03 or inside > 0 then
+  for k, v in pairs(by_kind) do print(("   %-16s out %5d / %5d   inside %d"):format(k, v[2], v[1], v[3] or 0)) end
+end
+check(inside == 0, "random shots: camera inside the aircraft on " .. inside .. " frames")
+check(under == 0, "random shots: camera underground on " .. under .. " frames")
+
+section("cameras are kept out of the aircraft even when pushed in")
+plane.u = 1500
+steer(150, 0, 0, 0, false)
+S.distance = 0.5
+CinematicViews.shot("chase")
+step(240)
+RT.start(RT.parse("kind=ext,anchor=orbit,motion=hold,az0=90,az1=90,el0=0,el1=0,d0=1.5,d1=1.5,z0=1,z1=1,look=centre"))
+step(240)
+local bx = cam.x - (plane.e - origin.e)
+check(math.abs(bx) >= A.Rs * 1.1, ("camera pushed out beside the wingtip (%.1f m, half span %.1f)"):format(math.abs(bx), A.Rs))
+S.distance = 1
+
+section("random cockpit shots look around inside the safe space")
+CinematicViews.stop()
+step(6)
+plane.u = 2.5
+steer(30, 90, 0, 0, true)
+local worst_c, turned_c = 0, 0
+for n = 1, 40 do
+  local r = RT.cockpit()
+  RT.start(r)
+  step(2)
+  step(120, function()
+    local hd = head()
+    local dx, dy, dz = hd[1] - EYE[1], hd[2] - EYE[2], hd[3] - EYE[3]
+    if math.abs(dx) > 0.0801 or dy > 0.0501 or dy < -0.0401 or dz < -0.0801 or dz > 0.0601 then worst_c = worst_c + 1 end
+    turned_c = math.max(turned_c, math.abs(((hd[4] - EYE[4] + 180) % 360) - 180))
+  end)
+end
+check(worst_c == 0, "random cockpit shots left the safe space on " .. worst_c .. " frames")
+check(turned_c > 60, ("random cockpit shots look around (%.0f deg)"):format(turned_c))
+check(in_cockpit(), "in the cockpit")
+
+section("recipes save and load exactly")
+local r = RT.exterior()
+local back = RT.parse(RT.serialize(r))
+local same_r = true
+for k, v in pairs(r) do
+  if type(v) == "number" then
+    if math.abs(v - back[k]) > math.max(1e-3, math.abs(v) * 1e-3) then same_r = false end
+  elseif v ~= back[k] then same_r = false end
+end
+check(same_r, "a recipe survives the settings file")
+check(RT.parse("kind=ext,anchor=orbit,d0=-50,az0=nonsense,zz=1").d0 == 1.5, "bad values are clamped")
+check(RT.parse("garbage") == nil, "garbage is ignored")
+
+section("Random, Save, and saved shots in Next / Previous")
+plane.u = 1500
+steer(150, 0, 0, 0, false)
+CinematicViews.shot("orbit")
+step(3)
+CinematicViews.random_shot("ext")
+step(3)
+check(cine.def.id:sub(1, 3) == "rnd", "Random makes a random shot (" .. cine.def.name .. ")")
+CinematicViews.next_shot()
+step(3)
+check(cine.def.id == "flyby", "Next from a random shot carries on the list after Orbit (" .. cine.def.id .. ")")
+CinematicViews.random_shot("ext")
+step(3)
+local rname = cine.def.name
+CinematicViews.toggle_window()
+build("Save")
+step(3)
+check(#RT.MY == 1, "Save keeps the random shot")
+CinematicViews.toggle_window()
+f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
+ini = f and f:read("*a") or ""
+if f then f:close() end
+check(ini:find("myshot = ", 1, true) ~= nil, "saved shot written to the settings file")
+CinematicViews.shot("fo")
+step(3)
+CinematicViews.next_shot()
+step(3)
+check(cine.def.id == RT.MY[1].id and cine.def.name == rname, "saved shot joins Next / Previous after the last listed shot")
+CinematicViews.toggle_window()
+build("Delete")
+step(3)
+CinematicViews.toggle_window()
+check(#RT.MY == 0, "Delete removes it")
+CinematicViews.toggle_window()
+build("Assign##random")
+tap(0x52, "r")
+check(BIND.random and BIND.random.vk == 0x52, "a key assigned to New random view")
+CinematicViews.toggle_window()
+local before_id = cine.def.id
+tap(0x52, "r")
+step(3)
+check(cine.def.id ~= before_id and cine.def.id:sub(1, 3) == "rnd", "the key makes a new random view")
+CinematicViews.stop()
+step(3)
 
 -- ---------------------------------------------------------------------------
 section("no errors logged")

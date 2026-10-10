@@ -1,5 +1,5 @@
 -- =============================================================================
---  Cinematic Views for X-Plane 12                                        v3.0.0
+--  Cinematic Views for X-Plane 12                                        v3.1.0
 --  A FlyWithLua NG+ script: an automatic cinematic camera for screenshots
 --  and videos, outside and inside the aircraft.
 --
@@ -11,12 +11,16 @@
 --    first officer. They look around rather than move around: the head stays
 --    within a few centimetres of the seat, so the view never leaves the
 --    cockpit or clips through the aircraft.
+--  * Endless random shots: each one a new mix of camera position, movement,
+--    target, lens and camera style, kept to ranges that frame the aircraft
+--    well. Save the ones you like and they join Next / Previous.
 --  * Cameras fit the aircraft: they read its span and length (or estimate
 --    them from its weight), and remember a size correction per aircraft.
 --  * Zoom: + and - (and the mouse wheel) zoom the exterior camera; in the
 --    cockpit, and when you are not filming, they are X-Plane's own as usual.
---  * One settings window with everything in it, including a key or joystick
---    button of your choice for camera on/off, next view and previous view.
+--  * A small window: camera on/off, previous/next, random, save, your own key
+--    or joystick button for each, and a few sliders. Nothing is ever drawn
+--    over the picture.
 --
 --  Install: copy this file to  X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
 --  Use:     Plugins > FlyWithLua > FlyWithLua Macros > Cinematic Views ...
@@ -25,7 +29,7 @@
 --  file in Cinematic_Views.ini.
 -- =============================================================================
 
-local VERSION = "3.0.0"
+local VERSION = "3.1.0"
 local TAG = "Cinematic Views: "
 
 local function log(msg)
@@ -216,14 +220,11 @@ local DEFAULTS = {
   normalize_lens = true,  -- frame exterior shots as if the sim FOV were 60 degrees
   head_motion = 0.5,      -- how much the head moves in cockpit shots, 0..1
   cockpit_in_cycle = true,-- Next/Previous include the cockpit shots
-  letterbox = true,
-  aspect = 2.39,
-  titles = true,
 }
 
 local RANGES = {
   blend_time = { 0, 5 }, distance = { 0.5, 3 }, orbit_speed = { 1, 20 }, shake = { 0, 1 },
-  max_zoom = { 2, 15 }, head_motion = { 0, 1 }, aspect = { 1.6, 2.8 },
+  max_zoom = { 2, 15 }, head_motion = { 0, 1 },
 }
 
 local S = {}
@@ -238,6 +239,11 @@ local SIZE = { key = "default", scales = {} }
 -- Your key or joystick button for each action: { kind = "key", vk, shift,
 -- ctrl, alt } or { kind = "joy", n }.
 local BIND = {}
+local ACTION_IDS = { "toggle", "next", "prev", "random" }
+
+-- Your saved shots ({ id, recipe }), and the saved recipes read from the file.
+local MY, MY_RAW = {}, {}
+local serialize_recipe          -- defined with the random shots
 
 local function parse_binding(v)
   local vk, sh, ct, al = v:match("^key:(%d+):(%d):(%d):(%d)$")
@@ -263,6 +269,8 @@ local function load_settings()
     if acf and n then SIZE.scales[acf] = math.max(0.4, math.min(2.5, n)) end
     local action, bv = line:match("^%s*bind%.(%a+)%s*=%s*(.-)%s*$")
     if action then BIND[action] = parse_binding(bv) end
+    local my = line:match("^%s*myshot%s*=%s*(.-)%s*$")
+    if my then MY_RAW[#MY_RAW + 1] = my end
     local k, v = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
     local d = k and DEFAULTS[k]
     if type(d) == "boolean" then
@@ -287,9 +295,10 @@ local function save_settings()
   for k in pairs(DEFAULTS) do keys[#keys + 1] = k end
   table.sort(keys)
   for _, k in ipairs(keys) do f:write(k, " = ", tostring(S[k]), "\n") end
-  for _, a in ipairs({ "toggle", "next", "prev" }) do
+  for _, a in ipairs(ACTION_IDS) do
     if BIND[a] then f:write("bind.", a, " = ", format_binding(BIND[a]), "\n") end
   end
+  for _, m in ipairs(MY) do f:write("myshot = ", serialize_recipe(m.recipe), "\n") end
   local acfs = {}
   for k, v in pairs(SIZE.scales) do if math.abs(v - 1) > 1e-3 then acfs[#acfs + 1] = k end end
   table.sort(acfs)
@@ -948,6 +957,268 @@ shot {
   end,
 }
 
+-- Random shots -----------------------------------------------------------------
+-- Endless variety: each random shot is a recipe drawn from ranges that frame
+-- the aircraft well - where the camera is and how it moves, what it looks at,
+-- the lens and the camera style. Exterior cameras are kept outside a box
+-- around the airframe (keep_outside, below) and cockpit ones in the safe
+-- space around the seat, so none of them can clip through the aircraft.
+
+local RS = {}
+do
+
+local LOOK_POINTS = {   -- body axes: x in half spans, y and z in half lengths
+  centre = { 0, 0, 0 }, cockpit = { 0, 0.08, -0.75 }, nose = { 0, 0.02, -0.95 },
+  tail = { 0, 0.25, 0.9 }, wing = { 0.85, 0, 0.1 },
+}
+
+local function look_point(r)
+  local p = LOOK_POINTS[r.look] or LOOK_POINTS.centre
+  local wx, wy, wz = body_to_world(p[1] * A.Rs * (r.lside or 1), p[2] * A.Rl, p[3] * A.Rl, A.psi, A.the, A.phi)
+  return A.x + wx, A.y + wy, A.z + wz
+end
+
+local function pingpong(t, period)
+  local u = (t / max(period, 4)) % 2
+  if u > 1 then u = 2 - u end
+  return smoother(u)
+end
+
+local function pick(list)   -- { { value, weight }, ... }
+  local total = 0
+  for _, e in ipairs(list) do total = total + e[2] end
+  local x, acc = random() * total, 0
+  for _, e in ipairs(list) do
+    acc = acc + e[2]
+    if x <= acc then return e[1] end
+  end
+  return list[#list][1]
+end
+
+local SIDE_WORDS = { "front", "front-right", "right", "rear-right", "rear", "rear-left", "left", "front-left" }
+local MOTION_WORDS = { hold = "hold", orbit = "orbit", dolly = "push-in", crane = "crane", slide = "slide", sweep = "sweep" }
+
+local function side_word(az) return SIDE_WORDS[math.floor(((az % 360) + 22.5) / 45) % 8 + 1] end
+
+local function height_word(el)
+  if el < 6 then return "Low" elseif el < 25 then return "Level" elseif el < 45 then return "High" end
+  return "Overhead"
+end
+
+local function cockpit_word(h, p)
+  if p < -14 then return "panel" end
+  if h < -60 then return "left window" elseif h < -20 then return "left" elseif h <= 20 then return "ahead"
+  elseif h <= 60 then return "right" end
+  return "right window"
+end
+
+local function describe(r)
+  if r.kind == "int" then
+    return ("Cockpit: %s to %s"):format(cockpit_word(r.h0, r.p0), cockpit_word(r.h1, r.p1))
+  end
+  local target = (r.look ~= "centre") and (", on the " .. r.look) or ""
+  if r.anchor == "pass" then
+    return (r.ground == 1 and "Ground" or "Air") .. " pass" .. (r.frac < 0.33 and ", long lens" or "")
+  elseif r.anchor == "mount" then
+    local az, el = deg(atan2(r.mx, -r.mz)), deg(math.asin(clamp(r.my, -1, 1)))
+    return ("Mounted %s %s"):format(height_word(el):lower(), side_word(az)) .. target
+  end
+  local lens = (r.z0 >= 1.8) and ", telephoto" or (r.z0 < 1) and ", wide" or ""
+  return ("%s %s %s"):format(height_word(r.el0), side_word(r.az0), MOTION_WORDS[r.motion]) .. lens .. target
+end
+
+-- Keep every number of a recipe in its range (recipes also come from the
+-- settings file).
+local function sanitize(r)
+  local function num(k, lo, hi, default)
+    r[k] = clamp(tonumber(r[k]) or default, lo, hi)
+  end
+  if r.kind == "int" then
+    num("h0", -120, 120, 0) num("h1", -120, 120, 30)
+    num("p0", -35, 20, -5) num("p1", -35, 20, -5)
+    num("period", 6, 60, 18) num("lean", 0, 1, 0.5)
+    return r
+  end
+  r.kind = "ext"
+  if r.anchor ~= "pass" and r.anchor ~= "mount" then r.anchor = "orbit" end
+  if not LOOK_POINTS[r.look] then r.look = "centre" end
+  r.lside = (tonumber(r.lside) or 1) < 0 and -1 or 1
+  num("z0", 0.7, 4, 1) num("z1", 0.7, 4, r.z0)
+  num("shake", 0, 1, 0.3) num("aim", 2, 10, 5) num("bank", 0, 1, 0)
+  num("period", 6, 60, 20)
+  if r.anchor == "orbit" then
+    num("az0", -720, 720, 150) num("az1", -720, 720, r.az0)
+    num("el0", -6, 75, 8) num("el1", -6, 75, r.el0)
+    num("d0", 1.5, 14, 3) num("d1", 1.5, 14, r.d0)
+    if not MOTION_WORDS[r.motion] then r.motion = "hold" end
+  elseif r.anchor == "pass" then
+    num("lead", 2, 12, 6) num("lat", 1.3, 8, 2) num("vert", -0.5, 2, 0.2) num("frac", 0.2, 0.6, 0.4)
+    r.ground = (tonumber(r.ground) == 1) and 1 or 0
+  else
+    num("mx", -1, 1, 0) num("my", 0.05, 1, 0.5) num("mz", -1, 1, 0.8) num("gap", 0.03, 0.8, 0.2)
+    local n = sqrt(r.mx * r.mx + r.my * r.my + r.mz * r.mz)
+    if n < 1e-3 then r.mx, r.my, r.mz, n = 0, 0.5, 0.8, sqrt(0.89) end
+    r.mx, r.my, r.mz = r.mx / n, r.my / n, r.mz / n
+  end
+  return r
+end
+
+serialize_recipe = function(r)
+  local keys = {}
+  for k in pairs(r) do keys[#keys + 1] = k end
+  table.sort(keys)
+  local parts = {}
+  for _, k in ipairs(keys) do
+    local v = r[k]
+    parts[#parts + 1] = k .. "=" .. (type(v) == "number" and ("%.4g"):format(v) or tostring(v))
+  end
+  return table.concat(parts, ",")
+end
+
+local function parse_recipe(text)
+  local r = {}
+  for k, v in text:gmatch("([%w_]+)=([^,]*)") do r[k] = tonumber(v) or v end
+  if r.kind ~= "ext" and r.kind ~= "int" then return nil end
+  return sanitize(r)
+end
+
+-- A new random exterior shot.
+local function random_exterior()
+  local r = { kind = "ext", look = "centre", lside = sign_rnd() }
+  r.anchor = pick({ { "orbit", 58 }, { "pass", 24 }, { "mount", 18 } })
+  if r.anchor == "orbit" then
+    local motion = pick({ { "hold", 2 }, { "orbit", 3 }, { "dolly", 2 }, { "crane", 2 }, { "slide", 2 }, { "sweep", 2 } })
+    local band = pick({ { "low", 7 }, { "high", 2 }, { "top", 1 } })
+    local az = rnd(0, 360)
+    local el = (band == "low") and rnd(-3, 18) or (band == "high") and rnd(18, 40) or rnd(40, 65)
+    local tele = random() < 0.3
+    local d = tele and rnd(4.5, 8) or rnd(1.7, 3.8)
+    local z = tele and rnd(1.8, 3.2) or rnd(0.85, 1.3)
+    r.az0, r.az1, r.el0, r.el1, r.d0, r.d1, r.z0, r.z1 = az, az, el, el, d, d, z, z
+    local s = sign_rnd()
+    if motion == "orbit" then
+      r.az1 = az + s * rnd(40, 120)
+    elseif motion == "dolly" then
+      r.d1 = d * rnd(0.55, 0.8)
+    elseif motion == "crane" then
+      r.el1 = clamp(el + s * rnd(15, 35), -3, 70)
+    elseif motion == "slide" then
+      r.az1, r.d1 = az + s * rnd(15, 35), d * rnd(0.9, 1.1)
+    elseif motion == "sweep" then
+      r.az1, r.el1, r.d1 = az + s * rnd(60, 140), clamp(el + rnd(-10, 25), -3, 70), d * rnd(0.7, 1.3)
+    else
+      r.z1 = z * rnd(1.0, 1.4)                              -- a hold, perhaps with a slow push on the lens
+    end
+    r.motion, r.period = motion, rnd(14, 30)
+    r.look = pick({ { "centre", 6 }, { "cockpit", 2 }, { "nose", 1 }, { "tail", 1 }, { "wing", 1 } })
+    local style = pick({ { "tripod", 3 }, { "handheld", 3 }, { "drone", 4 } })
+    r.shake = (style == "tripod") and rnd(0, 0.08) or (style == "handheld") and rnd(0.5, 1) or rnd(0.12, 0.3)
+    r.bank = (random() < 0.5) and 0 or rnd(0.2, 0.7)
+    r.aim = rnd(3.5, 7)
+  elseif r.anchor == "pass" then
+    r.ground = (random() < 0.35) and 1 or 0
+    r.lead, r.lat, r.vert = rnd(3.5, 9), rnd(1.3, 6), rnd(-0.3, 1.5)
+    r.frac, r.shake, r.aim = rnd(0.25, 0.55), rnd(0.3, 1), rnd(4.5, 7)
+  else
+    -- at or above the wings, so a mount never ends up under the aircraft on the ground
+    local az, el = rad(rnd(0, 360)), rad(rnd(5, 55))
+    r.mx, r.my, r.mz = sin(az) * cos(el), sin(el), -cos(az) * cos(el)
+    r.gap = rnd(0.05, 0.4)
+    r.look = pick({ { "centre", 5 }, { "cockpit", 2 }, { "tail", 1 }, { "wing", 1 } })
+    r.z0 = rnd(0.85, 1.1)
+  end
+  return sanitize(r)
+end
+
+-- A new random cockpit shot: a slow look from one place to another.
+local function random_cockpit()
+  local h0 = rnd(-100, 100)
+  local r = { kind = "int", h0 = h0, h1 = clamp(h0 + sign_rnd() * rnd(25, 80), -110, 110),
+              p0 = rnd(-28, 8), period = rnd(12, 26), lean = rnd(0.3, 1) }
+  r.p1 = clamp(r.p0 + rnd(-12, 12), -30, 12)
+  return sanitize(r)
+end
+
+local function random_orbit(r, st, o, dt)
+  st.h, st.hv = spring_angle(st.h, st.hv, track_or_heading(), 1.4, 1, dt)
+  local s = pingpong(st.t, r.period)
+  local az, el = rad(lerp(r.az0, r.az1, s)), rad(lerp(r.el0, r.el1, s))
+  local D = lerp(r.d0, r.d1, s) * A.R * S.distance
+  local ce = cos(el)
+  local ox, oy, oz = heading_to_world(D * ce * sin(az), D * sin(el), -D * ce * cos(az), st.h)
+  o.x, o.y, o.z = A.x + ox, A.y + oy, A.z + oz
+  o.tx, o.ty, o.tz = look_point(r)
+  o.rol, o.zoom = r.bank * A.phi, lerp(r.z0, r.z1, s)
+end
+
+-- Rigid mount just outside the box around the airframe, along a direction.
+local function random_mount(r, o)
+  local ex, ey, ez = A.Rs, 0.45 * A.Rl, A.Rl
+  local t = min(ex / max(abs(r.mx), 1e-3), ey / max(abs(r.my), 1e-3), ez / max(abs(r.mz), 1e-3))
+  t = t + r.gap * A.R
+  local bx, by, bz = r.mx * t, r.my * t, r.mz * t
+  local wx, wy, wz = body_to_world(bx, by, bz, A.psi, A.the, A.phi)
+  o.x, o.y, o.z = A.x + wx, A.y + wy, A.z + wz
+  local p = LOOK_POINTS[r.look] or LOOK_POINTS.centre
+  local dx, dy, dz = body_to_world(p[1] * A.Rs * r.lside - bx, p[2] * A.Rl - by, p[3] * A.Rl - bz, A.psi, A.the, A.phi)
+  local ux, uy, uz = body_to_world(0, 1, 0, A.psi, A.the, A.phi)
+  o.hdg, o.pit, o.rol = orient(dx, dy, dz, ux, uy, uz)
+  o.tx, o.ty, o.tz = o.x + dx, o.y + dy, o.z + dz      -- re-aims if the ground lifts the camera
+  o.zoom = r.z0
+end
+
+-- A shot from a recipe.
+local function make_def(r, id, name)
+  local def = { id = id, kind = r.kind, recipe = r, name = name or describe(r) }
+  if r.kind == "int" then
+    def.init = function() end
+    def.head = function(st, o)
+      local s = pingpong(st.t, r.period)
+      local h, p = lerp(r.h0, r.h1, s), lerp(r.p0, r.p1, s)
+      at_seat(o)
+      local m = S.head_motion
+      o.x = B[1] + sin(rad(h)) * r.lean * 0.04 * m
+      o.z = B[3] - max(0, -p / 25) * 0.03 * m
+      o.psi, o.the = B[4] + h, B[5] + p
+    end
+  elseif r.anchor == "pass" then
+    def.shake, def.aim = r.shake, r.aim
+    def.init = function(st)
+      plan_pass(st, r.lead, r.lat, r.lat * 1.25, r.ground == 1, r.vert)
+      st.max_zoom = (r.ground == 1) and S.max_zoom or min(S.max_zoom, 4)
+    end
+    def.place = function(st, o, dt) fixed_place(st, o, dt, r.frac, 2 / r.aim) end
+    def.done = pass_done
+  elseif r.anchor == "mount" then
+    def.rel, def.vib = true, 0.8
+    def.init = function() end
+    def.place = function(st, o) random_mount(r, o) end
+  else
+    def.rel, def.shake, def.aim = true, r.shake, r.aim
+    def.init = function(st) st.h, st.hv = track_or_heading(), 0 end
+    def.place = function(st, o, dt) random_orbit(r, st, o, dt) end
+  end
+  return def
+end
+
+-- Your saved shots.
+local my_count = 0
+local function add_my(r)
+  my_count = my_count + 1
+  local id = "my" .. my_count
+  SHOTS[id] = make_def(r, id)
+  MY[#MY + 1] = { id = id, recipe = r }
+  return id
+end
+for _, text in ipairs(MY_RAW) do
+  local r = parse_recipe(text)
+  if r then add_my(r) end
+end
+
+RS.look_point, RS.describe, RS.parse = look_point, describe, parse_recipe
+RS.exterior, RS.cockpit, RS.make_def, RS.add_my = random_exterior, random_cockpit, make_def, add_my
+end
+
 -- -----------------------------------------------------------------------------
 -- Session state
 -- -----------------------------------------------------------------------------
@@ -962,8 +1233,7 @@ local cine = {
   waiting = nil, wait = 0,              -- "ext" / "int" while a view change is under way
   origin_internal = true,               -- you started in the cockpit
   head_moved = false, last_head = nil, restore_frames = 0,
-  last_id = "chase",
-  title = "", title_t = 0,
+  last_id = "chase", last_listed = "chase",
   message = nil,
 }
 
@@ -1004,6 +1274,21 @@ local function filming_outside() return cine.active and cine.ext_on end
 
 local work_a, work_b = {}, {}
 
+-- Keep a camera outside a box around the airframe (half span across, half
+-- length fore and aft, with a margin). One that strays in is pushed out
+-- sideways or fore and aft - never down, where the ground would push it
+-- back up - so it can never pass through the aircraft.
+local function keep_outside(o)
+  local bx, by, bz = world_to_body(o.x - A.x, o.y - A.y, o.z - A.z, A.psi, A.the, A.phi)
+  local ex, ey, ez = A.Rs * 1.1 + 1, A.Rl * 0.45 + 1, A.Rl * 1.1 + 1
+  if abs(bx) < ex and abs(by) < ey and abs(bz) < ez then
+    if abs(bx) + abs(bz) < 1e-3 then bx = 1e-3 end
+    local k = min(ex / max(abs(bx), 1e-6), ez / max(abs(bz), 1e-6))
+    local wx, wy, wz = body_to_world(bx * k, by, bz * k, A.psi, A.the, A.phi)
+    o.x, o.y, o.z = A.x + wx, A.y + wy, A.z + wz
+  end
+end
+
 local function run_shot(def, st, o, dt)
   o.tx, o.hdg, o.pit, o.rol, o.zoom = nil, 0, 0, 0, 1
   def.place(st, o, dt)
@@ -1013,6 +1298,7 @@ local function run_shot(def, st, o, dt)
     o.x, o.y, o.z = A.x + ox, A.y + oy + nudge.up * A.R, A.z + oz
   end
 
+  if not def.vib then keep_outside(o) end
   local margin = def.ground_margin or 1.2
   local gy = terrain_y(o.x, o.y, o.z)
   if gy and o.y < gy + margin then o.y = gy + margin end
@@ -1323,8 +1609,8 @@ local function begin_shot(id, how)
   end
 
   cine.def, cine.st, cine.last_id = def, st, id
+  if id:sub(1, 3) ~= "rnd" then cine.last_listed = id end
   use_adjustments(id)
-  cine.title, cine.title_t = def.name, 4
   if def.kind == "int" and geti(REF.view_type) == VIEW_3D_COCKPIT then
     -- Already in the cockpit: place the head now, so the cut has no stray frame.
     cine.waiting = nil
@@ -1391,7 +1677,7 @@ local queue = {}
 local function request(fn) queue[#queue + 1] = fn end
 
 local function act_shot(id)
-  if not SHOTS[id] then return end
+  if not SHOTS[id] then id = "chase" end
   if not cine.active and not start_session() then return end
   begin_shot(id, "manual")
 end
@@ -1400,16 +1686,72 @@ local function in_cycle(def)
   return shot_available(def) and (def.kind == "ext" or S.cockpit_in_cycle)
 end
 
+-- The random shot on screen (each new one replaces the last; Save keeps it).
+local random_n, last_random = 0, nil
+
+local function remember_random(r)
+  random_n = random_n + 1
+  local id = "rnd" .. random_n
+  SHOTS[id] = RS.make_def(r, id)
+  if last_random then
+    SHOTS[last_random], adjustments[last_random] = nil, nil
+  end
+  last_random = id
+  return id
+end
+
+local function cockpit_ok() return (HAS_HEAD and CMD.cockpit and not vr_on()) and true or false end
+
+local function act_random(kind)
+  if not kind then
+    kind = (cockpit_ok() and S.cockpit_in_cycle and random() < 0.25) and "int" or "ext"
+  end
+  if kind == "int" and not cockpit_ok() then return end
+  act_shot(remember_random(kind == "int" and RS.cockpit() or RS.exterior()))
+end
+
+local function cycle_ids()
+  local ids = {}
+  for _, id in ipairs(SHOT_ORDER) do ids[#ids + 1] = id end
+  for _, m in ipairs(MY) do ids[#ids + 1] = m.id end
+  return ids
+end
+
 local function act_step(step)
   if not cine.active then return act_shot(cine.last_id) end   -- off: start with your last shot
-  local cur, n = cine.def and cine.def.id, #SHOT_ORDER
+  local ids = cycle_ids()
+  local cur, n = cine.def and cine.def.id, #ids
+  if cur and cur:sub(1, 3) == "rnd" then cur = cine.last_listed end   -- from a random shot: carry on the list
   local idx = (step > 0) and 0 or 1
-  for i, id in ipairs(SHOT_ORDER) do if id == cur then idx = i end end
+  for i, id in ipairs(ids) do if id == cur then idx = i end end
   for _ = 1, n do
     idx = (idx - 1 + step) % n + 1
-    if in_cycle(SHOTS[SHOT_ORDER[idx]]) then break end
+    if in_cycle(SHOTS[ids[idx]]) then break end
   end
-  act_shot(SHOT_ORDER[idx])
+  act_shot(ids[idx])
+end
+
+local function act_save()
+  local def = cine.active and cine.def
+  if not (def and def.recipe) or def.id:sub(1, 2) == "my" or def.saved_as then return end
+  local r = {}
+  for k, v in pairs(def.recipe) do r[k] = v end
+  local id = RS.add_my(r)
+  def.saved_as = id
+  adjustments[id] = { yaw = nudge.yaw, up = nudge.up, zoom = nudge.zoom }
+  settings_dirty = true
+end
+
+local function act_delete(id)
+  for i, m in ipairs(MY) do
+    if m.id == id then
+      table.remove(MY, i)
+      if SHOTS[id] then SHOTS[id].deleted = true end
+      if not (cine.def and cine.def.id == id) then SHOTS[id] = nil end
+      settings_dirty = true
+      return
+    end
+  end
 end
 
 local function act_toggle()
@@ -1423,7 +1765,9 @@ M.stop = function() request(function() stop_session(true) end) end
 M.next_shot = function() request(function() act_step(1) end) end
 M.previous_shot = function() request(function() act_step(-1) end) end
 M.shot = function(id) request(function() act_shot(id) end) end
-M.toggle_letterbox = function() S.letterbox = not S.letterbox settings_dirty = true end
+M.random_shot = function(kind) request(function() act_random(kind) end) end
+M.save_shot = function() request(act_save) end
+M.delete_shot = function(id) request(function() act_delete(id) end) end
 
 -- Zoom: the exterior camera's own; in the cockpit, X-Plane's.
 local function native_zoom(dir)
@@ -1446,6 +1790,7 @@ local ACTIONS = {
   { id = "toggle", name = "Camera on/off", run = M.toggle },
   { id = "next", name = "Next view", run = M.next_shot },
   { id = "prev", name = "Previous view", run = M.previous_shot },
+  { id = "random", name = "New random view", run = function() M.random_shot() end },
 }
 
 -- -----------------------------------------------------------------------------
@@ -1623,8 +1968,6 @@ end
 -- Per-frame work
 -- -----------------------------------------------------------------------------
 
-local LB = { amount = 0 }
-
 local function tick()
   local t, dt = sim_dt(clock.last)
   clock.last, clock.dt = t, dt
@@ -1693,13 +2036,6 @@ local function tick()
     if B and in_cockpit then write_head(B[1], B[2], B[3], B[4], B[5], B[6]) end
   end
 
-  if cine.title_t > 0 then cine.title_t = cine.title_t - dt end
-  local want = (cine.active and S.letterbox and not vr_on()) and 1 or 0
-  if LB.amount < want then
-    LB.amount = min(want, LB.amount + dt / 0.8)
-  elseif LB.amount > want then
-    LB.amount = max(want, LB.amount - dt / 0.8)
-  end
 end
 
 local function on_frame()
@@ -1709,58 +2045,30 @@ local function on_frame()
   end
 end
 
--- -----------------------------------------------------------------------------
--- Drawing: letterbox and shot title (FlyWithLua's own drawing functions)
--- -----------------------------------------------------------------------------
-
+-- Nothing is drawn over the picture: the draw callback only keeps the
+-- script running while the sim is paused, when flight loops may not run.
 local function on_draw()
-  -- Also the heartbeat while paused, when flight loops may not run.
   if frame.ticked ~= frame.id then
     frame.ticked = frame.id
     local ok, err = pcall(tick)
     if not ok then log("error: " .. tostring(err)) end
   end
   frame.id = frame.id + 1
-
-  local W, H = SCREEN_WIDTH, SCREEN_HIGHT
-  if not (W and H) then return end
-  local bar = 0
-  if LB.amount > 0.001 and glRectf and glColor4f then
-    bar = max(0, (H - W / S.aspect) / 2) * smoother(LB.amount)
-    if bar >= 1 then
-      XPLMSetGraphicsState(0, 0, 0, 1, 1, 0, 0)
-      glColor4f(0, 0, 0, 1)
-      glRectf(0, 0, W, bar)
-      glRectf(0, H - bar, W, H)
-    end
-  end
-  if S.titles and cine.active and cine.title_t > 0 and draw_string then
-    local y = (bar > 24) and (bar / 2 - 4) or 30
-    draw_string(30, y, cine.title, "white")
-  end
 end
 
 -- -----------------------------------------------------------------------------
--- The window: everything in one place
+-- The window: kept small
 -- -----------------------------------------------------------------------------
 
 local wnd = nil
 
-local COL_ACTIVE = 0xFFD08A2A    -- imgui colours are 0xAABBGGRR
-local COL_ON = 0xFF3C9A3C
-local COL_MUTED = 0xFF9A9A9A
-local COL_HEAD = 0xFFE0C080
+local COL_ON = 0xFF3C9A3C        -- imgui colours are 0xAABBGGRR
+local COL_HINT = 0xFF9A9A9A
+local COL_ASK = 0xFFE0C080
 
-local function heading(text)
-  imgui.Separator()
-  imgui.PushStyleColor(imgui.constant.Col.Text, COL_HEAD)
-  imgui.TextUnformatted(text)
-  imgui.PopStyleColor()
-end
-
-local function muted(text)
-  imgui.PushStyleColor(imgui.constant.Col.Text, COL_MUTED)
-  imgui.TextUnformatted(text)
+local function text(colour, s)
+  imgui.PushStyleColor(imgui.constant.Col.Text, colour)
+  imgui.TextUnformatted(s)
   imgui.PopStyleColor()
 end
 
@@ -1770,65 +2078,39 @@ local function slider(label, key, lo, hi, fmt)
   return changed
 end
 
-local function checkbox(label, key)
-  local changed, v = imgui.Checkbox(label, S[key])
-  if changed then S[key], settings_dirty = v, true end
-  return changed
-end
-
-local function shot_buttons(kind)
-  local col = 0
-  for _, id in ipairs(SHOT_ORDER) do
-    local def = SHOTS[id]
-    if def.kind == kind then
-      if col % 4 > 0 then imgui.SameLine() end
-      local current = cine.active and cine.def == def
-      local usable = shot_available(def)
-      if current then imgui.PushStyleColor(imgui.constant.Col.Button, COL_ACTIVE) end
-      if not usable then imgui.PushStyleColor(imgui.constant.Col.Text, COL_MUTED) end
-      if imgui.Button(def.name .. "##" .. id, 118, 26) then M.shot(id) end
-      if not usable then imgui.PopStyleColor() end
-      if current then imgui.PopStyleColor() end
-      col = col + 1
-    end
-  end
-end
-
 local function build_window()
-  -- Camera on/off and the current shot
-  local on = cine.active
+  local on, def = cine.active, cine.active and cine.def
   if on then imgui.PushStyleColor(imgui.constant.Col.Button, COL_ON) end
-  if imgui.Button(on and "Camera ON  (click to stop)" or "Start camera", 230, 32) then M.toggle() end
+  if imgui.Button(on and "Camera ON" or "Camera OFF", 110, 30) then M.toggle() end
   if on then imgui.PopStyleColor() end
   imgui.SameLine()
-  if imgui.Button("< Previous", 110, 32) then M.previous_shot() end
+  if imgui.Button("< Previous", 95, 30) then M.previous_shot() end
   imgui.SameLine()
-  if imgui.Button("Next >", 110, 32) then M.next_shot() end
-  if on and cine.def then
-    local z = cine.def.kind == "ext" and ("zoom %.1fx"):format(nudge.zoom) or "zoom: X-Plane's own"
-    imgui.TextUnformatted(("Now: %s   |   %s"):format(cine.def.name, z))
+  if imgui.Button("Next >", 95, 30) then M.next_shot() end
+  imgui.SameLine()
+  if imgui.Button("Random", 80, 30) then M.random_shot() end
+  imgui.SameLine()
+  local saved_shot = def and def.id:sub(1, 2) == "my" and not def.deleted
+  local can_save = def and def.recipe and not def.saved_as and def.id:sub(1, 3) == "rnd"
+  if imgui.Button(saved_shot and "Delete" or (def and def.saved_as) and "Saved" or "Save", 70, 30) then
+    if saved_shot then M.delete_shot(def.id) elseif can_save then M.save_shot() end
+  end
+  if def then
+    imgui.TextUnformatted(def.kind == "ext" and ("%s   (zoom %.1fx)"):format(def.name, nudge.zoom) or def.name)
   else
-    muted(cine.message or ("Starts with: " .. SHOTS[cine.last_id].name))
+    text(COL_HINT, cine.message or "Camera off")
   end
 
-  heading("EXTERIOR SHOTS")
-  shot_buttons("ext")
-  heading("COCKPIT SHOTS")
-  shot_buttons("int")
-  checkbox("Include cockpit shots in Next / Previous", "cockpit_in_cycle")
-
-  heading("CONTROLS")
+  imgui.Separator()
   for _, a in ipairs(ACTIONS) do
     imgui.TextUnformatted(a.name)
-    imgui.SameLine(130)
+    imgui.SameLine(140)
     if capture.action == a.id then
-      imgui.PushStyleColor(imgui.constant.Col.Text, COL_HEAD)
-      imgui.TextUnformatted("Press a key or joystick button...")
-      imgui.PopStyleColor()
+      text(COL_ASK, "Press a key or joystick button...")
     else
       imgui.TextUnformatted(binding_label(BIND[a.id]))
     end
-    imgui.SameLine(380)
+    imgui.SameLine(370)
     if imgui.Button((capture.action == a.id and "Cancel##" or "Assign##") .. a.id, 70, 22) then
       if capture.action == a.id then capture.action = nil else start_capture(a.id) end
     end
@@ -1837,70 +2119,18 @@ local function build_window()
       BIND[a.id], settings_dirty = nil, true
     end
   end
-  if capture.msg then muted(capture.msg) end
-  muted("Assigned keys only control the camera. Pick joystick buttons that X-Plane doesn't use.")
-  muted("Zoom: + and - or the mouse wheel. In the cockpit they're X-Plane's own zoom.")
+  if capture.msg then text(COL_HINT, capture.msg) end
 
-  heading("EXTERIOR CAMERA")
-  slider("Distance", "distance", 0.5, 3, "%.2fx")
-  slider("Orbit speed (deg/s)", "orbit_speed", 1, 20, "%.0f")
-  slider("Handheld shake", "shake", 0, 1, "%.2f")
-  slider("Telephoto limit", "max_zoom", 2, 15, "%.0fx")
-  slider("Glide between shots (s, 0 = cut)", "blend_time", 0, 5, "%.1f")
+  imgui.Separator()
+  slider("Camera distance", "distance", 0.5, 3, "%.2fx")
+  slider("Camera shake", "shake", 0, 1, "%.2f")
+  slider("Shot transition (s)", "blend_time", 0, 5, "%.1f")
+  slider("Cockpit head movement", "head_motion", 0, 1, "%.2f")
   local changed, v = imgui.SliderFloat("Aircraft size", SIZE.scales[SIZE.key] or 1, 0.4, 2.5, "%.2fx")
   if changed then
     SIZE.scales[SIZE.key], settings_dirty = v, true
     measure_aircraft()
   end
-  muted(("   %.0f m span x %.0f m long, %s - remembered for this aircraft"):format(2 * A.Rs, 2 * A.Rl,
-    A.size_source == "dimensions" and "from its dimensions" or "estimated from its weight"))
-  checkbox("Frame shots for a 60 deg lens whatever the sim FOV", "normalize_lens")
-  imgui.TextUnformatted("Adjust the live shot:")
-  if imgui.Button("Orbit <", 70, 24) then nudge.yaw = wrap180(nudge.yaw - 15) end
-  imgui.SameLine()
-  if imgui.Button("Orbit >", 70, 24) then nudge.yaw = wrap180(nudge.yaw + 15) end
-  imgui.SameLine()
-  if imgui.Button("Up", 44, 24) then nudge.up = clamp(nudge.up + 0.25, -2, 3) end
-  imgui.SameLine()
-  if imgui.Button("Down", 50, 24) then nudge.up = clamp(nudge.up - 0.25, -2, 3) end
-  imgui.SameLine()
-  if imgui.Button("Zoom +", 62, 24) then
-    if cine.def and cine.def.kind == "int" then native_zoom(1) else zoom_by(1.25) end
-  end
-  imgui.SameLine()
-  if imgui.Button("Zoom -", 62, 24) then
-    if cine.def and cine.def.kind == "int" then native_zoom(-1) else zoom_by(1 / 1.25) end
-  end
-  imgui.SameLine()
-  if imgui.Button("Reset", 56, 24) then reset_nudge() end
-
-  heading("COCKPIT CAMERA")
-  slider("Head movement", "head_motion", 0, 1, "%.2f")
-  muted("   The head stays within a few cm of your seat, so the view never leaves the cockpit.")
-  if imgui.Button("Use my current head position as the pilot's eye", 340, 24) then
-    request(function()
-      if geti(REF.view_type) == VIEW_3D_COCKPIT and not cine.active then capture_eye_point() end
-    end)
-  end
-  muted(B and ("   eye point x %.2f  y %.2f  z %.2f m"):format(B[1], B[2], B[3])
-          or "   taken from your seat when filming starts in the cockpit")
-
-  heading("LOOK")
-  checkbox("Letterbox bars", "letterbox")
-  imgui.SameLine()
-  checkbox("Shot titles", "titles")
-  for _, a in ipairs({ { 1.85, "1.85:1" }, { 2.0, "2:1" }, { 2.39, "2.39:1 scope" } }) do
-    local cur = abs(S.aspect - a[1]) < 0.01
-    if cur then imgui.PushStyleColor(imgui.constant.Col.Button, COL_ACTIVE) end
-    if imgui.Button(a[2], 100, 24) then S.aspect, settings_dirty = a[1], true end
-    if cur then imgui.PopStyleColor() end
-    imgui.SameLine()
-  end
-  imgui.TextUnformatted("")
-
-  imgui.Separator()
-  if vr_on() then muted("VR is on: cinematic views are paused.") end
-  muted("Cinematic Views " .. VERSION .. "  -  settings save automatically")
 end
 
 function cinematic_views_build_window(_, _, _)
@@ -1928,7 +2158,7 @@ M.toggle_window = function()
     log("the settings window needs FlyWithLua NG 2.7 or later; the commands still work.")
     return
   end
-  wnd = float_wnd_create(560, 780, 1, true)
+  wnd = float_wnd_create(560, 330, 1, true)
   float_wnd_set_title(wnd, "Cinematic Views")
   float_wnd_set_imgui_builder(wnd, "cinematic_views_build_window")
   float_wnd_set_onclose(wnd, "cinematic_views_window_closed")
@@ -1977,6 +2207,11 @@ measure_aircraft()
 -- For testing and for other scripts.
 M._state = function() return cine, A, S, BIND, function() return B end end
 M._shots = function() return SHOTS, SHOT_ORDER end
+M._random = function()
+  return { MY = MY, look_point = RS.look_point, serialize = serialize_recipe, parse = RS.parse,
+           exterior = RS.exterior, cockpit = RS.cockpit, describe = RS.describe,
+           start = function(r) request(function() act_shot(remember_random(r)) end) end }
+end
 
 CinematicViews = M
 
@@ -2003,9 +2238,12 @@ command("toggle", "camera on/off (starts with the last shot)", "CinematicViews.t
 command("stop", "stop and return to your view", "CinematicViews.stop()")
 command("next_shot", "next view", "CinematicViews.next_shot()")
 command("previous_shot", "previous view", "CinematicViews.previous_shot()")
-command("toggle_letterbox", "letterbox bars on/off", "CinematicViews.toggle_letterbox()")
 command("toggle_window", "settings window", "CinematicViews.toggle_window()")
 command("reset_adjustments", "reset orbit, height and zoom adjustments", "CinematicViews.reset_nudge()")
+command("random_view", "new random view", "CinematicViews.random_shot()")
+command("random_exterior", "new random exterior view", "CinematicViews.random_shot('ext')")
+command("random_cockpit", "new random cockpit view", "CinematicViews.random_shot('int')")
+command("save_shot", "save the current random shot to your shots", "CinematicViews.save_shot()")
 hold_command("orbit_left", "move the camera around the aircraft to the left (hold)", "CinematicViews.nudge('yaw', -1)")
 hold_command("orbit_right", "move the camera around the aircraft to the right (hold)", "CinematicViews.nudge('yaw', 1)")
 hold_command("camera_up", "raise the camera (hold)", "CinematicViews.nudge('up', 1)")
@@ -2019,6 +2257,7 @@ end
 if add_macro then
   add_macro("Cinematic Views: camera on/off", "CinematicViews.toggle()")
   add_macro("Cinematic Views: next view", "CinematicViews.next_shot()")
+  add_macro("Cinematic Views: new random view", "CinematicViews.random_shot()")
   add_macro("Cinematic Views: settings window", "CinematicViews.toggle_window()")
 end
 
