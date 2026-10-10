@@ -8,6 +8,10 @@ A web app for logging and reviewing flights, built with Next.js, Supabase, and d
 - [Supabase](https://supabase.com) for auth and data storage
 - [Vercel](https://vercel.com) for hosting, deployed from this GitHub repo
 
+## X-Plane cinematic camera
+
+The [`flywithlua/`](./flywithlua) folder contains a FlyWithLua script for X-Plane 12 that adds a cinematic camera mode. It is separate from the web app; see [`flywithlua/README.md`](./flywithlua/README.md).
+
 ## Getting started
 
 1. Install dependencies:
