@@ -5,7 +5,7 @@ A [FlyWithLua NG+](https://github.com/X-Friese/FlyWithLua) script for screenshot
 - **Outside:** a wide shot of the whole aircraft, or a close-up of one part of it.
 - **Inside:** a pilot's head looking around the cockpit, as a real pilot would.
 
-It films where you are. Start it in the cockpit and you get the 6 cockpit shots; start it from an outside view and you get the 13 exterior shots. **Next** steps through the shots of that kind, and shots change with a fade through black or a straight cut. Apart from the fade, nothing is ever drawn over the picture.
+It films where you are. Start it in the cockpit and you get the 6 cockpit shots; start it from an outside view and you get the 13 exterior shots. **Next** steps through the shots of that kind. Or set a **time per view**: the views then move on by themselves, switching between outside and the cockpit. Shots change with a fade through black or a straight cut. Apart from the fade, nothing is ever drawn over the picture.
 
 Everything is in one file, [`Cinematic_Views.lua`](./Cinematic_Views.lua).
 
@@ -35,6 +35,7 @@ The window is small and holds the basics:
   - **Camera distance**
   - **Camera shake**
   - **Shot transition:** how shots change. Above 0 it's a fade through black that long (half fading out, half fading in), and the shot changes while the picture is black. At 0 shots cut straight from one to the next. Turning the camera on and off uses it too.
+  - **Time per view:** how long each view lasts before the camera moves on by itself, from 5 to 60 seconds. With it set, the views switch between outside and the cockpit (see below). Slide it to the left end to turn it off, and each view then stays until you press **Next**.
   - **Head movement speed:** how quickly the pilot's head moves in cockpit shots (see below)
   - **Aircraft size:** a correction for the aircraft you're flying, remembered for it
 
@@ -48,6 +49,18 @@ The script films where you are when you turn it on:
 - **In an outside view** (chase, circle, tower or any other): exterior shots only. **Next** goes round the exterior shots.
 
 Each starts with the last shot you watched there. To switch, turn the camera off, change the view yourself, and turn it on again. Changing the view while filming also stops the camera, so X-Plane's view keys always get you out.
+
+### Time per view
+
+With **Time per view** set, the camera moves on by itself and switches between outside and the cockpit: two exterior shots, then a cockpit shot, then two more exterior shots, and so on.
+
+- It starts where you are: in the cockpit with a cockpit shot, outside with an exterior shot.
+- Each kind carries on in order from the last one you watched.
+- The view changes exactly on time. With a fade, the fade out starts early so the change lands on time, and it happens while the picture is black.
+- A view always lasts at least the fade plus 2 seconds.
+- **Next** moves on through the same mix straight away, and the new view gets its full time.
+- When you stop, you go back to where you started, inside or outside.
+- With the time per view off, everything works as described above.
 
 ### Exterior
 
@@ -124,7 +137,7 @@ You can also bind commands in X-Plane's **Settings → Keyboard** or **Joystick*
 | --- | --- |
 | `toggle` | Camera on or off. It starts with cockpit shots in the cockpit and exterior shots outside, with the last one you watched there |
 | `stop` | Stop and return to your view |
-| `next_shot` | Next view of the same kind; with the camera off it starts it, like `toggle` |
+| `next_shot` | Next view: of the same kind, or with a time per view set, the next in the mix of exterior and cockpit shots. With the camera off it starts it, like `toggle` |
 | `shot_<name>` | A specific shot, switching between the cockpit and outside if needed: `wide_rear`, `wide_front`, `wide_side`, `wide_high`, `wide_low`, `close_cockpit`, `close_nose`, `close_engine`, `close_wing`, `close_wingtip`, `close_tail`, `close_gear`, `close_nosegear`, `scan`, `panel`, `overhead`, `throttle`, `window`, `autopilot` |
 | `orbit_left`, `orbit_right`, `camera_up`, `camera_down`, `zoom_in`, `zoom_out` | Adjust the live shot while held |
 | `reset_adjustments` | Undo those adjustments for the current shot |
@@ -158,6 +171,7 @@ If something isn't working, look for lines starting with `Cinematic Views:` in X
 - Turned on in the cockpit, the camera only uses cockpit shots, and outside only exterior shots, with **Next** going round them. It also works when X-Plane gives the cockpit view a different number.
 - Key and joystick assignments work, including the window's own key, and + and − and the mouse wheel do the right thing inside, outside and when not filming. Zoom glides with no jumps from frame to frame, and it's remembered per shot.
 - Fades last as long as the setting, half out and half in, with the shot changing while the picture is black. At 0 shots cut. Several presses during one fade all count, and changing the view yourself mid-fade clears it at once.
+- With a time per view set, the view changes exactly on time, with or without a fade (while the picture is black), switching between the cockpit and outside in the right pattern. Every view is in the right place, Next keeps the mix going, and stopping takes you back to where you started. The slider snaps to off or whole seconds.
 - The head movement speed changes how often and how fast the head moves, and the head stays smooth and in the safe space at every setting.
 - Shots fit both an airliner and a glider, view changes hand the camera over correctly, and your head is restored.
 - Pause, replay, the window and saved settings work, and nothing but a fade is drawn over the picture.

@@ -1,5 +1,5 @@
 -- =============================================================================
---  Cinematic Views for X-Plane 12                                        v4.2.0
+--  Cinematic Views for X-Plane 12                                        v4.3.0
 --  A FlyWithLua NG+ script: an automatic cinematic camera for screenshots
 --  and videos, outside and inside the aircraft.
 --
@@ -19,10 +19,12 @@
 --    like X-Plane's own zoom; in the cockpit, and when you are not filming,
 --    they are X-Plane's own as usual.
 --  * Shots change with a fade through black, as long as you like, or a cut.
+--  * Time per view: set it and the views move on by themselves, switching
+--    between outside and the cockpit; off, they stay until you press Next.
 --  * A small window: camera on/off, next view, your own key or joystick
 --    button for each and for the window itself, and a few sliders: camera
---    distance, camera shake, shot transition, head movement speed and
---    aircraft size.
+--    distance, camera shake, shot transition, time per view, head movement
+--    speed and aircraft size.
 --
 --  Install: copy this file to  X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
 --  Use:     Plugins > FlyWithLua > FlyWithLua Macros > Cinematic Views
@@ -31,7 +33,7 @@
 --  file in Cinematic_Views.ini.
 -- =============================================================================
 
-local VERSION = "4.2.0"
+local VERSION = "4.3.0"
 local TAG = "Cinematic Views: "
 
 local function log(msg)
@@ -218,6 +220,7 @@ local function cockpit_view() return geti(REF.external) == 0 end
 
 local DEFAULTS = {
   blend_time = 2.0,       -- shot transition: a fade through black this long (0 = straight cut)
+  shot_time = 0,          -- time per view in seconds: move on by itself (0 = stay until Next)
   distance = 1.0,         -- exterior camera distance multiplier
   orbit_speed = 5,        -- degrees per second
   shake = 0.5,            -- handheld camera shake, 0..1
@@ -227,7 +230,7 @@ local DEFAULTS = {
 }
 
 local RANGES = {
-  blend_time = { 0, 5 }, distance = { 0.5, 3 }, orbit_speed = { 1, 20 }, shake = { 0, 1 },
+  blend_time = { 0, 5 }, shot_time = { 0, 60 }, distance = { 0.5, 3 }, orbit_speed = { 1, 20 }, shake = { 0, 1 },
   max_zoom = { 2, 15 }, head_motion = { 0, 1 },
 }
 
@@ -937,7 +940,9 @@ local cine = {
   waiting = nil, wait = 0,              -- "ext" / "int" while a view change is under way
   origin_internal = true,               -- you started in the cockpit
   head_moved = false, restore_frames = 0,
-  last = { ext = "wide_rear", int = "scan" },   -- the last shot you watched, outside and inside
+  last = {},                            -- the last shot you watched, outside ("ext") and inside ("int")
+  run_kind = nil, run_n = 0,            -- how many shots of one kind in a row
+  timer = nil,                          -- seconds on this view, for the time per view
   message = nil,
 }
 
@@ -1245,6 +1250,8 @@ local function begin_shot(id)
 
   cine.def, cine.st = def, st
   cine.last[def.kind] = id
+  if cine.run_kind == def.kind then cine.run_n = cine.run_n + 1 else cine.run_kind, cine.run_n = def.kind, 1 end
+  cine.timer = 0
   use_adjustments(id)
   zoom_snap()
   if def.kind == "int" and cockpit_view() then
@@ -1291,7 +1298,7 @@ local function stop_session(restore_view)
   release_camera()
   hook_zoom(false)
   cine.def, cine.st = nil, nil
-  cine.waiting = nil
+  cine.waiting, cine.timer, cine.run_kind, cine.run_n = nil, nil, nil, 0
   if B and cine.head_moved then
     -- Put the head back now (X-Plane keeps it for when you return to the
     -- cockpit) and for a few frames in case the view change resets it.
@@ -1360,12 +1367,28 @@ local function act_start()
   if id then act_shot(id) end
 end
 
--- Next: through the shots of the kind you are filming.
+-- The shot after the last one you watched of a kind (the first, if none).
+local function next_of(kind)
+  local ids, idx = shots_of(kind), 0
+  for i, id in ipairs(ids) do if id == cine.last[kind] then idx = i end end
+  return next_from(ids, idx)
+end
+
+-- With a time per view set, views move on by themselves and switch between
+-- outside and the cockpit: two exterior shots, then a cockpit shot, and so on.
+local RUN = { ext = 2, int = 1 }
+local function timed() return S.shot_time > 0 end
+
+-- Next: through the shots of the kind you are filming, or with a time per
+-- view set, on through the mix of exterior and cockpit shots.
 local function act_next()
   if not (cine.active and cine.def) then return act_start() end   -- off: start with your last shot
-  local ids, idx = shots_of(cine.def.kind), 1
-  for i, id in ipairs(ids) do if id == cine.def.id then idx = i end end
-  local id = next_from(ids, idx)
+  local kind = cine.def.kind
+  if timed() and cine.run_n >= RUN[kind] then
+    local other = (kind == "ext") and "int" or "ext"
+    if (other == "int" and cockpit_ok()) or (other == "ext" and CMD.external) then kind = other end
+  end
+  local id = next_of(kind)              -- the shot on screen is the last of its kind
   if id then act_shot(id) end
 end
 
@@ -1422,6 +1445,21 @@ end
 
 -- Starting where filming isn't possible (VR, say) just says why, with no fade.
 local function can_start() return not vr_on() and kind_here() ~= nil end
+
+-- Time per view: move on by itself, starting the fade out early so the view
+-- changes right on time. Never shorter than the fade plus two seconds.
+local function timer_tick(dt)
+  if not (cine.active and cine.def and cine.timer) then return end
+  if cine.waiting then return end
+  cine.timer = cine.timer + dt
+  if not timed() or #FADE.todo > 0 then return end
+  local period = max(S.shot_time, S.blend_time + 2)
+  local fade_out = (S.blend_time < 0.05) and 0 or S.blend_time / 2
+  if cine.timer >= period - fade_out then
+    cine.timer = nil
+    transition(act_next)
+  end
+end
 
 local M = {}
 M.version = VERSION
@@ -1660,6 +1698,7 @@ local function tick()
     stop_session(false)
     cancel_transition()
   end
+  timer_tick(dt)
   fade_tick(dt)
 
   local in_cockpit = HAS_HEAD and cockpit_view()
@@ -1788,6 +1827,12 @@ local function build_window()
   slider("Camera distance", "distance", 0.5, 3, "%.2fx")
   slider("Camera shake", "shake", 0, 1, "%.2f")
   slider("Shot transition", "blend_time", 0, 5, (S.blend_time < 0.05) and "cut" or "%.1f s fade")
+  local changed, v = imgui.SliderFloat("Time per view", S.shot_time, 0, 60,
+                                       timed() and "%.0f s, outside and cockpit" or "off: Next moves on")
+  if changed then
+    -- off below 2.5 s, else whole seconds from 5 s up
+    S.shot_time, settings_dirty = (v < 2.5) and 0 or max(5, math.floor(v + 0.5)), true
+  end
   slider("Head movement speed", "head_motion", 0, 1, "%.2f")
   local changed, v = imgui.SliderFloat("Aircraft size", SIZE.scales[SIZE.key] or 1, 0.4, 2.5, "%.2fx")
   if changed then
@@ -1821,7 +1866,7 @@ M.toggle_window = function()
     log("the settings window needs FlyWithLua NG 2.7 or later; the commands still work.")
     return
   end
-  wnd = float_wnd_create(520, 300, 1, true)
+  wnd = float_wnd_create(520, 325, 1, true)
   float_wnd_set_title(wnd, "Cinematic Views")
   float_wnd_set_imgui_builder(wnd, "cinematic_views_build_window")
   float_wnd_set_onclose(wnd, "cinematic_views_window_closed")

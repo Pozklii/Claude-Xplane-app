@@ -963,6 +963,147 @@ CinematicViews.stop()
 step(6)
 
 -- ---------------------------------------------------------------------------
+section("time per view: views move on by themselves, outside and in the cockpit")
+plane.u = 1500
+steer(150, 0, 0, 0, false)
+set("sim/flightmodel2/gear/deploy_ratio", 0)
+check(in_cockpit() and not cine.active, "starting in the cockpit, camera off")
+
+-- Run for a while, noting every change of view and checking each frame that
+-- exterior shots have the camera and cockpit shots are in the cockpit.
+local function film_for(seconds)
+  local rec = { seq = { { cine.def.id, cine.def.kind } }, at = {}, wrong = 0, stopped = 0, alpha_at = {} }
+  local cur, n = cine.def.id, 0
+  step(math.floor(60 * seconds), function()
+    n = n + 1
+    local a = drawn.alpha or 0
+    drawn.alpha = nil
+    if not (cine.active and cine.def) then rec.stopped = rec.stopped + 1 return end
+    if cine.def.id ~= cur then
+      cur = cine.def.id
+      rec.seq[#rec.seq + 1] = { cur, cine.def.kind }
+      rec.at[#rec.at + 1], rec.alpha_at[#rec.alpha_at + 1] = n, a
+    end
+    if not cine.waiting and FADE.alpha < 0.999 then
+      if cine.def.kind == "ext" and X.mock_camera_controlled() ~= 1 then rec.wrong = rec.wrong + 1 end
+      if cine.def.kind == "int" and (not in_cockpit() or X.mock_camera_controlled() ~= 0) then rec.wrong = rec.wrong + 1 end
+    end
+  end)
+  return rec
+end
+
+local function kinds(rec)
+  local k = {}
+  for _, e in ipairs(rec.seq) do k[#k + 1] = (e[2] == "ext") and "E" or "C" end
+  return table.concat(k)
+end
+
+S.blend_time, S.shot_time = 0, 10
+run_command("toggle")
+step(1)
+check(cine.active and cine.def.kind == "int", "starts where you are: in the cockpit")
+local rec = film_for(95)
+check(#rec.at == 9, ("a new view every 10 s (%d changes in 95 s)"):format(#rec.at))
+local even = true
+for i = 2, #rec.at do if math.abs(rec.at[i] - rec.at[i - 1] - 600) > 2 then even = false end end
+check(even, "exactly 10 s each")
+check(kinds(rec) == ("CEECEECEECE"):sub(1, #rec.seq), "switching between the cockpit and outside: " .. kinds(rec))
+check(rec.wrong == 0 and rec.stopped == 0, ("every view in the right place (%d wrong, %d stopped)"):format(rec.wrong, rec.stopped))
+check(rec.seq[1][1] ~= rec.seq[4][1] and rec.seq[2][1] ~= rec.seq[3][1], "and on to a different shot each time")
+local ext_seen, int_seen = {}, {}
+for _, e in ipairs(rec.seq) do if e[2] == "ext" then ext_seen[#ext_seen + 1] = e[1] else int_seen[#int_seen + 1] = e[1] end end
+-- each kind carries on in order from the last one you watched (gear close-ups
+-- left out with the gear up)
+local function in_order(seen, kind)
+  local list = {}
+  for _, id in ipairs(ORDER) do
+    if SHOTS[id].kind == kind and (not SHOTS[id].available or SHOTS[id].available()) then list[#list + 1] = id end
+  end
+  local pos = {}
+  for i, id in ipairs(list) do pos[id] = i end
+  for i = 2, #seen do
+    if pos[seen[i]] ~= pos[seen[i - 1]] % #list + 1 then return false end
+  end
+  return #seen >= 3
+end
+check(in_order(ext_seen, "ext"), "exterior shots in order (" .. table.concat(ext_seen, ", ") .. ")")
+check(in_order(int_seen, "int"), "cockpit shots in order (" .. table.concat(int_seen, ", ") .. ")")
+
+-- Next in this mode carries on the mix, and the next view gets its full time.
+step(60 * 3)
+local before = cine.def.id
+CinematicViews.next_shot()
+step(1)
+check(cine.def.id ~= before, "Next moves on")
+rec = film_for(10.5)
+check(#rec.at == 1 and math.abs(rec.at[1] - 599) <= 2, "and the view after it still gets its full 10 s")
+
+-- With a fade: the view still changes every 8 s, while the picture is black.
+S.blend_time, S.shot_time = 2, 8
+CinematicViews.next_shot()
+step(60 * 3)
+rec = film_for(41)
+local on_time, black = true, true
+for i = 2, #rec.at do if math.abs(rec.at[i] - rec.at[i - 1] - 480) > 3 then on_time = false end end
+for _, a in ipairs(rec.alpha_at) do if a < 0.999 then black = false end end
+check(#rec.at >= 4 and on_time, ("with a 2 s fade, still a new view every 8 s (%d changes)"):format(#rec.at))
+check(black, "each change happens while the picture is black")
+check(rec.wrong == 0 and rec.stopped == 0, "and every view in the right place")
+
+-- The view is never shorter than the fade plus two seconds.
+S.blend_time, S.shot_time = 5, 5
+CinematicViews.next_shot()
+step(60 * 4)
+rec = film_for(22)
+local short = false
+for i = 2, #rec.at do if rec.at[i] - rec.at[i - 1] < 60 * 7 - 3 then short = true end end
+check(#rec.at >= 2 and not short, "a view lasts at least the fade plus 2 s")
+
+-- Off: it stays on the view until Next.
+S.blend_time, S.shot_time = 0, 0
+rec = film_for(30)
+check(#rec.at == 0, "with the time per view off, the view stays")
+CinematicViews.next_shot()
+step(2)
+check(cine.def.kind == rec.seq[1][2], "and Next stays with the kind of view you're in")
+
+-- Stopping goes back to where you started (the cockpit here), even from outside.
+S.shot_time = 10
+while cine.def.kind ~= "ext" do CinematicViews.next_shot() step(2) end
+run_command("toggle")
+step(6)
+local hh = head()
+check(not cine.active and in_cockpit() and X.mock_camera_controlled() == 0, "stopping outside takes you back to the cockpit")
+check(math.abs(hh[4] - EYE[4]) < 1e-3 and math.abs(hh[3] - EYE[3]) < 1e-3, "with your head where it was")
+
+-- Started outside: it begins outside, and stopping in the cockpit takes you back out.
+X.mock_set_view(1017, 1)
+step(3)
+run_command("toggle")
+step(1)
+check(cine.active and cine.def.kind == "ext", "started outside, it begins with an exterior shot")
+rec = film_for(31)
+check(kinds(rec) == "EECE", "then the mix: " .. kinds(rec))
+check(rec.wrong == 0, "every view in the right place")
+run_command("toggle")
+step(6)
+check(not cine.active and get("sim/graphics/view/view_is_external") == 1 and X.mock_camera_controlled() == 0,
+      "stopping in the cockpit takes you back outside")
+X.mock_set_view(1026, 0)
+step(3)
+S.shot_time = 0
+set("sim/flightmodel2/gear/deploy_ratio", 1)
+
+-- The slider: off near 0, otherwise whole seconds from 5 up.
+for _, c in ipairs({ { 1, 0 }, { 3, 5 }, { 12.4, 12 }, { 60, 60 } }) do
+  ui.set = { "Time per view", c[1] }
+  build()
+  check(S.shot_time == c[2], ("time per view slider %g -> %g (%g)"):format(c[1], c[2], S.shot_time))
+end
+S.shot_time = 0
+for _, l in ipairs(logs) do check(not l:find("could not"), "log: " .. l) end
+
+-- ---------------------------------------------------------------------------
 section("paused: drawing alone keeps the camera alive and moving")
 plane.u = 1000
 steer(150, 0, 0, 0, false)
@@ -1011,8 +1152,8 @@ step(3)
 CinematicViews.toggle_window()
 labels = build()
 local want = { "Camera OFF", "Next >", "Camera on/off", "Next view",
-               "Open/close window", "Camera distance", "Camera shake", "Shot transition", "Head movement speed",
-               "Aircraft size" }
+               "Open/close window", "Camera distance", "Camera shake", "Shot transition", "Time per view",
+               "Head movement speed", "Aircraft size" }
 for _, w in ipairs(want) do
   local found = false
   for _, l in ipairs(labels) do if l:find(w, 1, true) then found = true end end
