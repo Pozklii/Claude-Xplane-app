@@ -10,19 +10,24 @@
 
     It can be switched on and off by hand, and it starts by itself after a
     while with no keyboard, mouse or joystick input (any input ends it again).
+    X-Plane's zoom keys (+ and -) zoom the cinematic camera.
 
     Install: copy this file to X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
 
-    Commands (Settings > Keyboard or Joystick, search for "cinematic"):
+    Everything is in one window: Plugins > FlyWithLua > FlyWithLua Macros >
+    Cinematic View. It starts and stops the cinematic, holds all the settings
+    and lets you set a key for each action. Settings and keys are saved next
+    to this script in cinematic_view.ini.
+
+    Each action is also an X-Plane command, for joystick buttons (Settings >
+    Joystick, search for "cinematic"):
         FlyWithLua/cinematic_view/toggle       start/stop
         FlyWithLua/cinematic_view/next_shot    cut to the next shot
         FlyWithLua/cinematic_view/toggle_afk   auto-start when away on/off
         FlyWithLua/cinematic_view/cycle_mode   mixed / outside / cockpit shots
-        FlyWithLua/cinematic_view/settings     show/hide the settings window
-
-    Menu: Plugins > FlyWithLua > FlyWithLua Macros > "Cinematic View: ..."
-
-    Settings are saved next to this script in cinematic_view.ini.
+        FlyWithLua/cinematic_view/zoom_in      zoom in (hold)
+        FlyWithLua/cinematic_view/zoom_out     zoom out (hold)
+        FlyWithLua/cinematic_view/settings     show/hide the window
 
     How it moves the camera: outside shots take control of X-Plane's camera
     through the plugin SDK (XPLMControlCamera, called through LuaJIT's FFI),
@@ -31,7 +36,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "1.0"
+local VERSION = "1.1"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -45,11 +50,19 @@ local DEFAULTS = {
     cockpit_share = 30,           -- % of shots in the cockpit in mixed mode
     shot_min = 7,                 -- shortest shot, seconds
     shot_max = 14,                -- longest shot, seconds
+    camera_speed = 1.0,           -- how fast cameras move, pan and orbit (0.25 to 2.5)
     letterbox = true,             -- cinema bars top and bottom
     fades = true,                 -- dip to black between some shots
-    caption = true,               -- shot name and flight info in the bars
     manual_exit_on_input = false, -- any input also ends a cinematic you started yourself
     joystick_deadband = 0.03,     -- how far an axis must move to count as input
+    -- keys, as "<virtual key> <modifiers> <name>" (modifiers: 1 shift, 2 ctrl, 4 alt); empty for none
+    bind_toggle = "",
+    bind_next_shot = "",
+    bind_toggle_afk = "",
+    bind_cycle_mode = "",
+    bind_zoom_in = "",
+    bind_zoom_out = "",
+    bind_settings = "",
 }
 
 local MODES = { "mixed", "outside", "cockpit" }
@@ -72,7 +85,11 @@ local function sanitize_settings()
     s.cockpit_share = math.max(0, math.min(100, math.floor(s.cockpit_share + 0.5)))
     s.shot_min = math.max(3, math.min(60, s.shot_min))
     s.shot_max = math.max(s.shot_min, math.min(90, s.shot_max))
+    s.camera_speed = math.max(0.25, math.min(2.5, s.camera_speed))
     s.joystick_deadband = math.max(0.001, math.min(0.5, s.joystick_deadband))
+    for k, v in pairs(s) do
+        if k:match("^bind_") and v ~= "" and not v:match("^%d+ %d+ .+$") then s[k] = "" end
+    end
 end
 
 local function load_settings()
@@ -250,7 +267,6 @@ do
         vy = "sim/flightmodel/position/local_vy",
         vz = "sim/flightmodel/position/local_vz",
         agl = "sim/flightmodel/position/y_agl",
-        elevation = "sim/flightmodel/position/elevation",
         paused = "sim/time/paused",
         frame_period = "sim/operation/misc/frame_rate_period",
         view_type = "sim/graphics/view/view_type",
@@ -321,7 +337,16 @@ local CV = {
     dirty = false, dirty_t = 0,
     errors = 0, disabled = false, logged = {},
     draw_last = nil,
+    tick_last = nil,
     size = 15,
+    user_zoom = 1,          -- zoom set with + and - during a cinematic
+    zoom_dir = 0,           -- +1 zooming in, -1 zooming out
+    zoom_vk = nil,          -- the + or - key being held
+    native_zoom = nil,      -- X-Plane zoom command held for a bound key or joystick button
+    keys_down = {},         -- bound keys held down (to ignore auto-repeat)
+    held = {},              -- hold actions (zoom) by the key that started them
+    capturing = nil,        -- action waiting for its new key in the settings window
+    ignore_buttons_until = 0, -- joystick buttons that just ran one of our commands aren't "input"
 }
 
 local function now()
@@ -463,7 +488,7 @@ local OUTSIDE_SHOTS = {
             -- sit on the flight path behind: lower in a climb, higher in a descent
             local drop = dist * M.clamp(c.vy / math.max(c.gs, 30), -0.25, 0.25)
             s.drop = s.drop + (drop - s.drop) * M.smooth(c.dt, 1.0)
-            local lat = s.side + sin(t * 0.35 + s.phase) * 0.1 * S
+            local lat = s.side + sin(t * 0.35 * s.speed + s.phase) * 0.1 * S
             local cx, cy, cz = yaw_point(c, s.hdg, lat, 0.22 * S + 2.5 - s.drop, dist)
             local tx, ty, tz = yaw_point(c, s.hdg, 0, 0.1 * S, -0.5 * S)
             aim(out, cx, cy, cz, tx, ty, tz, c.phi * 0.25, 1)
@@ -484,8 +509,9 @@ local OUTSIDE_SHOTS = {
             local zoom = M.clamp(s.dist / (2.4 * S + 20), 1.5, 5)
             aim(out, cx, cy, cz, c.x, c.y, c.z, 0, zoom)
             -- a hand-held long lens never sits perfectly still
-            out.heading = out.heading + sin(t * 1.7 + s.phase) * 0.12 + sin(t * 0.9) * 0.08
-            out.pitch = out.pitch + sin(t * 1.3 + s.phase * 2) * 0.08
+            local w = t * s.speed
+            out.heading = out.heading + sin(w * 1.7 + s.phase) * 0.12 + sin(w * 0.9) * 0.08
+            out.pitch = out.pitch + sin(w * 1.3 + s.phase * 2) * 0.08
         end,
     },
     {
@@ -499,7 +525,7 @@ local OUTSIDE_SHOTS = {
         update = function(s, c, t, out)
             local S = c.size
             s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.5))
-            local reach = S + 8
+            local reach = (S + 8) * s.speed
             local z = M.lerp(-reach, reach, M.ease(t / s.duration)) * s.dir
             local cx, cy, cz = yaw_point(c, s.hdg, s.side * (S + 8), s.height, z)
             local tx, ty, tz = yaw_point(c, s.hdg, 0, 0, -0.1 * S)
@@ -541,15 +567,15 @@ local OUTSIDE_SHOTS = {
         init = function(s, c)
             s.r = 1.5 * c.size + 14
             s.a0 = M.rand(0, 360)
-            s.speed = M.sign() * M.rand(6, 11)
+            s.rate = M.sign() * M.rand(6, 11) -- degrees a second
             s.height = M.rand(0.05, 0.35) * c.size + 2
             s.phase = M.rand(0, 6.28)
         end,
         update = function(s, c, t, out)
-            local a = rad(s.a0 + s.speed * t)
+            local a = rad(s.a0 + s.rate * s.speed * t)
             local cx = c.x + sin(a) * s.r
             local cz = c.z - cos(a) * s.r
-            local cy = c.y + s.height + sin(t * 0.25 + s.phase) * 0.08 * c.size
+            local cy = c.y + s.height + sin(t * 0.25 * s.speed + s.phase) * 0.08 * c.size
             aim(out, cx, cy, cz, c.x, c.y + 0.05 * c.size, c.z, 0, 1)
         end,
     },
@@ -566,9 +592,12 @@ local OUTSIDE_SHOTS = {
             local S = c.size
             s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.6))
             local k = M.ease(t / s.duration)
-            local x = M.lerp(0.3 * S, 1.2 * S + 8, k) * s.side
+            -- the same end point; a faster camera starts further away
+            local reach = M.clamp(s.speed, 0.4, 1.6)
+            local x1, z1 = 1.2 * S + 8, 0.7 * S
+            local x = M.lerp(x1 + (0.3 * S - x1) * reach, x1, k) * s.side
             local y = M.lerp(s.low and -0.12 * S or 0.15 * S + 1, 0.08 * S + 1, k)
-            local z = M.lerp(-(2.8 * S + 20), 0.7 * S, k)
+            local z = M.lerp(z1 + (-(2.8 * S + 20) - z1) * reach, z1, k)
             local cx, cy, cz = yaw_point(c, s.hdg, x, y, z)
             aim(out, cx, cy, cz, c.x, c.y, c.z, c.phi * 0.15, M.lerp(1.5, 1, k))
         end,
@@ -579,7 +608,7 @@ local OUTSIDE_SHOTS = {
         update = function(s, c, t, out)
             local S = c.size
             mounted(out, c, 0, 0.24 * S + 1.5, 0.55 * S + 2.5,
-                sin(t * 0.2 + s.phase) * 0.05 * S, 0.05 * S, -1.5 * S)
+                sin(t * 0.2 * s.speed + s.phase) * 0.05 * S, 0.05 * S, -1.5 * S)
         end,
     },
     {
@@ -588,7 +617,7 @@ local OUTSIDE_SHOTS = {
         update = function(s, c, t, out)
             local S = c.size
             mounted(out, c, s.side * (0.56 * S + 0.6), 0.08 * S + 0.4, 0.1 * S,
-                0, 0.05 * S, -0.3 * S + sin(t * 0.15) * 0.05 * S)
+                0, 0.05 * S, -0.3 * S + sin(t * 0.15 * s.speed) * 0.05 * S)
         end,
     },
     {
@@ -609,7 +638,7 @@ local OUTSIDE_SHOTS = {
             s.spin = M.sign() * M.rand(3, 7)
         end,
         update = function(s, c, t, out)
-            local a = rad(s.a0 + s.spin * t)
+            local a = rad(s.a0 + s.spin * s.speed * t)
             local cx = c.x + sin(a) * s.back
             local cz = c.z - cos(a) * s.back
             aim(out, cx, c.y + s.height, cz, c.x, c.y, c.z, 0, 1)
@@ -637,15 +666,15 @@ local COCKPIT_SHOTS = {
             s.pitch = M.rand(-7, -3)
         end,
         update = function(s, e, t)
-            return 0, 0.006 * sin(t * 1.3), 0,
-                s.amp * sin(s.w * t + s.phase), s.pitch + 2 * sin(s.w * 0.7 * t), 0
+            local w = s.w * s.speed * t
+            return 0, 0.006 * sin(t * 1.3), 0, s.amp * sin(w + s.phase), s.pitch + 2 * sin(w * 0.7), 0
         end,
     },
     {
         id = "shoulder", label = "Over the shoulder", weight = 2,
         init = function(s, e)
             s.inward = e.seat ~= 0 and -e.seat or 1
-            s.from = M.rand(-8, -2) * s.inward
+            s.from = M.rand(-8, -2) * s.inward * s.speed
         end,
         update = function(s, e, t)
             local k = M.ease(t / s.duration)
@@ -660,14 +689,15 @@ local COCKPIT_SHOTS = {
             s.phase = M.rand(0, 6.28)
         end,
         update = function(s, e, t)
-            return 0, 0, 0, s.out * (s.look + 5 * sin(t * 0.25 + s.phase)), -6 + 2 * sin(t * 0.3), 0
+            local w = t * s.speed
+            return 0, 0, 0, s.out * (s.look + 5 * sin(w * 0.25 + s.phase)), -6 + 2 * sin(w * 0.3), 0
         end,
     },
     {
         id = "panel", label = "Panel", weight = 1.5,
         init = function(s, e)
             s.pitch = -M.rand(22, 30)
-            s.span = M.rand(16, 26) * M.sign()
+            s.span = math.min(M.rand(16, 26) * s.speed, 45) * M.sign()
         end,
         update = function(s, e, t)
             local k = M.ease(t / s.duration)
@@ -681,7 +711,7 @@ local COCKPIT_SHOTS = {
             s.phase = M.rand(0, 6.28)
         end,
         update = function(s, e, t)
-            return -2 * e.x, 0, 0, e.seat * (s.look + 6 * sin(t * 0.2 + s.phase)), -6, 0
+            return -2 * e.x, 0, 0, e.seat * (s.look + 6 * sin(t * 0.2 * s.speed + s.phase)), -6, 0
         end,
     },
 }
@@ -734,7 +764,7 @@ local function camera_func(pos, losing)
     s.def.update(s, c, t_now - s.t0, cam_out)
     pos.x, pos.y, pos.z = cam_out.x, cam_out.y, cam_out.z
     pos.heading, pos.pitch, pos.roll = cam_out.heading, cam_out.pitch, cam_out.roll
-    pos.zoom = cam_out.zoom
+    pos.zoom = M.clamp(cam_out.zoom * CV.user_zoom, 0.4, 12)
     return 1
 end
 
@@ -833,7 +863,10 @@ local function pick_shot()
 end
 
 local function begin_shot(def)
-    local s = { def = def, t0 = now(), duration = M.rand(settings.shot_min, settings.shot_max), inited = false }
+    local s = {
+        def = def, t0 = now(), duration = M.rand(settings.shot_min, settings.shot_max),
+        speed = settings.camera_speed, inited = false,
+    }
     if def.kind == "cockpit" then
         release_camera()
         if view_type() ~= VIEW_3D_COCKPIT then command_once(CMD_COCKPIT) end
@@ -872,6 +905,35 @@ local function next_shot(force_fade)
     end
 end
 
+------------------------------------------------------------------------------
+-- Zoom: in outside shots the camera is ours, so the script zooms it; in the
+-- cockpit and X-Plane's own views, X-Plane's zoom does
+------------------------------------------------------------------------------
+
+local function outside_shot()
+    return CV.active and CV.shot ~= nil and CV.shot.def.kind == "outside"
+end
+
+local function zoom_end()
+    CV.zoom_dir = 0
+    CV.zoom_vk = nil
+    if CV.native_zoom then
+        command_end(CV.native_zoom)
+        CV.native_zoom = nil
+    end
+end
+
+local function zoom_begin(dir)
+    zoom_end()
+    if outside_shot() then
+        CV.zoom_dir = dir
+        CV.user_zoom = M.clamp(CV.user_zoom * (dir > 0 and 1.06 or 1 / 1.06), 0.5, 4) -- a tap still zooms a little
+    else
+        CV.native_zoom = dir > 0 and "sim/general/zoom_in" or "sim/general/zoom_out"
+        command_begin(CV.native_zoom)
+    end
+end
+
 local function start(reason)
     if CV.active or CV.disabled then return end
     if vr_on() then
@@ -891,6 +953,8 @@ local function start(reason)
     CV.recent = {}
     CV.shot = nil
     CV.input_flag = false
+    zoom_end()
+    CV.user_zoom = 1
     next_shot(true)
 end
 
@@ -902,6 +966,7 @@ local function stop(reason)
     CV.shot = nil
     CV.settle = 0
     CV.expected_view = nil
+    zoom_end()
     release_camera()
     -- put the user back in the view they were in, unless they just picked one
     if reason ~= "view" and CV.saved_view and CV.saved_view ~= 0 and view_type() ~= CV.saved_view then
@@ -953,6 +1018,7 @@ end
 local function joystick_moved()
     local moved = false
     local band = settings.joystick_deadband
+    local skip_buttons = now() < CV.ignore_buttons_until
     if XP.lib then
         if JOY.axes then
             local n = XP.lib.XPLMGetDatavf(R.axes, JOY.axes, 0, JOY.axes_n)
@@ -968,7 +1034,7 @@ local function joystick_moved()
             local n = XP.lib.XPLMGetDatavi(R.buttons, JOY.buttons, 0, JOY.buttons_n)
             for i = 0, n - 1 do
                 if JOY.buttons[i] ~= JOY.buttons_prev[i] then
-                    moved = true
+                    moved = moved or not skip_buttons
                     JOY.buttons_prev[i] = JOY.buttons[i]
                 end
             end
@@ -988,7 +1054,7 @@ local function joystick_moved()
             for i = 0, 3199 do
                 local b = button(i)
                 if b ~= JOY.buttons_prev[i] then
-                    moved = true
+                    moved = moved or not skip_buttons
                     JOY.buttons_prev[i] = b
                 end
             end
@@ -1068,6 +1134,8 @@ end
 local function tick()
     if not XP.lib then CV.fclock = CV.fclock + gf(R.frame_period, 1 / 30) end
     local t = now()
+    local dt = M.clamp(t - (CV.tick_last or t), 0, 0.1)
+    CV.tick_last = t
     CV.heartbeat = t
     CV.last_tick = t
 
@@ -1145,6 +1213,10 @@ local function tick()
             end
         end
 
+        if CV.zoom_dir ~= 0 and outside_shot() then
+            CV.user_zoom = M.clamp(CV.user_zoom * math.exp(CV.zoom_dir * dt), 0.5, 4)
+        end
+
         local s = CV.shot
         if s then
             if s.def.kind == "cockpit" then update_cockpit_shot(s, t - s.t0) end
@@ -1162,16 +1234,8 @@ local function tick()
 end
 
 ------------------------------------------------------------------------------
--- Drawing: letterbox, fades, captions, messages
+-- Drawing: letterbox, fades, messages
 ------------------------------------------------------------------------------
-
-local function format_altitude(m)
-    local ft = m * 3.28084
-    if ft >= 18000 then return string.format("FL%03d", math.floor(ft / 100 + 0.5)) end
-    local rounded = math.floor(ft / 10 + 0.5) * 10
-    local s = tostring(rounded):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
-    return s .. " FT"
-end
 
 local function text_width(text)
     if measure_string then
@@ -1181,10 +1245,8 @@ local function text_width(text)
     return #text * 7
 end
 
--- Text over black: a grey level stands in for transparency.
-local function draw_text(x, y, text, alpha)
-    local a = M.clamp(alpha, 0, 1)
-    if a > 0.02 then draw_string(math.floor(x), math.floor(y), text, a, a, a) end
+local function draw_text(x, y, text)
+    draw_string(math.floor(x), math.floor(y), text, 1, 1, 1)
 end
 
 local function draw()
@@ -1218,28 +1280,6 @@ local function draw()
         end
     end
 
-    if CV.active and ticking and settings.caption and CV.shot and CV.bars >= 1 and bar >= 40 then
-        local age = t - CV.shot.t0
-        local alpha = M.clamp(age / 0.8, 0, 1) * M.clamp((CV.shot.duration - age) / 0.6, 0, 1) * 0.85
-        if alpha > 0 then
-            local y = bar * 0.5 - 6
-            draw_text(40, y, string.upper(CV.shot.def.label), alpha)
-            local parts = {}
-            if PLANE_ICAO and PLANE_ICAO ~= "" then parts[#parts + 1] = PLANE_ICAO end
-            if PLANE_TAILNUMBER and PLANE_TAILNUMBER ~= "" then parts[#parts + 1] = PLANE_TAILNUMBER end
-            parts[#parts + 1] = format_altitude(gd(R.elevation))
-            local vx, vz = gf(R.vx), gf(R.vz)
-            parts[#parts + 1] = string.format("%d KT", math.floor(sqrt(vx * vx + vz * vz) * 1.94384 + 0.5))
-            local info = table.concat(parts, "   ")
-            draw_text(w - 40 - text_width(info), y, info, alpha)
-        end
-        if CV.reason == "afk" and t - CV.started_at < 6 then
-            local hint = "Press a key or move the mouse to take back control"
-            local a = M.clamp((6 - (t - CV.started_at)) / 1.0, 0, 1) * 0.7
-            draw_text((w - text_width(hint)) / 2, h - bar * 0.5 - 6, hint, a)
-        end
-    end
-
     if fade > 0 then
         glColor4f(0, 0, 0, fade)
         glRectf(0, 0, w, h)
@@ -1250,7 +1290,7 @@ local function draw()
         local x, y = (w - tw) / 2, math.max(bar, 0) + 60
         glColor4f(0, 0, 0, 0.6)
         glRectf(x - 16, y - 12, x + tw + 16, y + 26)
-        draw_text(x, y, CV.toast_text, 1)
+        draw_text(x, y, CV.toast_text)
     end
 end
 
@@ -1271,6 +1311,7 @@ local function status_text()
 end
 
 local function toggle_settings()
+    CV.capturing = nil
     if CV.wnd then
         float_wnd_destroy(CV.wnd)
         CV.wnd = nil
@@ -1280,10 +1321,193 @@ local function toggle_settings()
         toast("The settings window needs FlyWithLua NG+; edit cinematic_view.ini instead", 4)
         return
     end
-    CV.wnd = float_wnd_create(460, 430, 1, true)
+    CV.wnd = float_wnd_create(480, 660, 1, true)
     float_wnd_set_title(CV.wnd, "Cinematic View " .. VERSION)
     float_wnd_set_imgui_builder(CV.wnd, "CinematicView_build_settings")
     float_wnd_set_onclose(CV.wnd, "CinematicView_settings_closed")
+end
+
+------------------------------------------------------------------------------
+-- Actions and their keys
+------------------------------------------------------------------------------
+
+local function toggle_cinematic()
+    if CV.active then
+        stop("manual")
+    elseif now() - CV.input_stop_at > 0.5 then
+        -- (the key that just ended a cinematic shouldn't start it again)
+        start("manual")
+    end
+end
+
+local function toggle_afk()
+    settings.afk_enabled = not settings.afk_enabled
+    mark_dirty()
+    toast(settings.afk_enabled
+        and string.format("Cinematic view starts after %d s away", settings.afk_timeout)
+        or "Cinematic view won't start by itself")
+end
+
+local function cycle_mode()
+    local i = 1
+    for k, mode in ipairs(MODES) do if mode == settings.mode then i = k end end
+    settings.mode = MODES[i % #MODES + 1]
+    mark_dirty()
+    toast("Cinematic shots: " .. MODE_LABELS[settings.mode])
+    if CV.active then next_shot(true) end
+end
+
+-- id: the X-Plane command (FlyWithLua/cinematic_view/<id>) and the ini key (bind_<id>)
+local ACTIONS = {
+    { id = "toggle", label = "Start / stop", desc = "start/stop", press = toggle_cinematic },
+    { id = "next_shot", label = "Next shot", desc = "cut to the next shot",
+        press = function() if CV.active then next_shot(false) end end },
+    { id = "toggle_afk", label = "Auto-start on/off", desc = "auto-start when away on/off", press = toggle_afk },
+    { id = "cycle_mode", label = "Cycle shot types", desc = "cycle mixed/outside/cockpit shots", press = cycle_mode },
+    { id = "zoom_in", label = "Zoom in", desc = "zoom in (hold)",
+        press = function() zoom_begin(1) end, release = zoom_end },
+    { id = "zoom_out", label = "Zoom out", desc = "zoom out (hold)",
+        press = function() zoom_begin(-1) end, release = zoom_end },
+    { id = "settings", label = "This window", desc = "show/hide the settings window", press = toggle_settings },
+}
+local ACTION_BY_ID = {}
+for _, a in ipairs(ACTIONS) do ACTION_BY_ID[a.id] = a end
+
+local KEY_NAMES = {
+    [0x08] = "Backspace", [0x09] = "Tab", [0x0D] = "Return", [0x20] = "Space",
+    [0x21] = "Page Up", [0x22] = "Page Down", [0x23] = "End", [0x24] = "Home",
+    [0x25] = "Left", [0x26] = "Up", [0x27] = "Right", [0x28] = "Down", [0x2D] = "Insert", [0x2E] = "Delete",
+    [0x6A] = "Num *", [0x6B] = "Num +", [0x6D] = "Num -", [0x6E] = "Num .", [0x6F] = "Num /",
+    [0xB0] = "=", [0xB1] = "-", [0xB2] = "]", [0xB3] = "[", [0xB4] = "'", [0xB5] = ";", [0xB6] = "\\",
+    [0xB7] = ",", [0xB8] = "/", [0xB9] = ".", [0xBA] = "`", [0xBB] = "Enter", [0xBC] = "Num Enter", [0xBD] = "Num =",
+}
+
+-- mods: 1 shift, 2 ctrl, 4 alt
+local function key_name(vk, mods)
+    local name = KEY_NAMES[vk]
+    if not name then
+        if (vk >= 0x30 and vk <= 0x39) or (vk >= 0x41 and vk <= 0x5A) then
+            name = string.char(vk)
+        elseif vk >= 0x60 and vk <= 0x69 then
+            name = "Num " .. (vk - 0x60)
+        elseif vk >= 0x70 and vk <= 0x87 then
+            name = "F" .. (vk - 0x6F)
+        else
+            name = "Key " .. vk
+        end
+    end
+    local prefix = ""
+    if math.floor(mods / 2) % 2 == 1 then prefix = prefix .. "Ctrl+" end
+    if math.floor(mods / 4) % 2 == 1 then prefix = prefix .. "Alt+" end
+    if mods % 2 == 1 then prefix = prefix .. "Shift+" end
+    return prefix .. name
+end
+
+-- A key as stored in the ini: "<virtual key> <modifiers> <name>".
+local function parse_bind(v)
+    local vk, mods, name = (v or ""):match("^(%d+) (%d+) (.+)$")
+    if vk then return tonumber(vk), tonumber(mods), name end
+end
+
+local function action_for_key(vk, mods)
+    for _, a in ipairs(ACTIONS) do
+        local bvk, bmods = parse_bind(settings["bind_" .. a.id])
+        if bvk == vk and bmods == mods then return a end
+    end
+end
+
+-- One key does one thing: setting it here takes it off any other action.
+local function set_bind(id, vk, mods)
+    for _, a in ipairs(ACTIONS) do
+        local bvk, bmods = parse_bind(settings["bind_" .. a.id])
+        if bvk == vk and bmods == mods then settings["bind_" .. a.id] = "" end
+    end
+    settings["bind_" .. id] = string.format("%d %d %s", vk, mods, key_name(vk, mods))
+    mark_dirty()
+end
+
+local function press_action(a, from_command)
+    if from_command then
+        -- whatever ran the command (a key X-Plane maps to it, a joystick
+        -- button) isn't "input" that ends the cinematic
+        CV.input_flag = false
+        CV.ignore_buttons_until = now() + 0.5
+    end
+    a.press()
+end
+
+local function release_action(a, from_command)
+    if from_command then CV.ignore_buttons_until = now() + 0.5 end
+    if a.release then a.release() end
+end
+
+-- X-Plane's zoom keys: = and - on the main keyboard, + and - on the keypad.
+local ZOOM_KEYS = { [0xB0] = 1, [0x6B] = 1, [0xB1] = -1, [0x6D] = -1 }
+
+local function on_key()
+    local vk = VKEY or 0
+    if vk < 0 then vk = vk + 256 end -- FlyWithLua passes it as a signed char
+    local mods = (SHIFT_KEY and 1 or 0) + (CONTROL_KEY and 2 or 0) + (OPTION_KEY and 4 or 0)
+    if KEY_ACTION ~= "pressed" then
+        if CV.keys_down[vk] then
+            CV.keys_down[vk] = nil
+            RESUME_KEY = true
+        end
+        if CV.held[vk] then
+            release_action(CV.held[vk], false)
+            CV.held[vk] = nil
+        end
+        if CV.zoom_vk == vk then
+            zoom_end()
+            RESUME_KEY = true
+        end
+        return
+    end
+
+    if CV.capturing then
+        if vk ~= 0x1B then set_bind(CV.capturing, vk, mods) end -- Esc cancels
+        CV.capturing = nil
+        RESUME_KEY = true
+        return
+    end
+
+    local a = action_for_key(vk, mods)
+    if a then
+        RESUME_KEY = true -- ours, not X-Plane's
+        local t = now()
+        local down = CV.keys_down[vk]
+        CV.keys_down[vk] = t
+        if down and t - down < 3 then return end -- auto-repeat
+        if a.release then CV.held[vk] = a end
+        press_action(a, false)
+        return
+    end
+
+    -- zooming doesn't end the cinematic
+    if ZOOM_KEYS[vk] and CV.active and not CONTROL_KEY and not OPTION_KEY then
+        if outside_shot() then
+            RESUME_KEY = true -- X-Plane's zoom can't move our camera, so we zoom it
+            if CV.zoom_vk ~= vk then
+                zoom_begin(ZOOM_KEYS[vk])
+                CV.zoom_vk = vk
+            end
+        end
+        return
+    end
+
+    CV.input_flag = true
+end
+
+------------------------------------------------------------------------------
+-- What's in the settings window
+------------------------------------------------------------------------------
+
+local function checkbox(label, key)
+    local changed, v = imgui.Checkbox(label, settings[key])
+    if changed then
+        settings[key] = v
+        mark_dirty()
+    end
 end
 
 local function build_settings()
@@ -1298,14 +1522,12 @@ local function build_settings()
     end
     imgui.Separator()
 
-    changed, v = imgui.Checkbox("Start when I'm away from the controls", settings.afk_enabled)
-    if changed then settings.afk_enabled = v; mark_dirty() end
+    imgui.TextUnformatted("When you're away")
+    checkbox("Start when I'm away from the controls", "afk_enabled")
     changed, v = imgui.SliderInt("Away for", settings.afk_timeout, 15, 900, "%d s")
     if changed then settings.afk_timeout = v; mark_dirty() end
-    changed, v = imgui.Checkbox("Also start while the sim is paused", settings.afk_when_paused)
-    if changed then settings.afk_when_paused = v; mark_dirty() end
-    changed, v = imgui.Checkbox("Any input also ends a cinematic I started", settings.manual_exit_on_input)
-    if changed then settings.manual_exit_on_input = v; mark_dirty() end
+    checkbox("Also start while the sim is paused", "afk_when_paused")
+    checkbox("Any input also ends a cinematic I started", "manual_exit_on_input")
     imgui.Separator()
 
     imgui.TextUnformatted("Shots")
@@ -1332,26 +1554,44 @@ local function build_settings()
         settings.shot_min = math.min(settings.shot_min, v)
         mark_dirty()
     end
+    changed, v = imgui.SliderFloat("Camera speed", settings.camera_speed, 0.25, 2.5, "%.2fx")
+    if changed then settings.camera_speed = v; mark_dirty() end
+    checkbox("Letterbox bars", "letterbox")
+    imgui.SameLine()
+    checkbox("Fades", "fades")
     imgui.Separator()
 
-    changed, v = imgui.Checkbox("Letterbox bars", settings.letterbox)
-    if changed then settings.letterbox = v; mark_dirty() end
-    imgui.SameLine()
-    changed, v = imgui.Checkbox("Fades", settings.fades)
-    if changed then settings.fades = v; mark_dirty() end
-    imgui.SameLine()
-    changed, v = imgui.Checkbox("Captions", settings.caption)
-    if changed then settings.caption = v; mark_dirty() end
-    imgui.Separator()
+    imgui.TextUnformatted("Keys")
+    for _, a in ipairs(ACTIONS) do
+        local _, _, name = parse_bind(settings["bind_" .. a.id])
+        local capturing = CV.capturing == a.id
+        imgui.TextUnformatted(a.label)
+        imgui.SameLine(150)
+        imgui.TextUnformatted(capturing and "Press a key..." or (name or "-"))
+        imgui.SameLine(320)
+        if imgui.Button((capturing and "Cancel" or "Set") .. "##set_" .. a.id) then
+            CV.capturing = (not capturing) and a.id or nil
+        end
+        if name and not capturing then
+            imgui.SameLine()
+            if imgui.Button("Clear##clear_" .. a.id) then
+                settings["bind_" .. a.id] = ""
+                mark_dirty()
+            end
+        end
+    end
+    imgui.TextWrapped("Keys set here take priority over X-Plane's own (Esc cancels setting one). "
+        .. "+ and - zoom during a cinematic. For joystick buttons, assign the "
+        .. "FlyWithLua/cinematic_view commands under Settings > Joystick.")
 
     if not XP.camera_ok then
+        imgui.Separator()
         imgui.TextWrapped("The X-Plane SDK couldn't be loaded, so outside shots use X-Plane's own chase, orbit and flyby views.")
     end
-    imgui.TextWrapped("Assign keys under Settings > Keyboard: search for \"cinematic\".")
 end
 
 ------------------------------------------------------------------------------
--- Global entry points for FlyWithLua (commands, macros, callbacks)
+-- Global entry points for FlyWithLua (commands, menu, callbacks)
 ------------------------------------------------------------------------------
 
 local function guarded(name, fn)
@@ -1363,44 +1603,20 @@ end
 
 CinematicView_tick = guarded("frame", tick)
 CinematicView_draw = guarded("draw", draw)
+CinematicView_on_key = guarded("keyboard", on_key)
 
-CinematicView_toggle = guarded("toggle", function()
-    if CV.active then
-        stop("manual")
-    elseif now() - CV.input_stop_at > 0.5 then
-        -- (the key that just ended a cinematic shouldn't start it again)
-        start("manual")
-    end
-end)
-
-CinematicView_next = guarded("next", function()
-    if CV.active then next_shot(false) end
-end)
-
-CinematicView_toggle_afk = guarded("toggle_afk", function()
-    settings.afk_enabled = not settings.afk_enabled
-    mark_dirty()
-    toast(settings.afk_enabled
-        and string.format("Cinematic view starts after %d s away", settings.afk_timeout)
-        or "Cinematic view won't start by itself")
-end)
-
-CinematicView_cycle_mode = guarded("cycle_mode", function()
-    local i = 1
-    for k, mode in ipairs(MODES) do if mode == settings.mode then i = k end end
-    settings.mode = MODES[i % #MODES + 1]
-    mark_dirty()
-    toast("Cinematic shots: " .. MODE_LABELS[settings.mode])
-    if CV.active then next_shot(true) end
+CinematicView_command = guarded("command", function(id, down)
+    local a = ACTION_BY_ID[id]
+    if not a then return end
+    if down then press_action(a, true) else release_action(a, true) end
 end)
 
 CinematicView_toggle_settings = guarded("settings", toggle_settings)
 CinematicView_build_settings = guarded("settings window", build_settings)
-function CinematicView_settings_closed() CV.wnd = nil end
-
-CinematicView_on_key = guarded("keyboard", function()
-    if KEY_ACTION == "pressed" then CV.input_flag = true end
-end)
+function CinematicView_settings_closed()
+    CV.wnd = nil
+    CV.capturing = nil
+end
 
 CinematicView_on_mouse = guarded("mouse", function()
     CV.input_flag = true
@@ -1414,6 +1630,7 @@ function CinematicView_on_exit()
             write_head(h.x, h.y, h.z, h.psi, h.the, h.phi)
         end
     end)
+    pcall(zoom_end)
     pcall(release_camera)
     if XP.probe then
         pcall(function() XP.lib.XPLMDestroyProbe(XP.probe) end)
@@ -1442,20 +1659,16 @@ do_on_mouse_click("CinematicView_on_mouse()")
 do_on_mouse_wheel("CinematicView_on_mouse()")
 do_on_exit("CinematicView_on_exit()")
 
-create_command("FlyWithLua/cinematic_view/toggle", "Cinematic view: start/stop",
-    "CinematicView_toggle()", "", "")
-create_command("FlyWithLua/cinematic_view/next_shot", "Cinematic view: cut to the next shot",
-    "CinematicView_next()", "", "")
-create_command("FlyWithLua/cinematic_view/toggle_afk", "Cinematic view: auto-start when away on/off",
-    "CinematicView_toggle_afk()", "", "")
-create_command("FlyWithLua/cinematic_view/cycle_mode", "Cinematic view: cycle mixed/outside/cockpit shots",
-    "CinematicView_cycle_mode()", "", "")
-create_command("FlyWithLua/cinematic_view/settings", "Cinematic view: show/hide settings",
-    "CinematicView_toggle_settings()", "", "")
+-- every action as an X-Plane command too, for joystick buttons (the release
+-- is handled for all of them, so letting go of the button isn't "input")
+for _, a in ipairs(ACTIONS) do
+    create_command("FlyWithLua/cinematic_view/" .. a.id, "Cinematic view: " .. a.desc,
+        string.format('CinematicView_command("%s", true)', a.id), "",
+        string.format('CinematicView_command("%s", false)', a.id))
+end
 
-add_macro("Cinematic View: start/stop", "CinematicView_toggle()")
-add_macro("Cinematic View: next shot", "CinematicView_next()")
-add_macro("Cinematic View: settings", "CinematicView_toggle_settings()")
+-- one menu entry: the window has everything else
+add_macro("Cinematic View", "CinematicView_toggle_settings()")
 
 log(string.format("version %s loaded (%s)", VERSION,
     XP.camera_ok and "custom outside cameras" or "X-Plane's built-in outside views"))

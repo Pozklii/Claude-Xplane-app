@@ -17,7 +17,7 @@ MOUSE_X, MOUSE_Y = 500, 500
 PLANE_ICAO, PLANE_TAILNUMBER = "A320", "D-AXLA"
 local chunks = { frame = {}, draw = {}, key = {}, click = {}, wheel = {} }
 local exit_code = {}
-local commands, macros, logs, drawn = {}, {}, {}, { rects = 0, strings = {} }
+local commands, command_ends, macros, logs, drawn = {}, {}, {}, {}, { rects = 0, strings = {} }
 local in_draw = false
 function do_every_frame(c) table.insert(chunks.frame, c) end
 function do_every_draw(c) table.insert(chunks.draw, c) end
@@ -25,7 +25,7 @@ function do_on_keystroke(c) table.insert(chunks.key, c) end
 function do_on_mouse_click(c) table.insert(chunks.click, c) end
 function do_on_mouse_wheel(c) table.insert(chunks.wheel, c) end
 function do_on_exit(c) table.insert(exit_code, c) end
-function create_command(name, desc, b, c, e) commands[name] = b end
+function create_command(name, desc, b, c, e) commands[name] = b command_ends[name] = e end
 function add_macro(name, a) macros[name] = a end
 function logMsg(s) table.insert(logs, s) end
 local function need_draw(fn) if not in_draw then error(fn .. " outside draw") end end
@@ -114,6 +114,9 @@ end
 local VIEWS = { ["sim/view/chase"] = 1017, ["sim/view/circle"] = 1018, ["sim/view/still_spot"] = 1031,
     ["sim/view/linear_spot"] = 1032, ["sim/view/3d_cockpit_cmnd_look_forward"] = 1026 }
 local command_log = {}
+local held_commands = {}
+function command_begin(c) table.insert(command_log, "begin " .. c) held_commands[c] = true end
+function command_end(c) table.insert(command_log, "end " .. c) held_commands[c] = nil end
 function command_once(c)
     table.insert(command_log, c)
     if VIEWS[c] then set_i("sim/graphics/view/view_type", VIEWS[c]) end
@@ -153,6 +156,13 @@ push_aircraft()
 local ok, err = pcall(dofile, script)
 check(ok, "script loads: " .. tostring(err))
 check(commands["FlyWithLua/cinematic_view/toggle"] ~= nil, "toggle command created")
+for _, id in ipairs({ "toggle", "next_shot", "toggle_afk", "cycle_mode", "zoom_in", "zoom_out", "settings" }) do
+    check(commands["FlyWithLua/cinematic_view/" .. id] and command_ends["FlyWithLua/cinematic_view/" .. id] ~= "",
+        id .. " command with press and release")
+end
+local macro_count = 0
+for name in pairs(macros) do macro_count = macro_count + 1 end
+check(macro_count == 1 and macros["Cinematic View"] == "CinematicView_toggle_settings()", "one menu entry, opening the window")
 check(#chunks.frame == 1 and #chunks.draw == 1 and #chunks.key == 1 and #chunks.click == 1, "callbacks registered")
 for _, l in ipairs(logs) do print("log: " .. l) end
 
@@ -162,6 +172,38 @@ local function upvalue(f, name)
 end
 local CVt = upvalue(upvalue(CinematicView_tick, "fn"), "CV")
 local per_shot = {}
+local shots_seen, shot_log = {}, {}
+local function shots_since(i)
+    local seen = {}
+    for k = i + 1, #shot_log do seen[shot_log[k]] = true end
+    return seen
+end
+-- FlyWithLua passes VKEY as a signed char
+local function key(vk, action, mods)
+    mods = mods or {}
+    VKEY = vk >= 128 and vk - 256 or vk
+    CKEY = ""
+    SHIFT_KEY, CONTROL_KEY, OPTION_KEY = mods.shift or false, mods.ctrl or false, mods.alt or false
+    KEY_ACTION = action
+    RESUME_KEY = false
+    run(chunks.key)
+    return RESUME_KEY
+end
+local function tap(vk, mods)
+    local consumed = key(vk, "pressed", mods)
+    key(vk, "released", mods)
+    return consumed
+end
+local function command(id)
+    run({ commands["FlyWithLua/cinematic_view/" .. id] })
+    run({ command_ends["FlyWithLua/cinematic_view/" .. id] })
+end
+local function ini_text()
+    local f = io.open(SCRIPT_DIRECTORY .. "/cinematic_view.ini", "r")
+    local text = f and f:read("*a") or ""
+    if f then f:close() end
+    return text
+end
 local stats = { shots = {}, cam_frames = 0, cockpit_frames = 0, min_dist = 1e9, max_dist = 0, below_ground = 0 }
 local S_expected = 0.9 * 78000 ^ (1 / 3)
 
@@ -173,6 +215,11 @@ local function frame(dt)
     ac.z = ac.z + ac.vz * dt
     push_aircraft()
     run(chunks.frame)
+    if CVt.shot and CVt.shot ~= shot_log.last then
+        shots_seen[CVt.shot.def.id] = true
+        table.insert(shot_log, CVt.shot.def.id)
+        shot_log.last = CVt.shot
+    end
     if lib and lib.mock_camera_controlled() ~= 0 then
         local r = lib.mock_call_camera(cam, 0)
         if r == 1 then
@@ -192,11 +239,12 @@ local function frame(dt)
             local ps = per_shot[id] or { n = 0, ang = 0, dmin = 1e9, dmax = 0, zmax = 0, rollmax = 0 }
             per_shot[id] = ps
             ps.n = ps.n + 1
-            ps.ang = math.max(ps.ang, ang * cam.zoom)
+            local shot_zoom = cam.zoom / CVt.user_zoom -- framing as the shot set it, before + and -
+            ps.ang = math.max(ps.ang, ang * shot_zoom)
             ps.dmin, ps.dmax = math.min(ps.dmin, d), math.max(ps.dmax, d)
             ps.zmax = math.max(ps.zmax, cam.zoom)
             ps.rollmax = math.max(ps.rollmax, math.abs(cam.roll))
-            check(cam.zoom >= 1 and cam.zoom <= 6, "zoom in range " .. cam.zoom)
+            check(shot_zoom >= 0.99 and shot_zoom <= 6 and cam.zoom >= 0.4 and cam.zoom <= 12, "zoom in range " .. cam.zoom)
         end
     end
     in_draw = true
@@ -238,11 +286,9 @@ for i = 1, 30 * 240 do
     ac.phi = 25 * math.sin(T * 0.05)
     ac.psi = (ac.psi + 0.02) % 360
 end
-local labels = {}
-for _, s in ipairs(drawn.strings) do labels[s] = true end
 local n = 0
-for l in pairs(labels) do if l:match("^[A-Z' %-]+$") and #l > 3 then n = n + 1 end end
-print(string.format("cam frames %d, cockpit frames %d, camera distance %.1f..%.1f m (span %.1f), below ground %d, distinct captions %d",
+for _ in pairs(shots_seen) do n = n + 1 end
+print(string.format("cam frames %d, cockpit frames %d, camera distance %.1f..%.1f m (span %.1f), below ground %d, distinct shots %d",
     stats.cam_frames, stats.cockpit_frames, stats.min_dist, stats.max_dist, S_expected, stats.below_ground, n))
 if mode == "ffi" then
     check(stats.cam_frames > 1000, "outside shots drove the camera")
@@ -256,14 +302,11 @@ end
 check(stats.cockpit_frames > 300, "cockpit shots ran")
 check(head_moved, "head moved in cockpit shots")
 check(stats.below_ground == 0, "camera never below ground")
-check(n >= 6, "several different shots captioned (" .. n .. ")")
-local caption_has_info = false
-for _, s in ipairs(drawn.strings) do if s:find("A320") and s:find("KT") then caption_has_info = true end end
-check(caption_has_info, "flight info caption drawn")
+check(n >= 8, "many different shots (" .. n .. ")")
+check(#drawn.strings == 0, "no text drawn during the cinematic")
 
 -- 4. a key press ends the AFK cinematic and restores view and head
-KEY_ACTION = "pressed"
-run(chunks.key)
+check(not tap(0x41), "an ordinary key goes on to X-Plane")
 seconds(0.5)
 check(get_i("sim/graphics/view/view_type") == 1026, "back in the 3D cockpit after key press: " .. get_i("sim/graphics/view/view_type"))
 check(math.abs(get_f("sim/graphics/view/pilots_head_psi")) < 1e-3 and math.abs(get_f("sim/graphics/view/pilots_head_x") + 0.55) < 1e-3, "head restored")
@@ -278,7 +321,7 @@ check(drawn.rects == r1, "nothing drawn once stopped")
 run({ commands["FlyWithLua/cinematic_view/toggle"] })
 seconds(3)
 MOUSE_X = MOUSE_X + 50
-KEY_ACTION = "pressed"; run(chunks.key)
+tap(0x41)
 seconds(3)
 local active_after_input = false
 -- active if the letterbox is still being drawn
@@ -345,11 +388,10 @@ check(stats.below_ground == 0, "camera above ground on the runway")
 ac.vx, ac.vy, ac.vz = 0, 0, 0
 set_i("sim/time/paused", 1)
 run({ commands["FlyWithLua/cinematic_view/toggle"] })
-local before = #drawn.strings
+local before = #shot_log
 seconds(90)
-local flyby = false
-for i = before + 1, #drawn.strings do if drawn.strings[i] == "FLYBY" then flyby = true end end
-check(not flyby, "no flyby shots while parked")
+local parked_shots = shots_since(before)
+check(not parked_shots.flyby and not parked_shots.xp_spot, "no flyby shots while parked")
 run({ commands["FlyWithLua/cinematic_view/toggle"] })
 set_i("sim/time/paused", 0)
 
@@ -376,10 +418,121 @@ if lib then
     check(drawn.rects == r9, "joystick button ended it")
 end
 
--- 12. settings window
-run({ commands["FlyWithLua/cinematic_view/settings"] })
+-- 12. + and - zoom an outside shot without ending an AFK cinematic
+if lib then
+    command("cycle_mode") -- outside only
+    MOUSE_X = MOUSE_X + 40
+    seconds(1)
+    seconds(125)
+    check(CVt.active and CVt.reason == "afk", "AFK started for the zoom test")
+    seconds(2)
+    check(CVt.shot.def.kind == "outside", "outside shot running")
+    check(key(0xB0, "pressed") == true, "= is taken by the cinematic camera")
+    for _ = 1, 5 do key(0xB0, "pressed") end -- auto-repeat
+    seconds(1)
+    key(0xB0, "released")
+    local zoomed = CVt.user_zoom
+    check(zoomed > 2.5 and zoomed < 3.2, "holding = for a second zooms in about 2.9x: " .. zoomed)
+    seconds(0.5)
+    check(math.abs(CVt.user_zoom - zoomed) < 1e-6, "zoom stops on release")
+    check(cam.zoom >= zoomed * 0.99, "camera zoom includes it: " .. cam.zoom)
+    key(0x6D, "pressed") -- keypad -
+    seconds(0.5)
+    key(0x6D, "released")
+    check(CVt.user_zoom < zoomed, "keypad - zooms out")
+    check(CVt.active, "zooming didn't end the AFK cinematic")
+    -- a joystick button that runs one of our commands isn't input either
+    lib.mock_set_button(40, 1)
+    run({ commands["FlyWithLua/cinematic_view/next_shot"] })
+    seconds(0.2)
+    lib.mock_set_button(40, 0)
+    run({ command_ends["FlyWithLua/cinematic_view/next_shot"] })
+    seconds(1)
+    check(CVt.active, "a joystick button bound to next shot doesn't end it")
+    -- in the cockpit, + and - go on to X-Plane's own zoom
+    command("cycle_mode") -- cockpit only
+    seconds(2)
+    check(CVt.shot.def.kind == "cockpit", "cockpit shot running")
+    check(key(0xB0, "pressed") == false, "= goes on to X-Plane in the cockpit")
+    key(0xB0, "released")
+    check(CVt.active, "and doesn't end the cinematic")
+    tap(0x41)
+    seconds(0.5)
+    check(not CVt.active, "other keys still end it")
+    command("cycle_mode") -- back to mixed
+end
+
+-- 13. keys set in the settings window
+command("settings")
 local wnd = next(windows)
 check(wnd and wnd.builder == "CinematicView_build_settings", "settings window opened")
+local function build() _G[wnd.builder](wnd, 0, 0) end
+local function click(label) imgui_clicks[label] = true build() imgui_clicks = {} end
+widgets = {}
+build()
+local labels = table.concat(widgets, "|")
+for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "Cycle shot types", "Zoom in", "Zoom out", "This window",
+    "Camera speed", "Letterbox bars", "Fades" }) do
+    check(labels:find(l, 1, true), "window shows " .. l)
+end
+check(not labels:find("Caption"), "no captions option")
+click("Set##set_toggle")
+check(CVt.capturing == "toggle", "waiting for a key")
+check(tap(0x78, { ctrl = true }) == true, "the key being set is swallowed")
+check(CVt.capturing == nil, "captured")
+seconds(2)
+check(ini_text():find("bind_toggle = 120 2 Ctrl+F9", 1, true), "Ctrl+F9 saved for start/stop:\n" .. ini_text())
+check(tap(0x78, { ctrl = true }) == true, "Ctrl+F9 is ours now")
+seconds(1)
+check(CVt.active and CVt.reason == "manual", "Ctrl+F9 starts the cinematic")
+key(0x78, "pressed", { ctrl = true })
+key(0x78, "pressed", { ctrl = true }) -- auto-repeat
+key(0x78, "pressed", { ctrl = true })
+key(0x78, "released", { ctrl = true })
+seconds(1)
+check(not CVt.active, "Ctrl+F9 stops it, holding it doesn't flip it back")
+check(tap(0x78) == false, "plain F9 isn't bound")
+click("Set##set_next_shot")
+tap(0x1B)
+check(CVt.capturing == nil and not ini_text():find("bind_next_shot = %d"), "Esc cancels")
+click("Set##set_next_shot")
+tap(0x78, { ctrl = true })
+seconds(2)
+check(ini_text():find("bind_next_shot = 120 2 Ctrl+F9", 1, true) and ini_text():find("bind_toggle = \n", 1, true),
+    "a key set on another action moves there:\n" .. ini_text())
+click("Clear##clear_next_shot")
+seconds(2)
+check(ini_text():find("bind_next_shot = \n", 1, true), "Clear removes it")
+-- a key for zoom in: X-Plane's own zoom in the cockpit
+click("Set##set_zoom_in")
+tap(0x5A) -- Z
+command("cycle_mode") command("cycle_mode") -- cockpit only
+command("toggle")
+seconds(2)
+check(key(0x5A, "pressed") == true and held_commands["sim/general/zoom_in"], "Z holds X-Plane's zoom in the cockpit")
+seconds(0.5)
+key(0x5A, "released")
+check(not held_commands["sim/general/zoom_in"], "and lets go on release")
+command("toggle")
+command("cycle_mode") -- back to mixed
+
+-- 14. camera speed
+imgui_clicks["Camera speed"] = 2.5 build() imgui_clicks = {}
+command("toggle")
+seconds(40)
+check(CVt.shot and CVt.shot.speed == 2.5, "shots use the camera speed")
+command("toggle")
+imgui_clicks["Camera speed"] = 0.25 build() imgui_clicks = {}
+command("toggle")
+seconds(40)
+check(CVt.shot and CVt.shot.speed == 0.25, "slow camera speed too")
+command("toggle")
+imgui_clicks["Camera speed"] = 1 build() imgui_clicks = {}
+command("settings")
+
+-- 15. settings window
+command("settings")
+wnd = next(windows)
 _G[wnd.builder](wnd, 0, 0)
 check(#widgets > 10, "settings window built")
 imgui_clicks["Start when I'm away from the controls"] = true
@@ -388,14 +541,12 @@ imgui_clicks["Cockpit only"] = true
 _G[wnd.builder](wnd, 0, 0)
 imgui_clicks = {}
 seconds(3)
-local f = io.open((SCRIPT_DIRECTORY .. "/cinematic_view.ini"), "r")
-local ini = f and f:read("*a") or ""
-if f then f:close() end
+local ini = ini_text()
 check(ini:find("afk_enabled = false") and ini:find("afk_timeout = 300") and ini:find("mode = cockpit"), "settings saved:\n" .. ini)
-run({ commands["FlyWithLua/cinematic_view/settings"] })
+command("settings")
 check(next(windows) == nil, "settings window closed")
 
--- 13. exit hook
+-- 16. exit hook
 run({ commands["FlyWithLua/cinematic_view/toggle"] })
 seconds(2)
 run(exit_code)

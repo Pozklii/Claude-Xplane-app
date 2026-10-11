@@ -69,7 +69,7 @@ Free-tier Supabase projects are paused after a period of inactivity. While pause
 
 ### X-Plane cinematic view script
 
-Not part of the web app: [`xplane/`](./xplane/README.md) has a FlyWithLua NG+ script for X-Plane 12 (`xplane/FlyWithLua/Scripts/cinematic_view.lua`) that gives X-Plane a self-directing cinematic camera in the style of the Need for Speed and Forza Horizon attract modes, cutting between chase, flyby, orbit, tracking, mounted and drone shots outside and pilot's-eye, over-the-shoulder, window and panel shots in the cockpit, with letterbox bars and fades. It can be toggled with a key, and starts by itself after a while with no input. Install, settings and how it works are in [`xplane/README.md`](./xplane/README.md).
+Not part of the web app: [`xplane/`](./xplane/README.md) has a FlyWithLua NG+ script for X-Plane 12 (`xplane/FlyWithLua/Scripts/cinematic_view.lua`) that gives X-Plane a self-directing cinematic camera in the style of the Need for Speed and Forza Horizon attract modes, cutting between chase, flyby, orbit, tracking, mounted and drone shots outside and pilot's-eye, over-the-shoulder, window and panel shots in the cockpit, with letterbox bars and fades. One window (FlyWithLua's Macros menu) starts and stops it and holds its settings, camera speed included, and a key for each action; it also starts by itself after a while with no input, and X-Plane's + and - keys zoom it. Install, settings and how it works are in [`xplane/README.md`](./xplane/README.md).
 
 ### Reference data
 
