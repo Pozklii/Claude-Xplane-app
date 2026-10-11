@@ -38,7 +38,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.1"
+local VERSION = "2.2"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -1586,17 +1586,6 @@ end
 -- Settings window
 ------------------------------------------------------------------------------
 
-local function status_text()
-    if CV.disabled then return "Switched off after errors (see X-Plane's Log.txt)" end
-    if CV.active then
-        return "Running (" .. (CV.reason == "afk" and "you were away" or "started by you") .. ")"
-    end
-    if not settings.afk_enabled then return "Off. Auto-start when away is off." end
-    if vr_on() then return "Off. Not available in VR." end
-    local left = math.max(0, settings.afk_timeout - (now() - CV.last_input))
-    return string.format("Off. Starts after %d s with no input (%d s to go).", settings.afk_timeout, math.ceil(left))
-end
-
 local function toggle_settings()
     CV.capturing = nil
     if CV.wnd then
@@ -1608,7 +1597,7 @@ local function toggle_settings()
         toast("The settings window needs FlyWithLua NG+; edit cinematic_view.ini instead", 4)
         return
     end
-    CV.wnd = float_wnd_create(480, 660, 1, true)
+    CV.wnd = float_wnd_create(480, 560, 1, true)
     float_wnd_set_title(CV.wnd, "Cinematic View " .. VERSION)
     float_wnd_set_imgui_builder(CV.wnd, "CinematicView_build_settings")
     float_wnd_set_onclose(CV.wnd, "CinematicView_settings_closed")
@@ -1836,8 +1825,89 @@ local function on_key()
 end
 
 ------------------------------------------------------------------------------
--- What's in the settings window
+-- What's in the settings window: a header (status, a countdown to auto-start,
+-- Start/Stop and Next shot, the shot mix) over tabs for everything else
 ------------------------------------------------------------------------------
+
+local UI = {
+    amber = "#E8A33D", amber_hi = "#F2B95F", red = "#E05A4F", red_hi = "#EA7A70",
+    dark = "#1A1C20", tab = "#22252A", frame = "#2C3036", frame_hi = "#383D44", frame_on = "#42474F",
+    line = "#34383F", cap = "#5A5F68", muted = "#A2A6AD",
+}
+local LABEL_W = 130 -- where a control starts after its label
+
+-- A colour as imgui packs it (0xAABBGGRR).
+local function abgr(hex, alpha)
+    local r, g, b = tonumber(hex:sub(2, 3), 16), tonumber(hex:sub(4, 5), 16), tonumber(hex:sub(6, 7), 16)
+    return math.floor((alpha or 1) * 255 + 0.5) * 16777216 + b * 65536 + g * 256 + r
+end
+
+-- An imgui constant by name, trying each (older FlyWithLua versions name some
+-- differently); nil if it has none of them, and that bit of styling is skipped.
+local function ui_const(group, names)
+    local c = imgui.constant and imgui.constant[group]
+    if not c then return nil end
+    for _, name in ipairs(names) do
+        if c[name] then return c[name] end
+    end
+end
+
+-- Push a colour or style setting; each returns how many it pushed (0 or 1).
+local function push_color(names, hex, alpha)
+    local idx = ui_const("Col", type(names) == "table" and names or { names })
+    if not idx then return 0 end
+    imgui.PushStyleColor(idx, abgr(hex, alpha))
+    return 1
+end
+
+local function push_var(name, a, b)
+    local idx = ui_const("StyleVar", { name })
+    if not idx then return 0 end
+    if b then imgui.PushStyleVar_2(idx, a, b) else imgui.PushStyleVar(idx, a) end
+    return 1
+end
+
+local function pop_vars(n)
+    for _ = 1, n do imgui.PopStyleVar() end
+end
+
+local function push_theme()
+    local c = push_color("FrameBg", UI.frame) + push_color("FrameBgHovered", UI.frame_hi)
+        + push_color("FrameBgActive", UI.frame_on) + push_color("SliderGrab", UI.amber)
+        + push_color("SliderGrabActive", UI.amber_hi) + push_color("CheckMark", UI.amber)
+        + push_color("Button", UI.frame) + push_color("ButtonHovered", UI.frame_hi)
+        + push_color("ButtonActive", UI.frame_on) + push_color("Separator", UI.line)
+        + push_color("Tab", UI.tab) + push_color("TabHovered", UI.frame_hi)
+        + push_color({ "TabSelected", "TabActive" }, UI.frame) + push_color("TabSelectedOverline", UI.amber)
+    local v = push_var("FrameRounding", 4) + push_var("GrabRounding", 3) + push_var("TabRounding", 4)
+        + push_var("FramePadding", 8, 5) + push_var("ItemSpacing", 8, 8)
+    return c, v
+end
+
+-- A button in a colour of its own (amber or red), with dark text.
+local function push_button(base, hover)
+    return push_color("Button", base) + push_color("ButtonHovered", hover)
+        + push_color("ButtonActive", base) + push_color("Text", UI.dark)
+end
+
+local function muted_text(text, wrapped)
+    local n = push_color("Text", UI.muted)
+    if wrapped then imgui.TextWrapped(text) else imgui.TextUnformatted(text) end
+    imgui.PopStyleColor(n)
+end
+
+local function section(title)
+    local n = push_color("Text", UI.muted)
+    imgui.SeparatorText(title)
+    imgui.PopStyleColor(n)
+end
+
+-- A note under the controls, lined up with them.
+local function note(text)
+    imgui.Indent(LABEL_W)
+    muted_text(text, true)
+    imgui.Unindent(LABEL_W)
+end
 
 local function checkbox(label, key)
     local changed, v = imgui.Checkbox(label, settings[key])
@@ -1847,102 +1917,203 @@ local function checkbox(label, key)
     end
 end
 
-local function build_settings()
-    local changed, v
-    imgui.TextUnformatted(status_text())
-    if imgui.Button(CV.active and "Stop" or "Start now") then
+-- A label, then a slider filling the rest of the row (minus `room` for a
+-- button after it). Returns imgui's changed, value.
+local function slider_row(label, id, value, lo, hi, fmt, int, room)
+    imgui.AlignTextToFramePadding()
+    imgui.TextUnformatted(label)
+    imgui.SameLine(LABEL_W)
+    imgui.SetNextItemWidth(-(room or 1))
+    if int then return imgui.SliderInt("##" .. id, value, lo, hi, fmt) end
+    return imgui.SliderFloat("##" .. id, value, lo, hi, fmt)
+end
+
+-- What it's doing, a detail, a colour, and how far the countdown to
+-- auto-start has run (0 to 1).
+local function status_parts()
+    if CV.disabled then return "Switched off after errors", "see X-Plane's Log.txt", UI.red, 0 end
+    if CV.active then
+        return "Running", CV.reason == "afk" and "you were away" or "started by you", UI.red, 1
+    end
+    if not settings.afk_enabled then return "Ready", "auto-start is off", UI.muted, 0 end
+    if vr_on() then return "Ready", "not available in VR", UI.muted, 0 end
+    if gi(R.paused, 0) ~= 0 then return "Ready", "won't start while paused", UI.muted, 0 end
+    if not CV.afk_armed then return "Ready", "auto-start waits for you", UI.muted, 0 end
+    local idle = now() - CV.last_input
+    local left = math.ceil(math.max(0, settings.afk_timeout - idle))
+    return string.format("Auto-start in %d:%02d", math.floor(left / 60), left % 60),
+        string.format("no input for %d s", math.floor(idle)), UI.amber, M.clamp(idle / settings.afk_timeout, 0, 1)
+end
+
+local MODE_SHORT = { mixed = "Mixed", outside = "Outside", cockpit = "Cockpit" }
+
+local function header()
+    local status, detail, color, progress = status_parts()
+    local n = push_color("Text", color)
+    imgui.Bullet()
+    imgui.PopStyleColor(n)
+    imgui.SameLine()
+    imgui.TextUnformatted(status)
+    local dw = imgui.CalcTextSize(detail)
+    imgui.SameLine(math.max(LABEL_W, imgui.GetWindowWidth() - dw - 12))
+    muted_text(detail)
+    n = push_color("PlotHistogram", color)
+    imgui.ProgressBar(progress, -1, 4, "")
+    imgui.PopStyleColor(n)
+    imgui.Spacing()
+
+    local avail = imgui.GetContentRegionAvail()
+    local big = math.floor((avail - 8) * 0.62)
+    n = CV.active and push_button(UI.red, UI.red_hi) or push_button(UI.amber, UI.amber_hi)
+    if imgui.Button((CV.active and "Stop" or "Start cinematic") .. "##startstop", big, 34) then
         if CV.active then stop("manual") else start("manual") end
     end
-    if CV.active then
-        imgui.SameLine()
-        if imgui.Button("Next shot") then next_shot(false) end
-    end
-    imgui.Separator()
+    imgui.PopStyleColor(n)
+    imgui.SameLine()
+    imgui.BeginDisabled(not CV.active)
+    if imgui.Button("Next shot", avail - big - 8, 34) then next_shot(false) end
+    imgui.EndDisabled()
 
-    imgui.TextUnformatted("When you're away")
-    checkbox("Start when I'm away from the controls", "afk_enabled")
-    changed, v = imgui.SliderInt("Away for", settings.afk_timeout, 15, 900, "%d s")
-    if changed then settings.afk_timeout = v; mark_dirty() end
-    checkbox("Any input also ends a cinematic I started", "manual_exit_on_input")
-    imgui.Separator()
-
-    imgui.TextUnformatted("Shots")
+    local w = (avail - 8) / 3
     for i, mode in ipairs(MODES) do
-        if i > 1 then imgui.SameLine() end
-        if imgui.RadioButton(MODE_LABELS[mode], settings.mode == mode) then
+        if i > 1 then imgui.SameLine(0, 4) end
+        local k = (settings.mode == mode) and push_button(UI.amber, UI.amber_hi) or 0
+        if imgui.Button(MODE_SHORT[mode] .. "##mode", w, 26) and settings.mode ~= mode then
             settings.mode = mode
             mark_dirty()
+            if CV.active then next_shot(true) end
         end
+        imgui.PopStyleColor(k)
     end
-    if settings.mode == "mixed" then
-        changed, v = imgui.SliderInt("In the cockpit", settings.cockpit_share, 0, 100, "%d%%")
-        if changed then settings.cockpit_share = v; mark_dirty() end
-    end
-    changed, v = imgui.SliderFloat("Shortest shot", settings.shot_min, 3, 30, "%.0f s")
-    if changed then
-        settings.shot_min = v
-        settings.shot_max = math.max(settings.shot_max, v)
-        mark_dirty()
-    end
-    changed, v = imgui.SliderFloat("Longest shot", settings.shot_max, 3, 45, "%.0f s")
-    if changed then
-        settings.shot_max = v
-        settings.shot_min = math.min(settings.shot_min, v)
-        mark_dirty()
-    end
-    changed, v = imgui.SliderFloat("Camera speed", settings.camera_pace, 0.1, 2, "%.2fx")
+    imgui.Spacing()
+end
+
+local function tab_camera()
+    section("MOVEMENT")
+    local changed, v = slider_row("Camera speed", "camera_pace", settings.camera_pace, 0.1, 2, "%.2fx")
     if changed then settings.camera_pace = v; mark_dirty() end
-    changed, v = imgui.SliderFloat("Panning speed", settings.pan_pace, 0.1, 2, "%.2fx")
+    changed, v = slider_row("Panning speed", "pan_pace", settings.pan_pace, 0.1, 2, "%.2fx")
     if changed then settings.pan_pace = v; mark_dirty() end
-    changed, v = imgui.SliderFloat("Aircraft size", CV.size, 4, 100, "%.0f m")
+    note("How fast cameras travel, and how fast they turn.")
+
+    section("AIRCRAFT")
+    local set = aircraft_sizes[aircraft_key()] ~= nil
+    changed, v = slider_row("Size", "size", CV.size, 4, 100, set and "%.0f m" or "%.0f m (auto)", false, 72)
     if changed then
         aircraft_sizes[aircraft_key()] = v
         CV.size = v
         mark_dirty()
     end
     imgui.SameLine()
-    if aircraft_sizes[aircraft_key()] then
-        if imgui.Button("Auto##size") then
-            aircraft_sizes[aircraft_key()] = nil
-            CV.size = current_size()
-            mark_dirty()
-        end
-    else
-        imgui.TextUnformatted("(auto)")
+    imgui.BeginDisabled(not set)
+    if imgui.Button("Auto##size", 64, 0) then
+        aircraft_sizes[aircraft_key()] = nil
+        CV.size = current_size()
+        mark_dirty()
     end
-    imgui.TextWrapped("Raise the aircraft size if cameras clip the aircraft. It's kept for this aircraft.")
-    checkbox("Letterbox bars", "letterbox")
-    imgui.SameLine()
-    checkbox("Fades", "fades")
-    imgui.Separator()
+    imgui.EndDisabled()
+    note("Raise it if cameras clip this aircraft. It's kept for this aircraft.")
 
-    imgui.TextUnformatted("Keys")
+    section("PICTURE")
+    checkbox("Letterbox bars", "letterbox")
+    imgui.SameLine(LABEL_W + 70)
+    checkbox("Fades", "fades")
+    if not XP.camera_ok then
+        imgui.Spacing()
+        muted_text("The X-Plane SDK couldn't be loaded, so outside shots use X-Plane's own chase, orbit and flyby views.", true)
+    end
+end
+
+local function tab_shots()
+    imgui.BeginDisabled(settings.mode ~= "mixed")
+    local changed, v = slider_row("In the cockpit", "cockpit_share", settings.cockpit_share, 0, 100, "%d%%", true)
+    if changed then settings.cockpit_share = v; mark_dirty() end
+    imgui.EndDisabled()
+    changed, v = slider_row("Shortest shot", "shot_min", settings.shot_min, 3, 30, "%.0f s")
+    if changed then
+        settings.shot_min = v
+        settings.shot_max = math.max(settings.shot_max, v)
+        mark_dirty()
+    end
+    changed, v = slider_row("Longest shot", "shot_max", settings.shot_max, 3, 45, "%.0f s")
+    if changed then
+        settings.shot_max = v
+        settings.shot_min = math.min(settings.shot_min, v)
+        mark_dirty()
+    end
+    note("Shots are quicker on takeoff and landing, and longer in cruise.")
+end
+
+local function tab_auto()
+    checkbox("Start when I'm away from the controls", "afk_enabled")
+    imgui.BeginDisabled(not settings.afk_enabled)
+    local changed, v = slider_row("Away for", "afk_timeout", settings.afk_timeout, 15, 900, "%d s", true)
+    if changed then settings.afk_timeout = v; mark_dirty() end
+    imgui.EndDisabled()
+    checkbox("Any input also ends a cinematic I started", "manual_exit_on_input")
+    imgui.Spacing()
+    muted_text("It never starts by itself while the sim is paused.", true)
+end
+
+local function tab_keys()
+    local buttons_x = imgui.GetWindowWidth() - 124
     for _, a in ipairs(ACTIONS) do
         local _, _, name = parse_bind(settings["bind_" .. a.id])
         local capturing = CV.capturing == a.id
+        imgui.AlignTextToFramePadding()
         imgui.TextUnformatted(a.label)
-        imgui.SameLine(150)
-        imgui.TextUnformatted(capturing and "Press a key..." or (name or "-"))
-        imgui.SameLine(320)
-        if imgui.Button((capturing and "Cancel" or "Set") .. "##set_" .. a.id) then
+        imgui.SameLine(LABEL_W + 20)
+        if capturing then
+            local n = push_color("Text", UI.amber)
+            imgui.TextUnformatted("Press a key...")
+            imgui.PopStyleColor(n)
+        elseif name then
+            -- the key, drawn as a keycap
+            local n = push_color("Button", UI.dark) + push_color("ButtonHovered", UI.dark)
+                + push_color("ButtonActive", UI.dark) + push_color("Border", UI.cap)
+            local s = push_var("FrameBorderSize", 1)
+            imgui.SmallButton(name .. "##cap_" .. a.id)
+            pop_vars(s)
+            imgui.PopStyleColor(n)
+        else
+            muted_text("not set")
+        end
+        imgui.SameLine(buttons_x)
+        if imgui.Button((capturing and "Cancel" or "Set") .. "##set_" .. a.id, 54, 0) then
             CV.capturing = (not capturing) and a.id or nil
         end
         if name and not capturing then
             imgui.SameLine()
-            if imgui.Button("Clear##clear_" .. a.id) then
+            if imgui.Button("Clear##clear_" .. a.id, 54, 0) then
                 settings["bind_" .. a.id] = ""
                 mark_dirty()
             end
         end
     end
-    imgui.TextWrapped("Keys set here take priority over X-Plane's own (Esc cancels setting one). "
-        .. "+ and - zoom during a cinematic. For joystick buttons, assign the "
-        .. "FlyWithLua/cinematic_view commands under Settings > Joystick.")
+    imgui.Spacing()
+    muted_text("Press Set, then the key (Esc cancels). Keys set here take priority over X-Plane's own. "
+        .. "+ and - zoom during a cinematic. For joystick buttons, assign the FlyWithLua/cinematic_view "
+        .. "commands under Settings > Joystick.", true)
+end
 
-    if not XP.camera_ok then
-        imgui.Separator()
-        imgui.TextWrapped("The X-Plane SDK couldn't be loaded, so outside shots use X-Plane's own chase, orbit and flyby views.")
+-- Camera first: it's the tab people come back to.
+local TABS = { { "Camera", tab_camera }, { "Shots", tab_shots }, { "Auto-start", tab_auto }, { "Keys", tab_keys } }
+
+local function build_settings()
+    local colors, vars = push_theme()
+    header()
+    if imgui.BeginTabBar("cinematic_tabs") then
+        for _, t in ipairs(TABS) do
+            if imgui.BeginTabItem(t[1]) then
+                imgui.Spacing()
+                t[2]()
+                imgui.EndTabItem()
+            end
+        end
+        imgui.EndTabBar()
     end
+    pop_vars(vars)
+    imgui.PopStyleColor(colors)
 end
 
 ------------------------------------------------------------------------------

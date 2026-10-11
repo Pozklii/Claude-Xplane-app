@@ -41,19 +41,53 @@ function draw_string(x, y, s, r, g, b)
 end
 function measure_string(s) return #s * 8 end
 
--- imgui stubs: record widgets, simulate clicks on demand
+-- imgui stubs: record widgets, simulate clicks on demand (not on disabled
+-- widgets), and keep count of everything pushed or begun so a frame can be
+-- checked for balance
 local imgui_clicks = {}
-local widgets = {}
-imgui = {}
-function imgui.TextUnformatted(s) table.insert(widgets, s) end
-function imgui.TextWrapped(s) table.insert(widgets, s) end
+local widgets, checkboxes = {}, {}
+local ui = { colors = 0, vars = 0, disabled = 0, tabbar = 0, tabitem = 0 }
+local function clicked(l) return ui.disabled == 0 and imgui_clicks[l] end
+local function num(v, what) assert(type(v) == "number" and v == v, what .. " needs a number") end
+imgui = { constant = { Col = {}, StyleVar = {} } }
+for i, name in ipairs({ "Text", "FrameBg", "FrameBgHovered", "FrameBgActive", "SliderGrab", "SliderGrabActive",
+    "CheckMark", "Button", "ButtonHovered", "ButtonActive", "Separator", "Tab", "TabHovered", "TabSelected",
+    "TabSelectedOverline", "PlotHistogram", "Border" }) do imgui.constant.Col[name] = i end
+for i, name in ipairs({ "FrameRounding", "GrabRounding", "TabRounding", "FramePadding", "ItemSpacing", "FrameBorderSize" }) do
+    imgui.constant.StyleVar[name] = i
+end
+function imgui.TextUnformatted(s) assert(type(s) == "string") table.insert(widgets, s) end
+function imgui.TextWrapped(s) assert(type(s) == "string") table.insert(widgets, s) end
+function imgui.SeparatorText(s) assert(type(s) == "string") table.insert(widgets, s) end
 function imgui.Separator() end
-function imgui.SameLine() end
-function imgui.Button(l) table.insert(widgets, l) return imgui_clicks[l] == true end
-function imgui.Checkbox(l, v) assert(type(v) == "boolean", l) table.insert(widgets, l) if imgui_clicks[l] then return true, not v end return false, v end
-function imgui.SliderInt(l, v, a, b, f) assert(type(v) == "number", l) table.insert(widgets, l) if imgui_clicks[l] then return true, imgui_clicks[l] end return false, v end
-function imgui.SliderFloat(l, v, a, b, f) assert(type(v) == "number", l) table.insert(widgets, l) if imgui_clicks[l] then return true, imgui_clicks[l] end return false, v end
-function imgui.RadioButton(l, active) table.insert(widgets, l) return imgui_clicks[l] == true end
+function imgui.Spacing() end
+function imgui.Bullet() end
+function imgui.AlignTextToFramePadding() end
+function imgui.SameLine(x, sp) if x then num(x, "SameLine") end end
+function imgui.Indent(w) num(w, "Indent") end
+function imgui.Unindent(w) num(w, "Unindent") end
+function imgui.SetNextItemWidth(w) num(w, "SetNextItemWidth") end
+function imgui.GetWindowWidth() return 480 end
+function imgui.GetContentRegionAvail() return 464, 400 end
+function imgui.CalcTextSize(s) assert(type(s) == "string") return #s * 7, 13 end
+function imgui.ProgressBar(f, w, h, overlay) num(f, "ProgressBar") assert(f >= 0 and f <= 1, "progress 0..1") num(w, "bar width") num(h, "bar height") assert(type(overlay) == "string") end
+function imgui.PushStyleColor(idx, col) num(idx, "colour index") num(col, "colour") assert(col >= 0 and col < 2 ^ 32) ui.colors = ui.colors + 1 end
+function imgui.PopStyleColor(n) n = n or 1 ui.colors = ui.colors - n assert(ui.colors >= 0, "popped more colours than pushed") end
+function imgui.PushStyleVar(idx, v) num(idx, "style index") num(v, "style value") ui.vars = ui.vars + 1 end
+function imgui.PushStyleVar_2(idx, x, y) num(idx, "style index") num(x, "style x") num(y, "style y") ui.vars = ui.vars + 1 end
+function imgui.PopStyleVar(n) assert(n == nil, "pop style vars one at a time") ui.vars = ui.vars - 1 assert(ui.vars >= 0, "popped more style vars than pushed") end
+function imgui.BeginDisabled(d) assert(d == nil or type(d) == "boolean") ui.disabled = ui.disabled + ((d == false) and 0 or 1) ui.dstack = ui.dstack or {} table.insert(ui.dstack, d ~= false) end
+function imgui.EndDisabled() local d = table.remove(ui.dstack) assert(d ~= nil, "EndDisabled without BeginDisabled") if d then ui.disabled = ui.disabled - 1 end end
+function imgui.BeginTabBar(id) assert(type(id) == "string") ui.tabbar = ui.tabbar + 1 return true end
+function imgui.EndTabBar() ui.tabbar = ui.tabbar - 1 assert(ui.tabbar >= 0) end
+function imgui.BeginTabItem(l, ...) assert(type(l) == "string" and select("#", ...) == 0, "tab items take just a label") table.insert(widgets, l) ui.tabitem = ui.tabitem + 1 return true end
+function imgui.EndTabItem() ui.tabitem = ui.tabitem - 1 assert(ui.tabitem >= 0) end
+function imgui.Button(l, w, h) assert(type(l) == "string") table.insert(widgets, l) return clicked(l) == true end
+function imgui.SmallButton(l) assert(type(l) == "string") table.insert(widgets, l) return clicked(l) == true end
+function imgui.Checkbox(l, v) assert(type(v) == "boolean", l) table.insert(widgets, l) table.insert(checkboxes, l) if clicked(l) then return true, not v end return false, v end
+function imgui.SliderInt(l, v, a, b, f) assert(type(v) == "number", l) table.insert(widgets, l) if clicked(l) then return true, imgui_clicks[l] end return false, v end
+function imgui.SliderFloat(l, v, a, b, f) assert(type(v) == "number", l) table.insert(widgets, l) if clicked(l) then return true, imgui_clicks[l] end return false, v end
+function imgui.RadioButton(l, active) table.insert(widgets, l) return clicked(l) == true end
 local windows = {}
 function float_wnd_create(w, h, d, im) assert(im == true) local wnd = { w = w } windows[wnd] = true return wnd end
 function float_wnd_set_title(w, t) end
@@ -673,7 +707,12 @@ end
 command("settings")
 local wnd = next(windows)
 check(wnd and wnd.builder == "CinematicView_build_settings", "settings window opened")
-local function build() _G[wnd.builder](wnd, 0, 0) end
+local function build()
+    _G[wnd.builder](wnd, 0, 0)
+    check(ui.colors == 0 and ui.vars == 0 and ui.disabled == 0 and ui.tabbar == 0 and ui.tabitem == 0,
+        string.format("window frame balanced (colours %d, styles %d, disabled %d, tabs %d/%d)",
+            ui.colors, ui.vars, ui.disabled, ui.tabbar, ui.tabitem))
+end
 local function click(label) imgui_clicks[label] = true build() imgui_clicks = {} end
 widgets = {}
 build()
@@ -684,9 +723,24 @@ for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "Cycle sh
     check(labels:find(l, 1, true), "window shows " .. l)
 end
 check(not labels:find("Caption"), "no captions option")
-check(not labels:find("paused"), "no option to start while paused")
+for _, l in ipairs(checkboxes) do check(not l:find("paused"), "no option to start while paused") end
 check(not labels:find("shake"), "no camera shake option")
-check(labels:find("Aircraft size", 1, true), "window shows the aircraft size")
+check(labels:find("AIRCRAFT", 1, true) and labels:find("|Size|", 1, true), "window shows the aircraft size")
+for _, l in ipairs({ "Camera", "Shots", "Auto-start", "Keys", "MOVEMENT", "PICTURE", "Start cinematic##startstop",
+    "Mixed##mode", "Outside##mode", "Cockpit##mode" }) do
+    check(labels:find(l, 1, true), "window has " .. l)
+end
+check(labels:find("Auto-start in", 1, true) or labels:find("Ready", 1, true), "status line shows the countdown or readiness")
+-- Start and Stop from the window
+click("Start cinematic##startstop")
+check(CVt.active and CVt.reason == "manual", "Start cinematic starts it")
+seconds(1)
+widgets = {}
+build()
+check(table.concat(widgets, "|"):find("Stop##startstop", 1, true), "the button turns into Stop")
+click("Stop##startstop")
+check(not CVt.active, "Stop stops it")
+seconds(1)
 click("Set##set_toggle")
 check(CVt.capturing == "toggle", "waiting for a key")
 check(tap(0x78, { ctrl = true }) == true, "the key being set is swallowed")
@@ -732,36 +786,36 @@ command("toggle")
 command("cycle_mode") -- back to mixed
 
 -- 14. camera speed
-imgui_clicks["Camera speed"] = 2 build() imgui_clicks = {}
+imgui_clicks["##camera_pace"] = 2 build() imgui_clicks = {}
 command("toggle")
 seconds(40)
 check(CVt.shot and CVt.shot.pace == 2, "shots use the camera speed")
 command("toggle")
-imgui_clicks["Camera speed"] = 0.1 build() imgui_clicks = {}
+imgui_clicks["##camera_pace"] = 0.1 build() imgui_clicks = {}
 command("toggle")
 seconds(40)
 check(CVt.shot and CVt.shot.pace == 0.1, "slow camera speed too")
 command("toggle")
-imgui_clicks["Camera speed"] = 0.5 build() imgui_clicks = {}
+imgui_clicks["##camera_pace"] = 0.5 build() imgui_clicks = {}
 
 -- 14a. panning speed, separately
-imgui_clicks["Panning speed"] = 2 build() imgui_clicks = {}
+imgui_clicks["##pan_pace"] = 2 build() imgui_clicks = {}
 command("toggle")
 seconds(40)
 check(CVt.shot and CVt.shot.pan == 2 and CVt.shot.pace == 0.5, "shots use the panning speed, apart from the camera speed")
 command("toggle")
-imgui_clicks["Panning speed"] = 0.1 build() imgui_clicks = {}
+imgui_clicks["##pan_pace"] = 0.1 build() imgui_clicks = {}
 command("toggle")
 seconds(40)
 check(CVt.shot and CVt.shot.pan == 0.1, "slow panning too")
 command("toggle")
-imgui_clicks["Panning speed"] = 0.5 build() imgui_clicks = {}
+imgui_clicks["##pan_pace"] = 0.5 build() imgui_clicks = {}
 seconds(2)
 check(ini_text():find("pan_pace = 0.5", 1, true) and not ini_text():find("shake"), "panning speed saved, no shake setting")
 
 -- 14b. aircraft size, kept for this aircraft
 local auto_size = CVt.size
-imgui_clicks["Aircraft size"] = 60 build() imgui_clicks = {}
+imgui_clicks["##size"] = 60 build() imgui_clicks = {}
 check(CVt.size == 60, "the aircraft size slider sets the size")
 seconds(2)
 check(ini_text():find("size:Test A320.acf = 60.0", 1, true), "and it's saved for this aircraft:\n" .. ini_text())
@@ -778,12 +832,15 @@ command("settings")
 -- 15. settings window
 command("settings")
 wnd = next(windows)
-_G[wnd.builder](wnd, 0, 0)
+build()
 check(#widgets > 10, "settings window built")
-imgui_clicks["Start when I'm away from the controls"] = true
-imgui_clicks["Away for"] = 300
-imgui_clicks["Cockpit only"] = true
-_G[wnd.builder](wnd, 0, 0)
+imgui_clicks["##afk_timeout"] = 300
+imgui_clicks["Cockpit##mode"] = true
+build()
+imgui_clicks = {}
+click("Start when I'm away from the controls")
+imgui_clicks["##afk_timeout"] = 500 -- disabled now: no effect
+build()
 imgui_clicks = {}
 seconds(3)
 local ini = ini_text()

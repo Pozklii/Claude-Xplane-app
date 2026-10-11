@@ -12,7 +12,10 @@ It can be switched on and off whenever you like, and it starts by itself after a
 
 ## Use
 
-Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic View**. It has **Start now / Stop** and **Next shot** buttons, all the settings, and a key for each action.
+Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic View**.
+
+- **At the top:** what it's doing (with a bar counting down to auto-start), a big **Start cinematic** / **Stop** button, **Next shot**, and **Mixed / Outside / Cockpit** to choose the shots.
+- **Tabs below:** **Camera** (camera speed, panning speed, aircraft size, letterbox bars, fades), **Shots** (cockpit share, shot lengths), **Auto-start** (whether and when it starts by itself) and **Keys** (a key for each action).
 
 - **Start/stop by hand:** with the button, or a key you set in the window. A cinematic you start yourself keeps running while you use the controls (the autopilot is a good idea) until you stop it or pick another view.
 - **When you're away:** after the away time (2 minutes by default) with no keyboard, mouse, joystick or head-tracking input, it starts by itself, but never while the sim is paused. Any input ends it, except the zoom keys and the keys you've set for the cinematic.
@@ -20,7 +23,7 @@ Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → 
 
 ### Keys
 
-In the window's **Keys** section, press **Set** next to an action, then the key you want (with Ctrl, Alt or Shift if you like; Esc cancels). **Clear** removes it. A key set here takes priority over whatever X-Plane does with it, and setting a key on one action takes it off any other.
+In the window's **Keys** tab, press **Set** next to an action, then the key you want (with Ctrl, Alt or Shift if you like; Esc cancels). **Clear** removes it. A key set here takes priority over whatever X-Plane does with it, and setting a key on one action takes it off any other.
 
 | Action | Does |
 | --- | --- |
