@@ -2,10 +2,9 @@
 
 Royal Air Maroc livery (CN-RGO) for an Embraer E190 in X-Plane 12.
 
-**Status:** the design is done; the textures are not built yet. The fuselage
-and tail textures have to follow the exact UV layout of the E190 model, so
-they need that model's paint kit (or one of its stock liveries) before they
-can be built.
+**Status:** the 8K fuselage and tail textures are built for the X-Crafts
+E-Jets Family E190. They are derived from the X-Crafts paint kit, so they live
+in the private `Pozklii/190` repo (branch `royal-air-maroc-livery`), not here.
 
 - `artwork/ram_e190_profile_8k.png`: 8192 px left-side profile of the full design (transparent background)
 - `artwork/ram_e190_profile_preview.jpg`: the same profile on a sky background
@@ -19,5 +18,24 @@ Regenerate (needs Pillow and NumPy):
 python3 tools/elements.py artwork fonts
 python3 tools/profile.py artwork artwork/ram_e190_profile_8k.png
 ```
+
+### Building the X-Plane textures (`kit-tools/`)
+
+Run from a working folder next to the extracted kit PSDs (needs
+`psd-tools[composite]`, SciPy):
+
+```sh
+python3 kit-tools/extract.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" "E-JETS_PAINTKIT_TAIL 22-08-28.psd"
+python3 kit-tools/base_fus.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" layers/fus_base_e190.png
+python3 kit-tools/base_generic.py "E-JETS_PAINTKIT_TAIL 22-08-28.psd" layers/tail_base.png "BASE TEXTURE" "TOP LAYER"
+python3 kit-tools/paint_fus.py tools fonts layers
+python3 kit-tools/paint_tail.py tools layers
+python3 kit-tools/combine.py layers/fus_base_e190.png layers/fus_paint8.png fuselage.png
+python3 kit-tools/combine.py layers/tail_base.png layers/tail_paint8.png tail.png
+```
+
+The fuselage is mapped from the photo using the cabin windows as anchors and
+arc length around the fuselage; each fin side uses a five-point
+piecewise-affine map. `dump.py` and `tree.py` inspect a PSD's layers.
 
 Fonts: Outfit and Aref Ruqaa, both SIL Open Font License (see `fonts/`).
