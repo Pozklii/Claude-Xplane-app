@@ -64,7 +64,7 @@ end
 function add_macro(name, code) macros[name] = compile(code) end
 function XPLMSetGraphicsState() end
 local drawing = false
-function glColor4f() assert(drawing, "OpenGL call outside drawing") end
+function glColor4f(r, g, b, a) assert(drawing, "OpenGL call outside drawing") drawn.alpha = a end
 function glRectf(x1, y1, x2, y2)
   assert(drawing, "OpenGL call outside drawing")
   assert(x2 >= x1 and y2 >= y1, "bad rectangle")
@@ -312,6 +312,9 @@ for _, l in ipairs(logs) do check(not l:find("not started") and not l:find("fail
 local cine, A, S, BIND, getB = CinematicViews._state()
 local SHOTS, ORDER = CinematicViews._shots()
 local RT = CinematicViews._geometry()
+local FADE = CinematicViews._fade()
+check(S.blend_time == 2, "shots fade by default (" .. S.blend_time .. " s)")
+S.blend_time = 0          -- cuts for most tests; the fades have their own section
 local n_wide, n_close, n_int = 0, 0, 0
 for _, id in ipairs(ORDER) do
   if id:sub(1, 5) == "wide_" then n_wide = n_wide + 1
@@ -356,11 +359,7 @@ for _ = 1, 8 do
   step(3)
   check(cine.def.kind == "int" and in_cockpit(), "Next stays in the cockpit (" .. cine.def.id .. ")")
 end
-for _ = 1, 8 do
-  CinematicViews.previous_shot()
-  step(3)
-  check(cine.def.kind == "int" and in_cockpit(), "Previous stays in the cockpit (" .. cine.def.id .. ")")
-end
+local last_int = cine.def.id
 run_command("toggle")
 step(3)
 check(not cine.active and in_cockpit(), "Camera off")
@@ -370,15 +369,6 @@ run_command("toggle")
 step(3)
 check(cine.active and cine.def and cine.def.id == "wide_rear" and X.mock_camera_controlled() == 1,
       "Camera on outside starts an exterior shot (" .. tostring(cine.def and cine.def.id) .. ")")
-CinematicViews.previous_shot()
-step(3)
-check(cine.active and cine.def.id == "close_nosegear" and X.mock_camera_controlled() == 1,
-      "Previous from the first exterior shot goes to the last one (" .. cine.def.id .. ")")
-for _ = 1, 15 do
-  CinematicViews.previous_shot()
-  step(3)
-  check(cine.active and cine.def.kind == "ext" and X.mock_camera_controlled() == 1, "Previous stays outside (" .. cine.def.id .. ")")
-end
 for _ = 1, 15 do
   CinematicViews.next_shot()
   step(3)
@@ -392,7 +382,7 @@ X.mock_set_view(1026, 0)
 step(3)
 run_command("toggle")
 step(3)
-check(cine.active and cine.def.id == "scan", "back in the cockpit, Camera on picks up the cockpit shots again")
+check(cine.active and cine.def.id == last_int, "back in the cockpit, Camera on picks up the cockpit shot you left (" .. cine.def.id .. ")")
 run_command("toggle")
 step(3)
 
@@ -405,9 +395,9 @@ step(60)
 local hd = head()
 check(cine.active and cine.def.kind == "int" and (math.abs(hd[4] - EYE[4]) > 0.01 or math.abs(hd[5] - EYE[5]) > 0.01),
       "cockpit shots work whatever number the cockpit view has")
-CinematicViews.previous_shot()
+CinematicViews.next_shot()
 step(200)
-check(cine.active and cine.def.kind == "int", "and Previous works there too")
+check(cine.active and cine.def.kind == "int", "and Next works there too")
 CinematicViews.stop()
 step(6)
 X.mock_set_view(1026, 0)
@@ -427,7 +417,7 @@ local function measure_exterior(n, each)
     for _, k in ipairs({ "x", "y", "z", "pit", "hdg", "rol", "zoom" }) do
       if not finite(cam[k]) then m.bad = m.bad + 1 return end
     end
-    if cine.blend < 1 or not cine.st or not cine.st.r then return end
+    if not cine.st or not cine.st.r then return end
     m.frames = m.frames + 1
     local r = cine.st.r
     local tx, ty, tz, _, _, _, size = RT.subject(r)
@@ -518,7 +508,6 @@ local function measure_cockpit(n, each)
     if each then each() end
     local h = head()
     for k = 1, 6 do if not finite(h[k]) then m.bad = m.bad + 1 return end end
-    if cine.int_from then return end
     m.frames = m.frames + 1
     local dx, dy, dz = h[1] - EYE[1], h[2] - EYE[2], h[3] - EYE[3]
     if math.abs(dx) > 0.0801 or dy > 0.0501 or dy < -0.0401 or dz < -0.0801 or dz > 0.0601 then
@@ -651,7 +640,7 @@ check(math.abs(h[3] - EYE[3]) < 1e-3 and math.abs(h[4] - EYE[4]) < 1e-3, "and yo
 step(3)
 
 -- ---------------------------------------------------------------------------
-section("next and previous step through the shots, skipping parts that aren't there")
+section("Next steps through the shots, skipping parts that aren't there")
 plane.u = 3000
 steer(200, 90, 0, 0, false)
 set("sim/flightmodel2/gear/deploy_ratio", 0)       -- gear up
@@ -660,9 +649,8 @@ step(3)
 CinematicViews.next_shot()
 step(3)
 check(cine.def.id == "wide_rear", "with the gear up, Next from the tail skips the gear close-ups (" .. cine.def.id .. ")")
-CinematicViews.previous_shot()
+CinematicViews.shot("close_tail")
 step(3)
-check(cine.def.id == "close_tail", "and Previous comes back (" .. cine.def.id .. ")")
 set("sim/flightmodel2/gear/deploy_ratio", 1)
 CinematicViews.next_shot()
 step(3)
@@ -672,9 +660,6 @@ step(3)
 CinematicViews.next_shot()
 step(3)
 check(cine.def.id == "scan", "after the last cockpit shot, back to the first (" .. cine.def.id .. ")")
-CinematicViews.previous_shot()
-step(3)
-check(cine.def.id == "autopilot", "and Previous goes back round (" .. cine.def.id .. ")")
 CinematicViews.stop()
 step(3)
 
@@ -712,7 +697,7 @@ check(warned, "says + and - are kept for zoom")
 tap(0x1B, "")
 check(BIND.next == nil, "Esc cancels")
 
-section("assign joystick buttons to next and previous view")
+section("assign a joystick button to next view")
 build("Assign##next")
 X.mock_set_button(57, 1)
 step(2)
@@ -720,12 +705,6 @@ check(BIND.next and BIND.next.kind == "joy" and BIND.next.n == 57, "joystick but
 X.mock_set_button(57, 0)
 step(2)
 check(not cine.active, "assigning did not trigger it")
-build("Assign##prev")
-X.mock_set_button(58, 1)
-step(2)
-X.mock_set_button(58, 0)
-step(2)
-check(BIND.prev and BIND.prev.n == 58, "button 58 assigned to previous view")
 plane.u = 1000
 steer(150, 0, 0, 0, false)
 local last = cine.last[in_cockpit() and "int" or "ext"]
@@ -736,10 +715,11 @@ local after_next = cine.def.id
 check(after_next ~= last, "button 57: next view")
 X.mock_set_button(57, 0) step(3)
 check(cine.def.id == after_next, "holding the button steps once")
-X.mock_set_button(58, 1) step(3) X.mock_set_button(58, 0) step(3)
-check(cine.def.id == last, "button 58: previous view")
-build("Clear##prev")
-check(BIND.prev == nil, "Clear removes an assignment")
+build("Assign##window")
+tap(0x75, "")
+check(BIND.window and BIND.window.vk == 0x75, "F6 assigned to the window")
+build("Clear##window")
+check(BIND.window == nil, "Clear removes an assignment")
 CinematicViews.toggle_window()
 local f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
 local ini = f and f:read("*a") or ""
@@ -860,27 +840,127 @@ if f then f:close() end
 check(ini:find("size.ASK21 = 1.50", 1, true) ~= nil, "correction saved per aircraft")
 
 -- ---------------------------------------------------------------------------
-section("glides between shots go round the aircraft, never through it")
+section("shot transition: a fade through black as long as the setting, or a cut")
 plane.u = 1500
 steer(150, 0, 0, 0, false)
-S.blend_time = 2.5
-local through = 0
-for _, pair in ipairs({ { "wide_rear", "close_cockpit" }, { "close_wingtip", "close_tail" }, { "close_engine", "wide_high" },
-                        { "close_nose", "close_wing" }, { "wide_front", "close_tail" } }) do
-  CinematicViews.shot(pair[1])
-  step(180)
-  CinematicViews.shot(pair[2])
-  step(2, function() end)
-  step(60 * 3, function()
-    if cam then
-      local lx, ly, lz = world_to_body(cam.x - (plane.e - origin.e), cam.y - plane.u, cam.z - (plane.s - origin.s),
-                                       plane.psi, plane.the, plane.phi)
-      local ex, ey, ez = RT.box()
-      if math.abs(lx) < ex * 0.97 and math.abs(ly) < ey * 0.97 and math.abs(lz) < ez * 0.97 then through = through + 1 end
-    end
+CinematicViews.shot("wide_rear")
+step(60)
+check(drawn.rects == 0, "with the transition at 0, nothing is drawn")
+CinematicViews.next_shot()
+step(1)
+check(cine.def.id == "wide_front" and FADE.alpha == 0, "at 0, shots cut straight away")
+
+-- A fade: watch how dark the picture is and when the shot changes.
+local function watch_fade(action, frames)
+  local rec = { first_black = nil, switched = nil, clear = nil, max_alpha = 0, from = cine.def and cine.def.id, rose = true }
+  local n, last_alpha = 0, 0
+  drawn.alpha = nil
+  action()
+  step(frames, function()
+    n = n + 1
+    local a = drawn.alpha or 0
+    drawn.alpha = nil
+    rec.max_alpha = math.max(rec.max_alpha, a)
+    if not rec.first_black and a >= 0.999 then rec.first_black = n end
+    if not rec.switched and (cine.def and cine.def.id) ~= rec.from then rec.switched, rec.alpha_at_switch = n, last_alpha end
+    if rec.first_black and not rec.clear and a == 0 then rec.clear = n end
+    if not rec.first_black and a < last_alpha - 1e-6 then rec.rose = false end
+    last_alpha = a
   end)
+  return rec
 end
-check(through == 0, "glide passed through the aircraft on " .. through .. " frames")
+
+for _, len in ipairs({ 1, 2, 4 }) do
+  S.blend_time = len
+  local before = cine.def.id
+  local rec = watch_fade(function() CinematicViews.next_shot() end, 60 * (len + 1))
+  check(rec.first_black and math.abs(rec.first_black / 60 - len / 2) < 0.1,
+        ("%g s: the picture fades out over half the time (black after %.2f s)"):format(len, (rec.first_black or 0) / 60))
+  check(rec.rose, len .. " s: it darkens steadily")
+  check(rec.switched and rec.alpha_at_switch >= 0.999, len .. " s: the shot changes while the picture is black")
+  check(rec.clear and math.abs((rec.clear - rec.first_black) / 60 - len / 2) < 0.15,
+        ("%g s: and fades back in over the other half (%.2f s)"):format(len, ((rec.clear or 0) - (rec.first_black or 0)) / 60))
+  check(cine.def.id ~= before and X.mock_camera_controlled() == 1, len .. " s: on the next shot")
+end
+
+S.blend_time = 2
+local rec = watch_fade(function() CinematicViews.shot("scan") end, 60 * 4)
+check(rec.switched and rec.alpha_at_switch >= 0.999 and in_cockpit() and rec.clear,
+      "into the cockpit: the view changes while black, then fades in")
+rec = watch_fade(function() run_command("toggle") end, 60 * 4)
+check(not cine.active and rec.max_alpha >= 0.999 and rec.clear, "turning the camera off fades too")
+local h_off = head()
+check(math.abs(h_off[4] - EYE[4]) < 1e-3 and math.abs(h_off[5] - EYE[5]) < 1e-3, "and your view is back")
+rec = watch_fade(function() run_command("toggle") end, 60 * 4)
+check(cine.active and cine.def.kind == "int" and rec.max_alpha >= 0.999 and rec.clear, "and turning it on")
+
+-- Presses during a fade all count: two Nexts move two shots on.
+local first = cine.def.id
+CinematicViews.next_shot()
+step(20)
+CinematicViews.next_shot()
+step(60 * 3)
+local ids = {}
+for _, id in ipairs(ORDER) do if SHOTS[id].kind == "int" and SHOTS[id].available ~= nil and not SHOTS[id].available() then else if SHOTS[id].kind == "int" then ids[#ids + 1] = id end end end
+local pos = {}
+for i, id in ipairs(ids) do pos[id] = i end
+check((pos[cine.def.id] - pos[first]) % #ids == 2, "two presses during one fade move two shots on (" .. first .. " -> " .. cine.def.id .. ")")
+
+-- You changing the view in the middle of a fade: it stops, nothing waits.
+CinematicViews.next_shot()
+step(30)
+X.mock_set_view(1018, 1)
+step(60 * 3)
+check(not cine.active and FADE.alpha == 0 and #FADE.todo == 0, "changing the view yourself mid-fade stops it and clears the picture")
+X.mock_set_view(1026, 0)
+step(3)
+
+-- Nothing fades when filming can't start (in VR).
+set("sim/graphics/VR/enabled", 1)
+rec = watch_fade(function() run_command("toggle") end, 60)
+check(not cine.active and rec.max_alpha == 0 and cine.message ~= nil, "in VR it doesn't start, and doesn't fade")
+set("sim/graphics/VR/enabled", 0)
+S.blend_time = 0
+step(3)
+
+-- ---------------------------------------------------------------------------
+section("head movement speed: slow and calm at 0, quick at 1")
+plane.u = 3000
+steer(200, 90, 0, 0, false)
+local moves, peaks, paths = {}, {}, {}
+for _, v in ipairs({ 0, 0.5, 1 }) do
+  S.head_motion = v
+  CinematicViews.shot("scan")
+  step(3)
+  local n_moves, last_target = 0, nil
+  local m = measure_cockpit(60 * 120, function()
+    local target = cine.st.th and (cine.st.th .. "," .. cine.st.tp)
+    if target ~= last_target then n_moves, last_target = n_moves + 1, target end
+  end)
+  local path, peak, prev = 0, 0, nil
+  for k = 1, #m.headings do
+    if prev then
+      local d = math.abs(m.headings[k] - prev[1]) + math.abs(m.pitches[k] - prev[2])
+      path, peak = path + d, math.max(peak, math.max(math.abs(m.headings[k] - prev[1]), math.abs(m.pitches[k] - prev[2])) * 60)
+    end
+    prev = { m.headings[k], m.pitches[k] }
+  end
+  moves[#moves + 1], peaks[#peaks + 1], paths[#paths + 1] = n_moves / 2, peak, path / 120
+  check(m.outside_space == 0 and m.jump == 0 and m.fast == 0 and m.still == 0 and m.bad == 0,
+        ("speed %.1f: safe, smooth and never frozen (space %d, jumps %d, fast %d, frozen %d)"):format(v, m.outside_space, m.jump, m.fast, m.still))
+end
+if os.getenv("VERBOSE") then
+  print(("   head: %.0f, %.0f, %.0f moves a minute; peak %.0f, %.0f, %.0f deg/s; %.1f, %.1f, %.1f deg/s on average"):format(
+    moves[1], moves[2], moves[3], peaks[1], peaks[2], peaks[3], paths[1], paths[2], paths[3]))
+end
+check(moves[2] > moves[1] * 1.7 and moves[3] > moves[2] * 1.7,
+      ("the head moves on more often as the setting goes up (%.0f, %.0f, %.0f a minute)"):format(moves[1], moves[2], moves[3]))
+check(peaks[1] < 70 and peaks[2] > peaks[1] * 1.4 and peaks[3] >= peaks[2] * 0.95,
+      ("and turns faster (peak %.0f, %.0f, %.0f deg/s)"):format(peaks[1], peaks[2], peaks[3]))
+check(paths[3] > paths[1] * 2.5, ("overall it moves a lot more at 1 than at 0 (%.1f vs %.1f deg/s)"):format(paths[3], paths[1]))
+S.head_motion = 0.5
+CinematicViews.stop()
+step(6)
 
 -- ---------------------------------------------------------------------------
 section("paused: drawing alone keeps the camera alive and moving")
@@ -919,8 +999,10 @@ end)
 check(math.abs(A.gs - 150) < 10, ("ground speed from replay motion %.1f"):format(A.gs))
 set("sim/time/is_in_replay", 0)
 
-section("nothing is ever drawn over the picture")
-check(drawn.rects == 0 and #drawn.strings == 0, ("no bars or text drawn (%d, %d)"):format(drawn.rects, #drawn.strings))
+section("nothing is drawn over the picture except a fade")
+local rects = drawn.rects
+step(120)
+check(drawn.rects == rects and #drawn.strings == 0, ("no bars or text drawn (%d, %d)"):format(drawn.rects - rects, #drawn.strings))
 
 -- ---------------------------------------------------------------------------
 section("a small window with the basics")
@@ -928,8 +1010,8 @@ CinematicViews.stop()
 step(3)
 CinematicViews.toggle_window()
 labels = build()
-local want = { "Camera OFF", "< Previous", "Next >", "Camera on/off", "Next view", "Previous view",
-               "Open/close window", "Camera distance", "Camera shake", "Shot transition", "Cockpit head movement",
+local want = { "Camera OFF", "Next >", "Camera on/off", "Next view",
+               "Open/close window", "Camera distance", "Camera shake", "Shot transition", "Head movement speed",
                "Aircraft size" }
 for _, w in ipairs(want) do
   local found = false
@@ -938,7 +1020,8 @@ for _, w in ipairs(want) do
 end
 check(#labels < 36, "window kept small (" .. #labels .. " items)")
 for _, l in ipairs(labels) do
-  check(not l:find("Random", 1, true) and not l:find("Save", 1, true), "no random views or saving (" .. l .. ")")
+  check(not l:find("Random", 1, true) and not l:find("Save", 1, true) and not l:find("Previous", 1, true),
+        "no random views, saving or previous view (" .. l .. ")")
 end
 check(ui.depth == 0, "style colours balanced")
 build("Camera OFF")
@@ -950,11 +1033,18 @@ check(not cine.active, "Camera ON button stops it")
 ui.set = { "Camera shake", 0.8 }
 build()
 check(S.shake == 0.8, "sliders change settings")
+ui.set = { "Head movement speed", 0.9 }
+build()
+ui.set = { "Shot transition", 3 }
+build()
+check(S.head_motion == 0.9 and S.blend_time == 3, "head movement speed and shot transition sliders")
 CinematicViews.toggle_window()
 f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
 ini = f and f:read("*a") or ""
 if f then f:close() end
-check(ini:find("shake = 0.8", 1, true) ~= nil, "settings saved")
+check(ini:find("shake = 0.8", 1, true) ~= nil and ini:find("blend_time = 3", 1, true) ~= nil
+      and ini:find("head_motion = 0.9", 1, true) ~= nil, "settings saved")
+S.blend_time, S.head_motion = 0, 0.5
 
 section("an optional key or button opens and closes the window")
 CinematicViews.toggle_window()
@@ -985,9 +1075,12 @@ check(ini:find("bind.window = joy:60", 1, true) ~= nil, "the window button is sa
 check(ini:find("myshot", 1, true) == nil and ini:find("random", 1, true) == nil, "nothing about random views in the settings")
 
 -- ---------------------------------------------------------------------------
-section("no random views")
-for name in pairs(commands) do check(not name:find("random") and not name:find("save_shot"), "command " .. name) end
-check(CinematicViews.random_shot == nil and CinematicViews.save_shot == nil, "no random or save functions")
+section("no random views and no previous view")
+for name in pairs(commands) do
+  check(not name:find("random") and not name:find("save_shot") and not name:find("previous"), "command " .. name)
+end
+check(CinematicViews.random_shot == nil and CinematicViews.save_shot == nil and CinematicViews.previous_shot == nil,
+      "no random, save or previous functions")
 
 -- ---------------------------------------------------------------------------
 section("no errors logged")

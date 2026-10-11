@@ -5,7 +5,7 @@ A [FlyWithLua NG+](https://github.com/X-Friese/FlyWithLua) script for screenshot
 - **Outside:** a wide shot of the whole aircraft, or a close-up of one part of it.
 - **Inside:** a pilot's head looking around the cockpit, as a real pilot would.
 
-It films where you are. Start it in the cockpit and you get the 6 cockpit shots; start it from an outside view and you get the 13 exterior shots. **Next** and **Previous** step through the shots of that kind. Nothing is ever drawn over the picture.
+It films where you are. Start it in the cockpit and you get the 6 cockpit shots; start it from an outside view and you get the 13 exterior shots. **Next** steps through the shots of that kind, and shots change with a fade through black or a straight cut. Apart from the fade, nothing is ever drawn over the picture.
 
 Everything is in one file, [`Cinematic_Views.lua`](./Cinematic_Views.lua).
 
@@ -25,8 +25,8 @@ The window is small and holds the basics:
 
 - **A row of buttons:**
   - **Camera ON/OFF**
-  - **< Previous** and **Next >**
-- **Your controls:** a key or joystick button for **Camera on/off**, **Next view**, **Previous view** and, optionally, **Open/close window**.
+  - **Next >**
+- **Your controls:** a key or joystick button for **Camera on/off**, **Next view** and, optionally, **Open/close window**.
   - Press **Assign**, then the key or button you want. **Esc** cancels.
   - Assigned keys only control the camera, so X-Plane won't also act on them.
   - X-Plane still sees joystick buttons, so pick ones that have no X-Plane assignment.
@@ -34,8 +34,8 @@ The window is small and holds the basics:
 - **Sliders:**
   - **Camera distance**
   - **Camera shake**
-  - **Shot transition:** the glide between related shots, 0 for a hard cut
-  - **Cockpit head movement**
+  - **Shot transition:** how shots change. Above 0 it's a fade through black that long (half fading out, half fading in), and the shot changes while the picture is black. At 0 shots cut straight from one to the next. Turning the camera on and off uses it too.
+  - **Head movement speed:** how quickly the pilot's head moves in cockpit shots (see below)
   - **Aircraft size:** a correction for the aircraft you're flying, remembered for it
 
 Everything saves automatically to `Cinematic_Views.ini` next to the script.
@@ -44,8 +44,8 @@ Everything saves automatically to `Cinematic_Views.ini` next to the script.
 
 The script films where you are when you turn it on:
 
-- **In the cockpit:** cockpit shots only. **Next** and **Previous** go round the cockpit shots.
-- **In an outside view** (chase, circle, tower or any other): exterior shots only. **Next** and **Previous** go round the exterior shots.
+- **In the cockpit:** cockpit shots only. **Next** goes round the cockpit shots.
+- **In an outside view** (chase, circle, tower or any other): exterior shots only. **Next** goes round the exterior shots.
 
 Each starts with the last shot you watched there. To switch, turn the camera off, change the view yourself, and turn it on again. Changing the view while filming also stops the camera, so X-Plane's view keys always get you out.
 
@@ -98,7 +98,13 @@ How the head moves:
 - It leans a few centimetres toward what it's reading: forward to the pedestal, back for the overhead, toward the window to look out.
 - It breathes, and responds a little to G-forces, turbulence, a firm touchdown and runway rumble.
 
-Where things are comes from typical cockpit layouts, adjusted for the side of the cockpit you sit on. **Cockpit head movement** sets how lively the head is; at 0 it only turns.
+Where things are comes from typical cockpit layouts, adjusted for the side of the cockpit you sit on.
+
+**Head movement speed** sets how quickly the head moves:
+
+- **0:** slow and calm. The head lingers about 2.5 times as long on each thing, and turns at about 0.4 times the speed, never faster than about 65° a second.
+- **The middle (the default):** a pilot's normal pace, about 80 moves a minute.
+- **1:** quick and busy. The head moves on about 2.5 times as often and turns 2.5 times as fast, up to a real head's limit.
 
 Cockpit shots can't clip through the aircraft. The head never moves more than 8 cm sideways, 5 cm up, 4 cm down, 8 cm forward or 6 cm back from the seat. That keeps the view inside the cockpit, clear of the panel, the seat and the walls.
 
@@ -118,7 +124,7 @@ You can also bind commands in X-Plane's **Settings → Keyboard** or **Joystick*
 | --- | --- |
 | `toggle` | Camera on or off. It starts with cockpit shots in the cockpit and exterior shots outside, with the last one you watched there |
 | `stop` | Stop and return to your view |
-| `next_shot`, `previous_shot` | Next or previous view of the same kind; with the camera off they start it, like `toggle` |
+| `next_shot` | Next view of the same kind; with the camera off it starts it, like `toggle` |
 | `shot_<name>` | A specific shot, switching between the cockpit and outside if needed: `wide_rear`, `wide_front`, `wide_side`, `wide_high`, `wide_low`, `close_cockpit`, `close_nose`, `close_engine`, `close_wing`, `close_wingtip`, `close_tail`, `close_gear`, `close_nosegear`, `scan`, `panel`, `overhead`, `throttle`, `window`, `autopilot` |
 | `orbit_left`, `orbit_right`, `camera_up`, `camera_down`, `zoom_in`, `zoom_out` | Adjust the live shot while held |
 | `reset_adjustments` | Undo those adjustments for the current shot |
@@ -137,7 +143,7 @@ Exterior shots use the SDK's `XPLMControlCamera` through LuaJIT's FFI. The camer
 
 Cockpit shots write the `sim/graphics/view/pilots_head_*` datarefs, clamped to the safe space around the seat. Any view that isn't an exterior one (`sim/graphics/view/view_is_external` is 0) counts as the cockpit, whatever view number X-Plane gives it.
 
-Keys, the mouse wheel and joystick buttons use FlyWithLua's own key and wheel hooks and X-Plane's joystick button values. The script only holds back a key or the wheel when it uses them. X-Plane's zoom commands are taken over only during exterior shots. The script draws nothing on screen.
+Keys, the mouse wheel and joystick buttons use FlyWithLua's own key and wheel hooks and X-Plane's joystick button values. The script only holds back a key or the wheel when it uses them. X-Plane's zoom commands are taken over only during exterior shots. The only thing the script draws is the black of a fade between shots: a full-screen rectangle drawn with FlyWithLua's own drawing functions. It isn't drawn in VR.
 
 When you stop, or reload scripts, the script releases the camera and the zoom commands and puts your head back. If FlyWithLua stops running the script for any reason, it releases them on its own.
 
@@ -149,9 +155,11 @@ If something isn't working, look for lines starting with `Cinematic Views:` in X
 
 - Every exterior shot keeps its subject in frame, with the whole aircraft in a wide shot. Its camera keeps moving, stays outside the aircraft and above the ground, and close-ups fill the frame with their part. This holds for taxiing, a takeoff roll, a banked turn and an approach.
 - Cockpit shots stay in the safe space around the seat through takeoff rolls, turbulence and firm landings. They turn smoothly at head-like speeds, never freeze, and look where they should, for example the overhead panel most of the time in the overhead shot.
-- Turned on in the cockpit, the camera only uses cockpit shots, and outside only exterior shots, with **Next** and **Previous** going round them both ways. It also works when X-Plane gives the cockpit view a different number.
+- Turned on in the cockpit, the camera only uses cockpit shots, and outside only exterior shots, with **Next** going round them. It also works when X-Plane gives the cockpit view a different number.
 - Key and joystick assignments work, including the window's own key, and + and − and the mouse wheel do the right thing inside, outside and when not filming. Zoom glides with no jumps from frame to frame, and it's remembered per shot.
-- Shots fit both an airliner and a glider, transitions go round the aircraft, view changes hand the camera over correctly, and your head is restored.
-- Pause, replay, the window and saved settings work, and nothing is drawn over the picture.
+- Fades last as long as the setting, half out and half in, with the shot changing while the picture is black. At 0 shots cut. Several presses during one fade all count, and changing the view yourself mid-fade clears it at once.
+- The head movement speed changes how often and how fast the head moves, and the head stays smooth and in the safe space at every setting.
+- Shots fit both an airliner and a glider, view changes hand the camera over correctly, and your head is restored.
+- Pause, replay, the window and saved settings work, and nothing but a fade is drawn over the picture.
 
 The tests need `cc` and `luajit`. Because they run against a mock, they check the script's logic but not X-Plane's own behaviour, so try changes in the sim too.

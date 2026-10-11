@@ -1,5 +1,5 @@
 -- =============================================================================
---  Cinematic Views for X-Plane 12                                        v4.1.0
+--  Cinematic Views for X-Plane 12                                        v4.2.0
 --  A FlyWithLua NG+ script: an automatic cinematic camera for screenshots
 --  and videos, outside and inside the aircraft.
 --
@@ -18,9 +18,11 @@
 --  * Zoom: + and - (and the mouse wheel) zoom the exterior camera smoothly,
 --    like X-Plane's own zoom; in the cockpit, and when you are not filming,
 --    they are X-Plane's own as usual.
---  * A small window: camera on/off, previous/next, your own key or joystick
---    button for each and for the window itself, and a few sliders. Nothing
---    is ever drawn over the picture.
+--  * Shots change with a fade through black, as long as you like, or a cut.
+--  * A small window: camera on/off, next view, your own key or joystick
+--    button for each and for the window itself, and a few sliders: camera
+--    distance, camera shake, shot transition, head movement speed and
+--    aircraft size.
 --
 --  Install: copy this file to  X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
 --  Use:     Plugins > FlyWithLua > FlyWithLua Macros > Cinematic Views
@@ -29,7 +31,7 @@
 --  file in Cinematic_Views.ini.
 -- =============================================================================
 
-local VERSION = "4.1.0"
+local VERSION = "4.2.0"
 local TAG = "Cinematic Views: "
 
 local function log(msg)
@@ -215,13 +217,13 @@ local function cockpit_view() return geti(REF.external) == 0 end
 -- -----------------------------------------------------------------------------
 
 local DEFAULTS = {
-  blend_time = 2.5,       -- glide between related shots (0 = always cut)
+  blend_time = 2.0,       -- shot transition: a fade through black this long (0 = straight cut)
   distance = 1.0,         -- exterior camera distance multiplier
   orbit_speed = 5,        -- degrees per second
   shake = 0.5,            -- handheld camera shake, 0..1
   max_zoom = 8,           -- telephoto limit for flyby and spotter shots
   normalize_lens = true,  -- frame exterior shots as if the sim FOV were 60 degrees
-  head_motion = 0.5,      -- how much the head moves in cockpit shots, 0..1
+  head_motion = 0.5,      -- how fast the head moves in cockpit shots, 0 (slow, calm) .. 1 (quick)
 }
 
 local RANGES = {
@@ -241,7 +243,7 @@ local SIZE = { key = "default", scales = {} }
 -- Your key or joystick button for each action: { kind = "key", vk, shift,
 -- ctrl, alt } or { kind = "joy", n }.
 local BIND = {}
-local ACTION_IDS = { "toggle", "next", "prev", "window" }
+local ACTION_IDS = { "toggle", "next", "window" }
 local ACTION_KNOWN = {}
 for _, a in ipairs(ACTION_IDS) do ACTION_KNOWN[a] = true end
 
@@ -316,7 +318,6 @@ local min, max, rad, deg, random = math.min, math.max, math.rad, math.deg, math.
 math.randomseed(os.time())
 
 local function clamp(v, a, b) if v < a then return a elseif v > b then return b end return v end
-local function lerp(a, b, t) return a + (b - a) * t end
 local function wrap180(a) return (a + 180) % 360 - 180 end
 local function smoother(t) t = clamp(t, 0, 1) return t * t * t * (t * (t * 6 - 15) + 10) end
 local function rnd(a, b) return a + (b - a) * random() end
@@ -518,7 +519,7 @@ local HP = {
 local function update_head_motion(dt)
   local o = HP.out
   if dt <= 0 then return end
-  local amt, g = S.head_motion, 9.81
+  local amt, g = 0.5, 9.81
 
   local fx, fy, fz = world_to_body(A.ax, A.ay + g, A.az, A.psi, A.the, A.phi)
   fy = fy - g
@@ -799,6 +800,9 @@ do
   -- smoothly (a little overshoot that settles) to the next, leaning a few
   -- centimetres toward what it reads, breathing slowly.
   local function look_around(r, st, o, dt)
+    -- Head movement speed: 1 at the middle setting; at 0 the head turns at
+    -- 0.4 times the speed and lingers 2.5 times as long, at 1 the reverse.
+    local speed = 0.4 * 6.25 ^ S.head_motion
     local seat = seat_side()
     local c = (seat ~= 0) and -seat or 1
     if not st.area or st.t >= st.dwell_end then
@@ -818,11 +822,11 @@ do
       st.area = name
       -- a look at what the shot is about lasts; a look at anything else is a glance
       local glance = (r.w[name] or 0) < 0.5 * r.wmax
-      st.dwell_end = st.t + rnd(a.dwell[1], a.dwell[2]) * r.dwell * (glance and 0.6 or 1)
+      st.dwell_end = st.t + rnd(a.dwell[1], a.dwell[2]) * r.dwell * (glance and 0.6 or 1) / speed
       st.bh = a.h * ((a.c == 0) and 1 or a.c * c) + rnd(-0.5, 0.5) * a.spread
       st.bp = a.p + rnd(-0.5, 0.5) * a.spread * 0.6
       st.th, st.tp = st.bh, st.bp
-      st.micro = st.t + rnd(0.4, 1.0)
+      st.micro = st.t + rnd(0.4, 1.0) / speed
       st.lxt, st.lyt, st.lzt = a.lean[1] * c, a.lean[2], a.lean[3]
     elseif st.t >= st.micro then
       -- reading: a small move to another spot on the same thing
@@ -837,14 +841,15 @@ do
         end
         ang = ang + math.pi
       end
-      st.micro = st.t + rnd(0.5, 1.4)
+      st.micro = st.t + rnd(0.5, 1.4) / speed
     end
     local gap = max(abs(st.th - st.h), abs(st.tp - st.p))
-    local w = (gap > 15) and clamp(4.5 * sqrt(30 / gap), 2.2, 4.5) or 7   -- big turns take a little longer
+    local w = ((gap > 15) and clamp(4.5 * sqrt(30 / gap), 2.2, 4.5) or 7) * speed   -- big turns take a little longer
+    local top = 160 * min(speed, 1)                                         -- no faster than a real head
     st.h, st.hv = spring(st.h, st.hv, st.th, w, 0.78, dt)
     st.p, st.pv = spring(st.p, st.pv, st.tp, w, 0.78, dt)
-    st.hv, st.pv = clamp(st.hv, -160, 160), clamp(st.pv, -160, 160)       -- no faster than a real head
-    local m = S.head_motion
+    st.hv, st.pv = clamp(st.hv, -top, top), clamp(st.pv, -top, top)
+    local m = 0.5
     st.lx, st.lxv = spring(st.lx, st.lxv, st.lxt * m, 3, 1, dt)
     st.ly, st.lyv = spring(st.ly, st.lyv, st.lyt * m, 3, 1, dt)
     st.lz, st.lzv = spring(st.lz, st.lzv, st.lzt * m, 3, 1, dt)
@@ -869,7 +874,6 @@ do
   -- Shots ---------------------------------------------------------------------
 
   local function define(def)
-    def.rel = (def.kind == "ext")
     def.init = function(st)
       st.r = def.make()
       st.h, st.hv, st.p, st.pv = 0, 0, 0, 0
@@ -929,13 +933,10 @@ end
 local cine = {
   active = false,
   def = nil, st = nil,                  -- current shot
-  prev_def = nil, prev_st = nil,        -- exterior shot being glided from
-  blend = 1, blend_len = 0, blend_check = false,
-  int_from = nil,                       -- cockpit pose being glided from
   ext_on = false, expect_release = false, override = false,
   waiting = nil, wait = 0,              -- "ext" / "int" while a view change is under way
   origin_internal = true,               -- you started in the cockpit
-  head_moved = false, last_head = nil, restore_frames = 0,
+  head_moved = false, restore_frames = 0,
   last = { ext = "wide_rear", int = "scan" },   -- the last shot you watched, outside and inside
   message = nil,
 }
@@ -987,7 +988,7 @@ local function filming_outside() return cine.active and cine.ext_on end
 -- drawn aircraft.
 -- -----------------------------------------------------------------------------
 
-local work_a, work_b = {}, {}
+local work_a = {}
 
 -- Keep a camera outside a box around the airframe (half span across, half
 -- length fore and aft, with a margin). One that strays in is pushed out
@@ -1042,16 +1043,6 @@ local function run_shot(def, st, o, dt)
   o.zoom = o.zoom * exp(ZOOM.log)
 end
 
--- Would a straight glide between two camera positions pass through the aircraft?
-local function path_clear(a, b)
-  local dx, dy, dz = b.x - a.x, b.y - a.y, b.z - a.z
-  local len2 = dx * dx + dy * dy + dz * dz
-  local t = 0
-  if len2 > 1e-6 then t = clamp(((A.x - a.x) * dx + (A.y - a.y) * dy + (A.z - a.z) * dz) / len2, 0, 1) end
-  local cx, cy, cz = a.x + dx * t - A.x, a.y + dy * t - A.y, a.z + dz * t - A.z
-  return cx * cx + cy * cy + cz * cz > (0.9 * A.R) ^ 2
-end
-
 local function lens_factor()
   if not S.normalize_lens or not REF.fov then return 1 end
   local fov = getf(REF.fov)
@@ -1088,44 +1079,6 @@ local function camera_update(pos, losing)
   st.t = st.t + dt
   local o = work_a
   run_shot(cine.def, st, o, dt)
-
-  if cine.prev_def then
-    local pst = cine.prev_st
-    pst.t = pst.t + dt
-    local b = work_b
-    run_shot(cine.prev_def, pst, b, dt)
-    if cine.blend_check then
-      cine.blend_check = false
-      if not path_clear(b, o) then cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1 end
-    end
-    if cine.prev_def then
-      cine.blend = cine.blend + dt / max(cine.blend_len, 0.05)
-      if cine.blend >= 1 then
-        cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1
-      else
-        local s = smoother(cine.blend)
-        local ax, ay, az = o.x, o.y, o.z
-        o.x, o.y, o.z = lerp(b.x, ax, s), lerp(b.y, ay, s), lerp(b.z, az, s)
-        keep_outside(o)                  -- the glide goes round the aircraft, never through it
-        local gy = terrain_y(o.x, o.y, o.z)
-        if gy and o.y < gy + 1.2 then o.y = gy + 1.2 end
-        if o.tx and b.tx then
-          -- Both look at the aircraft: keep it framed all the way, carrying
-          -- over each shot's lag and shake.
-          local ha, pa = look_angles(o.tx - ax, o.ty - ay, o.tz - az)
-          local hb, pb = look_angles(b.tx - b.x, b.ty - b.y, b.tz - b.z)
-          local h, p = look_angles(lerp(b.tx, o.tx, s) - o.x, lerp(b.ty, o.ty, s) - o.y, lerp(b.tz, o.tz, s) - o.z)
-          o.hdg = h + lerp(wrap180(b.hdg - hb), wrap180(o.hdg - ha), s)
-          o.pit = p + lerp(b.pit - pb, o.pit - pa, s)
-        else
-          o.hdg = b.hdg + wrap180(o.hdg - b.hdg) * s
-          o.pit = lerp(b.pit, o.pit, s)
-        end
-        o.rol = lerp(b.rol, o.rol, s)
-        o.zoom = lerp(b.zoom, o.zoom, s)
-      end
-    end
-  end
 
   local zoom = o.zoom * lens_factor()
   if not (finite(o.x) and finite(o.y) and finite(o.z) and finite(o.hdg) and finite(o.pit) and finite(o.rol) and finite(zoom)) then
@@ -1184,20 +1137,7 @@ local function run_cockpit(dt)
   def.head(st, o, dt)
   local x, y, z, psi, the, phi = o.x, o.y, o.z, o.psi, o.the, o.phi
 
-  if cine.int_from then
-    cine.blend = cine.blend + dt / max(cine.blend_len, 0.05)
-    if cine.blend >= 1 then
-      cine.int_from = nil
-    else
-      local f, s = cine.int_from, smoother(cine.blend)
-      x, y, z = lerp(f[1], x, s), lerp(f[2], y, s), lerp(f[3], z, s)
-      psi = f[4] + wrap180(psi - f[4]) * s
-      the, phi = lerp(f[5], the, s), lerp(f[6], phi, s)
-    end
-  end
-
   psi, the = psi + nudge.yaw, clamp(the + nudge.up * 10, -80, 80)
-  cine.last_head = { x, y, z, psi, the, phi }
 
   local h = HP.out
   x, y, z = x + h[1], y + h[2], z + h[3]
@@ -1267,27 +1207,21 @@ local function shot_available(def)
   return not def.available or def.available()
 end
 
-local function begin_shot(id, how)
+-- Switch to a shot at once (a transition fades out first and calls this
+-- when the picture is black).
+local function begin_shot(id)
   local def = SHOTS[id]
   if not def then return end
-  local prev_def, prev_st = cine.def, cine.st
+  local prev_def = cine.def
   local st = { t = 0 }
   def.init(st)
 
   if def.kind == "ext" then
-    cine.int_from = nil
     if prev_def and prev_def.kind == "ext" and cine.ext_on then
-      if S.blend_time > 0.05 and how ~= "cut" and prev_def.rel and def.rel then
-        cine.prev_def, cine.prev_st = prev_def, prev_st
-        cine.blend, cine.blend_len, cine.blend_check = 0, S.blend_time, true
-      else
-        cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1
-      end
       cine.waiting = nil
     else
       -- Switch to an exterior view, then take the camera (now, if the switch
       -- already happened, or as soon as it does).
-      cine.prev_def, cine.prev_st, cine.blend = nil, nil, 1
       cine.waiting, cine.wait = "ext", 0
       if geti(REF.external) == 0 then run_cmd(CMD.external) end
       if geti(REF.external) ~= 0 then
@@ -1296,13 +1230,6 @@ local function begin_shot(id, how)
       end
     end
   else
-    cine.prev_def, cine.prev_st = nil, nil
-    if prev_def and prev_def.kind == "int" and cine.last_head and S.blend_time > 0.05 and how ~= "cut"
-       then
-      cine.int_from, cine.blend, cine.blend_len = cine.last_head, 0, S.blend_time
-    else
-      cine.int_from, cine.blend = nil, 1
-    end
     if cine.ext_on then
       cine.expect_release = true
       run_cmd(CMD.cockpit)
@@ -1363,8 +1290,8 @@ local function stop_session(restore_view)
   end
   release_camera()
   hook_zoom(false)
-  cine.def, cine.st, cine.prev_def, cine.prev_st, cine.int_from = nil, nil, nil, nil, nil
-  cine.waiting, cine.last_head = nil, nil
+  cine.def, cine.st = nil, nil
+  cine.waiting = nil
   if B and cine.head_moved then
     -- Put the head back now (X-Plane keeps it for when you return to the
     -- cockpit) and for a few frames in case the view change resets it.
@@ -1388,7 +1315,7 @@ local function request(fn) queue[#queue + 1] = fn end
 local function act_shot(id)
   if not SHOTS[id] then return end
   if not cine.active and not start_session() then return end
-  begin_shot(id, "manual")
+  begin_shot(id)
 end
 
 local function cockpit_ok() return (HAS_HEAD and CMD.cockpit and not vr_on()) and true or false end
@@ -1407,11 +1334,11 @@ local function shots_of(kind)
 end
 
 -- The next shot of the same kind that works right now (the gear close-ups
--- only with the gear down, say), forward or back from shot index idx.
-local function step_from(ids, idx, step)
+-- only with the gear down, say), after shot index idx.
+local function next_from(ids, idx)
   local n = #ids
   for _ = 1, n do
-    idx = (idx - 1 + step) % n + 1
+    idx = idx % n + 1
     if shot_available(SHOTS[ids[idx]]) then return ids[idx] end
   end
   return nil
@@ -1429,16 +1356,16 @@ local function act_start()
     return
   end
   local id = cine.last[kind]
-  if not (SHOTS[id] and shot_available(SHOTS[id])) then id = step_from(shots_of(kind), 0, 1) end
+  if not (SHOTS[id] and shot_available(SHOTS[id])) then id = next_from(shots_of(kind), 0) end
   if id then act_shot(id) end
 end
 
--- Next or previous: through the shots of the kind you are filming.
-local function act_step(step)
+-- Next: through the shots of the kind you are filming.
+local function act_next()
   if not (cine.active and cine.def) then return act_start() end   -- off: start with your last shot
   local ids, idx = shots_of(cine.def.kind), 1
   for i, id in ipairs(ids) do if id == cine.def.id then idx = i end end
-  local id = step_from(ids, idx, step)
+  local id = next_from(ids, idx)
   if id then act_shot(id) end
 end
 
@@ -1446,13 +1373,70 @@ local function act_toggle()
   if cine.active then stop_session(true) else act_start() end
 end
 
+-- Shot transitions. With a transition length set, the picture fades to
+-- black, the shot changes (or the camera starts or stops) while it is black,
+-- and the picture fades back in: half the time out, half in. At 0 it cuts.
+local FADE = { alpha = 0, dir = 0, hold = 0, todo = {} }   -- dir: 1 fading out, -1 fading in
+
+local function run_now(fn)
+  local ok, err = pcall(fn)
+  if not ok then log("error: " .. tostring(err)) end
+end
+
+local function transition(fn)
+  if S.blend_time < 0.05 then
+    local todo = FADE.todo
+    FADE.alpha, FADE.dir, FADE.todo = 0, 0, {}
+    for _, f in ipairs(todo) do run_now(f) end
+    run_now(fn)
+    return
+  end
+  FADE.todo[#FADE.todo + 1] = fn
+  FADE.dir = 1
+end
+
+-- You took the view back yourself: drop what was waiting, show the picture.
+local function cancel_transition()
+  FADE.todo = {}
+  if FADE.alpha > 0 then FADE.dir, FADE.hold = -1, 99 else FADE.dir = 0 end
+end
+
+local function fade_tick(dt)
+  local half = max(S.blend_time / 2, 0.05)
+  if FADE.dir > 0 then
+    FADE.alpha = min(1, FADE.alpha + dt / half)
+    if FADE.alpha >= 1 then
+      local todo = FADE.todo
+      FADE.todo, FADE.dir, FADE.hold = {}, -1, 0
+      for _, f in ipairs(todo) do run_now(f) end
+    end
+  elseif FADE.dir < 0 then
+    if cine.waiting then return end      -- stay black until the view has changed
+    FADE.hold = FADE.hold + 1
+    if FADE.hold > 2 then                -- and a couple of frames more, for it to settle
+      FADE.alpha = max(0, FADE.alpha - dt / half)
+      if FADE.alpha <= 0 then FADE.dir = 0 end
+    end
+  end
+end
+
+-- Starting where filming isn't possible (VR, say) just says why, with no fade.
+local function can_start() return not vr_on() and kind_here() ~= nil end
+
 local M = {}
 M.version = VERSION
-M.toggle = function() request(act_toggle) end
-M.stop = function() request(function() stop_session(true) end) end
-M.next_shot = function() request(function() act_step(1) end) end
-M.previous_shot = function() request(function() act_step(-1) end) end
-M.shot = function(id) request(function() act_shot(id) end) end
+M.toggle = function()
+  request(function()
+    if cine.active or #FADE.todo > 0 or can_start() then transition(act_toggle) else act_start() end
+  end)
+end
+M.stop = function() request(function() if cine.active then transition(function() stop_session(true) end) end end) end
+M.next_shot = function()
+  request(function()
+    if cine.active or #FADE.todo > 0 or can_start() then transition(act_next) else act_start() end
+  end)
+end
+M.shot = function(id) request(function() if SHOTS[id] then transition(function() act_shot(id) end) end end) end
 
 -- Zoom: the exterior camera's own; in the cockpit, X-Plane's.
 local function native_zoom(dir)
@@ -1479,7 +1463,6 @@ local window_pending = false
 local ACTIONS = {
   { id = "toggle", name = "Camera on/off", run = M.toggle },
   { id = "next", name = "Next view", run = M.next_shot },
-  { id = "prev", name = "Previous view", run = M.previous_shot },
   { id = "window", name = "Open/close window", run = function() window_pending = true end },
 }
 
@@ -1668,9 +1651,16 @@ local function tick()
   if cine.override then
     -- You changed the view yourself: the camera is yours again.
     cine.override = false
-    if cine.active then stop_session(false) end
+    if cine.active then
+      stop_session(false)
+      cancel_transition()
+    end
   end
-  if cine.active and vr_on() then stop_session(false) end
+  if cine.active and vr_on() then
+    stop_session(false)
+    cancel_transition()
+  end
+  fade_tick(dt)
 
   local in_cockpit = HAS_HEAD and cockpit_view()
   if cine.active and cine.def then
@@ -1707,6 +1697,7 @@ local function tick()
         end
       else
         stop_session(false)              -- you left the cockpit view yourself
+        cancel_transition()
       end
     end
   elseif cine.restore_frames > 0 then
@@ -1723,8 +1714,9 @@ local function on_frame()
   end
 end
 
--- Nothing is drawn over the picture: the draw callback only keeps the
--- script running while the sim is paused, when flight loops may not run.
+-- The only thing ever drawn over the picture is the black of a fade between
+-- shots. The draw callback also keeps the script running while the sim is
+-- paused, when flight loops may not run.
 local function on_draw()
   if frame.ticked ~= frame.id then
     frame.ticked = frame.id
@@ -1732,6 +1724,13 @@ local function on_draw()
     if not ok then log("error: " .. tostring(err)) end
   end
   frame.id = frame.id + 1
+
+  local W, H = SCREEN_WIDTH, SCREEN_HIGHT
+  if FADE.alpha > 0.002 and W and H and glRectf and glColor4f and not vr_on() then
+    if XPLMSetGraphicsState then XPLMSetGraphicsState(0, 0, 0, 1, 1, 0, 0) end
+    glColor4f(0, 0, 0, smoother(FADE.alpha))
+    glRectf(0, 0, W, H)
+  end
 end
 
 -- -----------------------------------------------------------------------------
@@ -1762,8 +1761,6 @@ local function build_window()
   if imgui.Button(on and "Camera ON" or "Camera OFF", 110, 30) then M.toggle() end
   if on then imgui.PopStyleColor() end
   imgui.SameLine()
-  if imgui.Button("< Previous", 95, 30) then M.previous_shot() end
-  imgui.SameLine()
   if imgui.Button("Next >", 95, 30) then M.next_shot() end
   if cine.message and not on then text(COL_HINT, cine.message) end
 
@@ -1790,8 +1787,8 @@ local function build_window()
   imgui.Separator()
   slider("Camera distance", "distance", 0.5, 3, "%.2fx")
   slider("Camera shake", "shake", 0, 1, "%.2f")
-  slider("Shot transition (s)", "blend_time", 0, 5, "%.1f")
-  slider("Cockpit head movement", "head_motion", 0, 1, "%.2f")
+  slider("Shot transition", "blend_time", 0, 5, (S.blend_time < 0.05) and "cut" or "%.1f s fade")
+  slider("Head movement speed", "head_motion", 0, 1, "%.2f")
   local changed, v = imgui.SliderFloat("Aircraft size", SIZE.scales[SIZE.key] or 1, 0.4, 2.5, "%.2fx")
   if changed then
     SIZE.scales[SIZE.key], settings_dirty = v, true
@@ -1885,6 +1882,7 @@ measure_aircraft()
 -- For testing and for other scripts.
 M._state = function() return cine, A, S, BIND, function() return B end end
 M._shots = function() return SHOTS, SHOT_ORDER end
+M._fade = function() return FADE end
 M._geometry = function() return { subject = RS.subject, box = RS.box } end
 
 CinematicViews = M
@@ -1911,7 +1909,6 @@ end
 command("toggle", "camera on/off (cockpit views in the cockpit, exterior views outside)", "CinematicViews.toggle()")
 command("stop", "stop and return to your view", "CinematicViews.stop()")
 command("next_shot", "next view", "CinematicViews.next_shot()")
-command("previous_shot", "previous view", "CinematicViews.previous_shot()")
 command("toggle_window", "settings window", "CinematicViews.toggle_window()")
 command("reset_adjustments", "reset orbit, height and zoom adjustments", "CinematicViews.reset_nudge()")
 hold_command("orbit_left", "move the camera around the aircraft to the left (hold)", "CinematicViews.nudge('yaw', -1)")
