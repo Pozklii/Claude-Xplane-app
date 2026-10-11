@@ -13,7 +13,8 @@
     It can be switched on and off by hand, and it starts by itself after a
     while with no keyboard, mouse or joystick input (any input ends it again).
     X-Plane's zoom keys (+ and -) and the mouse wheel zoom the cinematic
-    camera, and X-Plane's depth of field stays focused on the aircraft.
+    camera (in every shot, cockpit included), and X-Plane's depth of field
+    stays focused on the aircraft.
 
     Install: copy this file to X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
 
@@ -36,7 +37,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.4"
+local VERSION = "2.5"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -207,6 +208,7 @@ do
             float normalX, normalY, normalZ; float velocityX, velocityY, velocityZ;
             int is_wet; } cinematic_view_probe_t;]])
         cdef("void *XPLMFindDataRef(const char *);")
+        cdef("void *XPLMFindCommand(const char *);")
         cdef("int XPLMGetDatai(void *);")
         cdef("void XPLMSetDatai(void *, int);")
         cdef("float XPLMGetDataf(void *);")
@@ -372,6 +374,9 @@ local CV = {
     capturing = nil,        -- action waiting for its new key in the settings window
     ignore_buttons_until = 0, -- joystick buttons that just ran one of our commands aren't "input"
     wheel_t = -100,         -- when the mouse wheel last turned
+    wheel_cmd = false,      -- X-Plane's zoom command the wheel is holding down,
+    wheel_until = 0,        -- until then
+    xp_zoom = false,        -- X-Plane has the zoom commands + and - run
 }
 
 local function now()
@@ -1268,6 +1273,42 @@ local function zoom_wheel(notches)
     CV.zoom_target = M.clamp(CV.zoom_target * WHEEL_STEP ^ notches, ZOOM_MIN, ZOOM_MAX)
 end
 
+-- Where X-Plane's zoom is the one that works (the cockpit and X-Plane's own
+-- views), the wheel runs X-Plane's zoom commands, the ones + and - run: each
+-- notch holds one down as long as a tap of the key would. Left to X-Plane,
+-- the wheel would turn whatever cockpit control is under the pointer.
+local XP_ZOOM = { [1] = "sim/general/zoom_in", [-1] = "sim/general/zoom_out" }
+local WHEEL_TAP = 0.12     -- seconds of X-Plane's zoom for each notch
+local WHEEL_TAP_MAX = 0.8  -- the most that can be queued up
+
+local function find_zoom_commands()
+    CV.xp_zoom = true
+    if XP.lib then
+        for _, name in pairs(XP_ZOOM) do
+            if XP.lib.XPLMFindCommand(name) == nil then CV.xp_zoom = false end
+        end
+    end
+    if not CV.xp_zoom then log("didn't find X-Plane's zoom commands, so the wheel only zooms outside shots") end
+end
+
+local function wheel_xp_end()
+    if CV.wheel_cmd then
+        command_end(CV.wheel_cmd)
+        CV.wheel_cmd = false
+    end
+end
+
+local function wheel_xp(notches)
+    local cmd = XP_ZOOM[notches > 0 and 1 or -1]
+    local t = now()
+    if CV.wheel_cmd ~= cmd then
+        wheel_xp_end()
+        command_begin(cmd)
+        CV.wheel_cmd, CV.wheel_until = cmd, t
+    end
+    CV.wheel_until = math.min(math.max(CV.wheel_until, t) + WHEEL_TAP * abs(notches), t + WHEEL_TAP_MAX)
+end
+
 -- Each frame of an outside shot: the target moves while a zoom is held,
 -- ramping up over a quarter of a second, and the zoom shown eases after it,
 -- so starting and stopping are smooth.
@@ -1314,6 +1355,7 @@ local function stop(reason)
     CV.settle = 0
     CV.expected_view = nil
     zoom_end()
+    wheel_xp_end()
     release_camera()
     focus_release()
     -- put the user back in the view they were in, unless they just picked one
@@ -1546,6 +1588,7 @@ local function tick()
     end
     local cond = watch_flight(t)
     check_taken_keys(t)
+    if CV.wheel_cmd and (t >= CV.wheel_until or not CV.active or outside_shot()) then wheel_xp_end() end
 
     -- after a cinematic: put the head back where it was and check the view
     if not CV.active then
@@ -2230,8 +2273,9 @@ CinematicView_on_mouse = guarded("mouse", function()
     CV.input_flag = true
 end)
 
--- During a cinematic the mouse wheel zooms instead of ending it: our camera
--- in outside shots (X-Plane's zoom can't move it), X-Plane's own elsewhere.
+-- During a cinematic the mouse wheel zooms, like + and -, instead of ending
+-- it: our camera in outside shots (X-Plane's zoom can't move it), X-Plane's
+-- own zoom elsewhere.
 CinematicView_on_wheel = guarded("mouse wheel", function()
     CV.wheel_t = now()
     if not CV.active then
@@ -2239,8 +2283,12 @@ CinematicView_on_wheel = guarded("mouse wheel", function()
         return
     end
     local notches = MOUSE_WHEEL_CLICKS or 0
-    if outside_shot() and (MOUSE_WHEEL_NUMBER or 0) == 0 and notches ~= 0 then
+    if (MOUSE_WHEEL_NUMBER or 0) ~= 0 or notches == 0 then return end
+    if outside_shot() then
         zoom_wheel(notches)
+        RESUME_MOUSE_WHEEL = true
+    elseif CV.xp_zoom then
+        wheel_xp(notches)
         RESUME_MOUSE_WHEEL = true
     end
 end)
@@ -2254,6 +2302,7 @@ function CinematicView_on_exit()
         end
     end)
     pcall(zoom_end)
+    pcall(wheel_xp_end)
     pcall(release_camera)
     pcall(focus_release)
     if XP.probe then
@@ -2271,6 +2320,7 @@ math.randomseed(os.time())
 math.random(); math.random()
 load_settings()
 pcall(joystick_setup)
+if not pcall(find_zoom_commands) then CV.xp_zoom = false end
 if not pcall(find_focus_settings) then
     log("couldn't list X-Plane's datarefs to find its focus setting")
 end

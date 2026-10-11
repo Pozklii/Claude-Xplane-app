@@ -40,6 +40,8 @@ static void init(void) {
     DR *b = add("sim/joystick/joystick_button_values", 16); b->vi = buttons; b->n = 3200;
 }
 
+static int cmd_dummy;
+void *XPLMFindCommand(const char *name) { return strncmp(name, "sim/", 4) ? 0 : &cmd_dummy; }
 void *XPLMFindDataRef(const char *name) { init(); for (int i = 0; i < ndrs; i++) if (!strcmp(drs[i].name, name)) return &drs[i]; return 0; }
 int XPLMGetDatai(void *r) { return r ? ((DR *)r)->i : 0; }
 void XPLMSetDatai(void *r, int v) { if (r) ((DR *)r)->i = v; }

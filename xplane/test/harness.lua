@@ -423,6 +423,18 @@ else
     local builtin = 0
     for _, c in ipairs(command_log) do if c == "sim/view/circle" or c == "sim/view/still_spot" or c == "sim/view/linear_spot" then builtin = builtin + 1 end end
     check(builtin > 0, "fallback used built-in views")
+    -- in X-Plane's own views the wheel runs X-Plane's zoom, like + and -
+    local tries = 0
+    while not (CVt.active and CVt.shot and CVt.shot.def.kind == "builtin") and tries < 600 do
+        frame(1 / 30)
+        tries = tries + 1
+    end
+    check(CVt.shot and CVt.shot.def.kind == "builtin", "a built-in view running")
+    MOUSE_WHEEL_CLICKS, MOUSE_WHEEL_NUMBER, RESUME_MOUSE_WHEEL = 1, 0, false
+    run(chunks.wheel)
+    check(RESUME_MOUSE_WHEEL == true and held_commands["sim/general/zoom_in"], "the wheel zooms X-Plane's own views")
+    seconds(0.5)
+    check(not held_commands["sim/general/zoom_in"] and CVt.active, "for a moment, without ending the cinematic")
 end
 check(stats.cockpit_frames > 300, "cockpit shots ran")
 check(head_moved, "head moved in cockpit shots")
@@ -746,14 +758,42 @@ if lib then
     check(CVt.shot.def.kind == "cockpit", "cockpit shot running")
     check(key(0xB0, "pressed") == false, "= goes on to X-Plane in the cockpit")
     key(0xB0, "released")
-    MOUSE_WHEEL_CLICKS, MOUSE_WHEEL_NUMBER, RESUME_MOUSE_WHEEL = 1, 0, false
+    -- and the wheel runs X-Plane's zoom (rather than turning a knob under the pointer)
+    local function wheel_commands(notches, label)
+        local from = #command_log
+        check(wheel(notches) == true, label .. ": the wheel is taken in the cockpit")
+        local zoom_in = held_commands["sim/general/zoom_in"]
+        local zoom_out = held_commands["sim/general/zoom_out"]
+        check((notches > 0 and zoom_in and not zoom_out) or (notches < 0 and zoom_out and not zoom_in),
+            label .. ": it holds X-Plane's zoom " .. (notches > 0 and "in" or "out"))
+        local start = T
+        while held_commands["sim/general/zoom_in"] or held_commands["sim/general/zoom_out"] do
+            frame(1 / 60)
+            if T - start > 2 then break end
+        end
+        return T - start, from
+    end
+    local held = wheel_commands(1, "one notch")
+    check(held > 0.08 and held < 0.2, "one notch zooms as long as a tap: " .. held)
+    held = wheel_commands(3, "three notches")
+    check(held > 0.3 and held < 0.45, "three notches zoom three times as long: " .. held)
+    wheel(2)
+    frame(1 / 60)
+    local _, from = wheel_commands(-1, "turning back")
+    check(command_log[from + 1] == "end sim/general/zoom_in" and command_log[from + 2] == "begin sim/general/zoom_out",
+        "turning the wheel back lets go of zooming in first")
+    wheel(1)
+    MOUSE_WHEEL_CLICKS, MOUSE_WHEEL_NUMBER, RESUME_MOUSE_WHEEL = 1, 1, false
     run(chunks.wheel)
-    check(RESUME_MOUSE_WHEEL == false, "and so does the wheel")
+    check(RESUME_MOUSE_WHEEL == false, "a sideways wheel goes on to X-Plane")
     seconds(0.5)
     check(CVt.active, "and neither ends the cinematic")
+    check(not next(held_commands), "nothing left held down")
+    wheel(5)
     tap(0x41)
     seconds(0.5)
     check(not CVt.active, "other keys still end it")
+    check(not next(held_commands), "and ending it lets go of X-Plane's zoom")
     set_mode("mixed")
     -- when it isn't running, the wheel is input like any other
     local idle_from = CVt.last_input
