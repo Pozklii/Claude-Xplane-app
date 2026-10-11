@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 from scipy import ndimage
+from scipy.interpolate import splprep, splev
 
 sys.path.insert(0, sys.argv[1])
 import geometry as G
@@ -145,6 +146,40 @@ E_LAT = curve(LA_TOP, DR_FRONT, 1306, 0.0)
 E_DUP = np.where(XG < 1306, 0.0, curve(LB_BOT, 1306, DR_BACK, math.pi))
 low = np.where(XG < 1290, math.pi, np.interp(XG, [q[0] for q in DR_LOW], [q[1] * DEG for q in DR_LOW]))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), np.minimum(E_B5, low), 0.0)
+def smooth_edge(E, rms_px=2.0, px_per_deg=1.5):
+    """Turn one colour edge theta(x) into a single smooth curve. Wherever it
+    lies strictly between the crown and the belly, a parametric smoothing
+    spline is fitted through it in surface units (photo px along the
+    fuselage, ~1.5 px per degree around it) with its two ends pinned, so the
+    measured points are followed to within ~rms_px while kinks between them
+    and measurement wobble go; tips and belly crossings stay sharp."""
+    act = (E > 0.2 * DEG) & (E < math.pi - 0.2 * DEG)
+    idx = np.nonzero(act)[0]
+    out = E.copy()
+    for run in np.split(idx, np.nonzero(np.diff(idx) > 1)[0] + 1):
+        if len(run) < 60:
+            continue
+        sub = run[::8]
+        if sub[-1] != run[-1]:
+            sub = np.append(sub, run[-1])
+        x, y = XG[sub], E[sub] / DEG * px_per_deg
+        w = np.ones(len(sub)); w[[0, -1]] = 50.0
+        tck, _ = splprep([x, y], w=w, s=len(sub) * rms_px ** 2)
+        xs, ys = splev(np.linspace(0, 1, len(run) * 2), tck)
+        order = np.argsort(xs)
+        out[run] = np.clip(np.interp(XG[run], xs[order], ys[order]) / px_per_deg * DEG,
+                           0.0, math.pi)
+    return out
+
+
+_raw = dict(B1=E_B1, B2=E_B2, B3=E_B3, B5=E_B5, B43=E_B43, DUP=E_DUP, DLO=E_DLO,
+            LAT=E_LAT, LAB=E_LAB)
+E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5, E_B43))
+E_DUP, E_DLO, E_LAT, E_LAB = (smooth_edge(e) for e in (E_DUP, E_DLO, E_LAT, E_LAB))
+for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB)):
+    print(f'smoothed {k}: max change {np.degrees(np.abs(e - _raw[k]).max()):.1f} deg', flush=True)
+
+
 EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB]
 # slopes for edge anti-aliasing; capped so the cut-offs where a shape ends
 # (a jump in the curve) stay sharp instead of leaving a faint line
