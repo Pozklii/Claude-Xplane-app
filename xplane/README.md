@@ -55,18 +55,18 @@ Inside the cockpit, the pilot's head is placed somewhere (the pilot's seat, over
 - **Faster cutting when it's busy.** On the takeoff or landing roll and flying low, shots come from the short half of your shot-length range; parked and in cruise, from the long half.
 - **A reveal to open with.** A cinematic starts with an orbiting shot from ahead, swinging round (unless it's cockpit-only).
 - **Tilted horizons** now and then.
-- **Camera shake.** Mounted cameras shake most and close orbiting ones a little, with turbulence (changes in g-load), runway rumble that grows with speed, and a thump when you touch down that's bigger for firmer landings. Cockpit shots get a little of the same. Long lenses and trackside cameras stay steady. Turn it off with **Camera shake**.
 - **Cameras never go below the ground.**
 
-### Camera speed
+### Camera speed and panning speed
 
-**Camera speed** limits how fast the picture moves:
+Two sliders limit how fast the picture moves, each from 0.1 to 2 (default 0.5):
 
-- An orbiting camera's movement over a shot is limited (about 2.5° a second at the default 0.5, 0.5° a second at the slowest 0.1), and a zoomed-in camera moves less, since zoom magnifies motion.
-- Trackside cameras stand far enough from the flight path that they never have to turn faster than the limit to follow the aircraft (about 20° a second at the default), and zoom out as it passes so the picture doesn't sweep faster than that. The touchdown and liftoff cameras do the same, so with fast aircraft they stand well back from the runway.
-- Mounted cameras' drift and cockpit pans are limited the same way.
+- **Camera speed** is how fast cameras travel: an orbiting camera going round the aircraft, up or down, in or out (about 2.5° a second at the default, 0.5° at the slowest). A zoomed-in camera moves less, since zoom magnifies motion.
+- **Panning speed** is how fast cameras turn:
+  - Trackside cameras stand far enough from the flight path that they never have to turn faster than the limit to follow the aircraft (about 20° a second at the default, 4° at the slowest), and zoom out as it passes so the picture doesn't sweep faster than that. The touchdown and liftoff cameras do the same, so with fast aircraft and slow panning they stand well back from the runway.
+  - Mounted cameras' slow drift across the aircraft, and the pilot's head panning in cockpit shots (about 3.75° a second at the default), keep to it too.
 
-It takes effect from the next shot.
+Both take effect from the next shot.
 
 ### Aircraft size
 
@@ -83,10 +83,10 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 | `mode` | `mixed` | `mixed`, `outside` or `cockpit` |
 | `cockpit_share` | `30` | Percent of shots in the cockpit in mixed mode |
 | `shot_min`, `shot_max` | `7`, `14` | Shot length range, seconds |
-| `camera_pace` | `0.5` | Camera speed: how fast the picture may move, from `0.1` to `2` (replaces the old `camera_speed`, so earlier settings start at the new slower default) |
+| `camera_pace` | `0.5` | Camera speed: how fast cameras travel, from `0.1` to `2` (replaces the old `camera_speed`, so earlier settings start at the new slower default) |
+| `pan_pace` | `0.5` | Panning speed: how fast cameras turn, from `0.1` to `2` |
 | `letterbox` | `true` | Cinema bars top and bottom |
 | `fades` | `true` | Dip to black when switching between inside and outside, and now and then between other shots |
-| `shake` | `true` | Camera shake from turbulence, runway rumble and touchdowns |
 | `manual_exit_on_input` | `false` | Any input also ends a cinematic you started yourself |
 | `joystick_deadband` | `0.03` | How far an axis must move to count as input (raise it for noisy hardware) |
 | `bind_toggle`, `bind_next_shot`, `bind_toggle_afk`, `bind_cycle_mode`, `bind_zoom_in`, `bind_zoom_out`, `bind_settings` | empty | The keys set in the window, as `<virtual key code> <modifiers> <name>` (modifiers: 1 Shift, 2 Ctrl, 4 Alt); easiest set from the window |

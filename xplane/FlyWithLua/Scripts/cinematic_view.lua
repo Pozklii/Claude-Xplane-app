@@ -8,8 +8,7 @@
     flight path, or fixed to the airframe, and the pilot's view in the
     cockpit, with letterbox bars and fades. Shots suit what the aircraft is
     doing (runway-level shots on takeoff and landing, air-to-air in cruise),
-    liftoff and touchdown get shots of their own, and cameras shake with
-    turbulence, runway rumble and touchdowns.
+    and liftoff and touchdown get shots of their own.
 
     It can be switched on and off by hand, and it starts by itself after a
     while with no keyboard, mouse or joystick input (any input ends it again).
@@ -39,7 +38,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.0"
+local VERSION = "2.1"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -52,10 +51,10 @@ local DEFAULTS = {
     cockpit_share = 30,           -- % of shots in the cockpit in mixed mode
     shot_min = 7,                 -- shortest shot, seconds
     shot_max = 14,                -- longest shot, seconds
-    camera_pace = 0.5,            -- how fast the picture may move (0.1 to 2)
+    camera_pace = 0.5,            -- camera speed: how fast cameras move (0.1 to 2)
+    pan_pace = 0.5,               -- panning speed: how fast cameras turn (0.1 to 2)
     letterbox = true,             -- cinema bars top and bottom
     fades = true,                 -- dip to black between some shots
-    shake = true,                 -- cameras shake with turbulence, runway rumble and touchdowns
     manual_exit_on_input = false, -- any input also ends a cinematic you started yourself
     joystick_deadband = 0.03,     -- how far an axis must move to count as input
     -- keys, as "<virtual key> <modifiers> <name>" (modifiers: 1 shift, 2 ctrl, 4 alt); empty for none
@@ -96,6 +95,7 @@ local function sanitize_settings()
     s.shot_min = math.max(3, math.min(60, s.shot_min))
     s.shot_max = math.max(s.shot_min, math.min(90, s.shot_max))
     s.camera_pace = math.max(0.1, math.min(2, s.camera_pace))
+    s.pan_pace = math.max(0.1, math.min(2, s.pan_pace))
     s.chase_view = math.max(0, math.floor(s.chase_view))
     s.joystick_deadband = math.max(0.001, math.min(0.5, s.joystick_deadband))
     for k, v in pairs(s) do
@@ -303,7 +303,6 @@ do
         m_max = "sim/aircraft/weight/acf_m_max",
         vr = "sim/graphics/VR/enabled",
         onground = "sim/flightmodel/failures/onground_any",
-        g_nrml = "sim/flightmodel/forces/g_nrml",
         fov = "sim/graphics/view/field_of_view_deg",
         axes = "sim/joystick/joystick_axis_values",
         buttons = "sim/joystick/joystick_button_values",
@@ -492,10 +491,11 @@ end
 -- Inside, the pilot's head looks somewhere and pans slowly, holding still
 -- otherwise.
 --
--- The camera speed setting limits how fast the picture moves: how far a
--- shot's camera travels, and how fast trackside cameras turn to follow (so
--- they stand further back from fast aircraft). Zooming in magnifies motion,
--- so a zoomed-in camera moves less.
+-- Two settings limit how fast the picture moves. Camera speed: how far an
+-- orbiting camera travels over a shot. Panning speed: how fast cameras turn,
+-- trackside ones following the aircraft (so they stand further back from fast
+-- aircraft), mounted ones drifting and the pilot's head panning. Zooming in
+-- magnifies motion, so a zoomed-in camera moves less.
 --
 -- Cameras keep outside a sphere round the aircraft sized from its span (the
 -- aircraft size setting), so they don't clip it.
@@ -507,7 +507,7 @@ local function W(parked, taxi, roll, low, cruise)
     return { parked = parked, taxi = taxi, roll = roll, low = low, cruise = cruise }
 end
 
-local MOTION_RATE = 5 -- degrees a second of camera movement at camera speed 1
+local MOTION_RATE = 5 -- degrees a second of camera movement or panning at speed 1
 
 -- Point at an offset from the aircraft in a frame turned only by heading.
 local function yaw_point(c, hdg, ox, oy, oz)
@@ -614,7 +614,6 @@ local ORBITING = {
         s.lead = M.rand(0, 0.25) * S -- aim a little ahead, leaving room in front
         s.offh, s.offp = M.rand(-4, 4) / s.zoom, M.rand(-2, 2) / s.zoom
         s.dutch = maybe_dutch(0.2, 5)
-        s.shake = s.zoom > 1.5 and 0 or 0.3
         s.hdg = c.track
         s.gs, s.acc = c.gs, 0
         CV.last_az = s.az0 + s.daz / 2
@@ -703,7 +702,8 @@ local function trackside_update(s, c, t, out)
     aim(out, s.px, py, s.pz, c.x + c.vx * 0.1, c.y, c.z + c.vz * 0.1, s.dutch or 0, s.zoom)
 end
 
-local function pan_cap(s) return M.clamp(40 * s.pace, 6, 60) end
+-- How fast (degrees a second) trackside cameras may turn to follow.
+local function pan_cap(s) return M.clamp(40 * s.pan, 4, 80) end
 
 local TRACKSIDE = {
     id = "trackside", kind = "outside", min_gs = 5,
@@ -745,7 +745,7 @@ local MOUNTS = {
 }
 
 local MOUNTED = {
-    id = "mounted", kind = "outside", shake = 1,
+    id = "mounted", kind = "outside",
     init = function(s, c)
         local pool = {}
         for _, m in ipairs(MOUNTS) do
@@ -760,7 +760,7 @@ local MOUNTED = {
         s.lx, s.ly, s.lz = m.look[1] * c.size, m.look[2] * c.size, m.look[3] * c.size
         -- the look point drifts sideways a little over the shot
         local reach = sqrt((s.mx - s.lx) ^ 2 + (s.my - s.ly) ^ 2 + (s.mz - s.lz) ^ 2)
-        s.drift = M.sign() * math.tan(rad(math.min(MOTION_RATE * s.pace * s.duration * 0.5, 15))) * reach
+        s.drift = M.sign() * math.tan(rad(math.min(MOTION_RATE * s.pan * s.duration * 0.5, 15))) * reach
     end,
     update = function(s, c, t, out)
         local k = M.ease(t / s.duration) - 0.5
@@ -847,7 +847,7 @@ local COCKPIT = {
         else
             s.psi0, s.the = -side * M.rand(20, 45), M.rand(-10, -4)
         end
-        local B = math.min(MOTION_RATE * s.pace * s.duration * 1.5, 40)
+        local B = math.min(MOTION_RATE * s.pan * s.duration * 1.5, 40)
         s.dpsi = M.sign() * B
         s.psi0 = s.psi0 - s.dpsi / 2
     end,
@@ -855,26 +855,6 @@ local COCKPIT = {
         return s.dx, s.dy, s.dz, s.psi0 + s.dpsi * M.ease(t / s.duration), s.the, 0
     end,
 }
-
-------------------------------------------------------------------------------
--- Camera shake: turbulence (changes in g-load), runway rumble and the thump
--- of a touchdown, scaled by each shot's shake factor
-------------------------------------------------------------------------------
-
-local SH = { g_lp = 1, turb = 0, impact = 0, impact_t = -100 }
-
-local function shake_level(c, dt, t)
-    SH.g_lp = SH.g_lp + (c.g - SH.g_lp) * M.smooth(dt, 0.5)
-    SH.turb = SH.turb + (abs(c.g - SH.g_lp) - SH.turb) * M.smooth(dt, 0.3)
-    local rumble = c.onground and M.clamp(c.gs / 50, 0, 1) or 0
-    local impact = SH.impact * math.exp(-(t - SH.impact_t) / 0.35)
-    return M.clamp(SH.turb * 5, 0, 1.5) + rumble * 0.6 + impact * 2.5 + 0.04
-end
-
--- Smooth jitter between about -1 and 1; k picks a different pattern.
-local function jitter(t, k)
-    return (sin(t * 9.1 + k * 1.7) + 0.6 * sin(t * 15.3 + k * 4.1) + 0.4 * sin(t * 23.9 + k * 2.3)) / 2
-end
 
 ------------------------------------------------------------------------------
 -- Camera control
@@ -909,7 +889,6 @@ local function read_aircraft(c)
     c.track = c.gs > 3 and deg(atan2(c.vx, -c.vz)) or c.psi
     c.size = CV.size
     c.onground = on_ground(c.agl)
-    c.g = gf(R.g_nrml, 1)
 end
 
 -- Called by X-Plane every frame while we hold the camera.
@@ -937,14 +916,6 @@ local function camera_func(pos, losing)
         s.inited = true
     end
     s.def.update(s, c, t_now - s.t0, cam_out)
-    local level = shake_level(c, c.dt, t_now)
-    local amount = settings.shake and (s.shake or s.def.shake or 0) or 0
-    if amount > 0 then
-        local a = amount * level * 0.6
-        cam_out.heading = cam_out.heading + a * 0.5 * jitter(t_now, 1)
-        cam_out.pitch = cam_out.pitch + a * 0.5 * jitter(t_now, 2)
-        cam_out.roll = cam_out.roll + a * 0.7 * jitter(t_now, 3)
-    end
     pos.x, pos.y, pos.z = cam_out.x, cam_out.y, cam_out.z
     pos.heading, pos.pitch, pos.roll = cam_out.heading, cam_out.pitch, cam_out.roll
     update_zoom(c.dt)
@@ -1004,7 +975,7 @@ local function conditions()
     local gs, agl = sqrt(vx * vx + vz * vz), gf(R.agl, 100)
     local ground = on_ground(agl)
     return {
-        gs = gs, agl = agl, vy = gf(R.vy), g = gf(R.g_nrml, 1), onground = ground,
+        gs = gs, agl = agl, vy = gf(R.vy), onground = ground,
         paused = gi(R.paused, 0) ~= 0, phase = flight_phase(gs, agl, ground),
     }
 end
@@ -1110,7 +1081,7 @@ local function begin_shot(def)
     local busy = CV.phase == "roll" or CV.phase == "low"
     local s = {
         def = def, t0 = now(), duration = busy and M.rand(lo, mid) or M.rand(mid, hi),
-        pace = settings.camera_pace, inited = false,
+        pace = settings.camera_pace, pan = settings.pan_pace, inited = false,
     }
     CV.view_target = nil
     if def.kind == "cockpit" then
@@ -1382,27 +1353,17 @@ local function report_error(where, err)
     end
 end
 
-local function update_cockpit_shot(s, t, cond, dt)
+local function update_cockpit_shot(s, t)
     local dx, dy, dz, psi, the, phi = s.def.update(s, CV.eye, t)
-    if settings.shake then
-        local a = 0.2 * shake_level(cond, dt, now())
-        psi = psi + a * 0.5 * jitter(t, 4)
-        the = the + a * 0.5 * jitter(t, 5)
-    end
     local e = CV.eye
     write_head(e.x + dx, e.y + dy, e.z + dz, psi, the, phi)
 end
 
--- Liftoff and touchdown cut straight to shots of their own, and a touchdown
--- shakes the cameras.
+-- Liftoff and touchdown cut straight to shots of their own.
 local function watch_flight(t)
     local cond = conditions()
     CV.phase = cond.phase
     if cond.onground then
-        if CV.was_on_ground == false and CV.last_vy then
-            SH.impact = M.clamp(-CV.last_vy / 2, 0.15, 1.5)
-            SH.impact_t = t
-        end
         if CV.was_on_ground ~= true then CV.ground_since = t end
     elseif cond.agl > 150 then
         CV.landing_shown = false -- ready for the next approach
@@ -1546,7 +1507,7 @@ local function tick()
 
         local s = CV.shot
         if s then
-            if s.def.kind == "cockpit" then update_cockpit_shot(s, t - s.t0, cond, dt) end
+            if s.def.kind == "cockpit" then update_cockpit_shot(s, t - s.t0) end
             if not CV.trans and t - s.t0 >= s.duration then next_shot(false) end
         end
     elseif settings.afk_enabled and CV.afk_armed and t - CV.last_input >= settings.afk_timeout then
@@ -1931,6 +1892,8 @@ local function build_settings()
     end
     changed, v = imgui.SliderFloat("Camera speed", settings.camera_pace, 0.1, 2, "%.2fx")
     if changed then settings.camera_pace = v; mark_dirty() end
+    changed, v = imgui.SliderFloat("Panning speed", settings.pan_pace, 0.1, 2, "%.2fx")
+    if changed then settings.pan_pace = v; mark_dirty() end
     changed, v = imgui.SliderFloat("Aircraft size", CV.size, 4, 100, "%.0f m")
     if changed then
         aircraft_sizes[aircraft_key()] = v
@@ -1951,8 +1914,6 @@ local function build_settings()
     checkbox("Letterbox bars", "letterbox")
     imgui.SameLine()
     checkbox("Fades", "fades")
-    imgui.SameLine()
-    checkbox("Camera shake", "shake")
     imgui.Separator()
 
     imgui.TextUnformatted("Keys")

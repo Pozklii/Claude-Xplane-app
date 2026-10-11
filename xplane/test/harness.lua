@@ -323,7 +323,7 @@ check(saw_letterbox, "letterbox drawn once active")
 
 -- run a long cinematic and record what happens
 local head_moved = false
-check(CVt.shot and CVt.shot.pace == 0.5, "the camera speed starts at 0.5")
+check(CVt.shot and CVt.shot.pace == 0.5 and CVt.shot.pan == 0.5, "camera and panning speeds start at 0.5")
 measuring = true
 for i = 1, 30 * 240 do
     frame(1 / 30)
@@ -471,8 +471,7 @@ tap(0x41)
 seconds(1)
 check(not CVt.active, "and a key ends it")
 
--- 10b. a landing gets a touchdown shot by the runway, and the touchdown shakes the cameras
-local SHt = upvalue(upvalue(upvalue(CinematicView_tick, "fn"), "watch_flight"), "SH")
+-- 10b. a landing gets a touchdown shot by the runway
 if lib then
     ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 300, 300, 70, -3.5, 0, 2, 0, 90, false
     command("toggle")
@@ -493,9 +492,6 @@ if lib then
             local d = math.sqrt((cam.x - ac.x) ^ 2 + (cam.z - ac.z) ^ 2)
             touchdown_closest = math.min(touchdown_closest, d)
             if cam.y < 0.9 or cam.y > 2.0 then touchdown_cam_low = false end
-        end
-        if touched_at and T - touched_at < 0.05 then
-            check(SHt.impact > 0.15, "the touchdown registered for camera shake: " .. SHt.impact)
         end
     end
     check(touched_at ~= nil, "simulated landing touched down")
@@ -684,11 +680,12 @@ build()
 local labels = table.concat(widgets, "|")
 check(labels:find("Running", 1, true) == nil or not labels:find("Running %(.-%):"), "no shot names in the status line")
 for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "Cycle shot types", "Zoom in", "Zoom out", "This window",
-    "Camera speed", "Letterbox bars", "Fades" }) do
+    "Camera speed", "Panning speed", "Letterbox bars", "Fades" }) do
     check(labels:find(l, 1, true), "window shows " .. l)
 end
 check(not labels:find("Caption"), "no captions option")
 check(not labels:find("paused"), "no option to start while paused")
+check(not labels:find("shake"), "no camera shake option")
 check(labels:find("Aircraft size", 1, true), "window shows the aircraft size")
 click("Set##set_toggle")
 check(CVt.capturing == "toggle", "waiting for a key")
@@ -746,6 +743,21 @@ seconds(40)
 check(CVt.shot and CVt.shot.pace == 0.1, "slow camera speed too")
 command("toggle")
 imgui_clicks["Camera speed"] = 0.5 build() imgui_clicks = {}
+
+-- 14a. panning speed, separately
+imgui_clicks["Panning speed"] = 2 build() imgui_clicks = {}
+command("toggle")
+seconds(40)
+check(CVt.shot and CVt.shot.pan == 2 and CVt.shot.pace == 0.5, "shots use the panning speed, apart from the camera speed")
+command("toggle")
+imgui_clicks["Panning speed"] = 0.1 build() imgui_clicks = {}
+command("toggle")
+seconds(40)
+check(CVt.shot and CVt.shot.pan == 0.1, "slow panning too")
+command("toggle")
+imgui_clicks["Panning speed"] = 0.5 build() imgui_clicks = {}
+seconds(2)
+check(ini_text():find("pan_pace = 0.5", 1, true) and not ini_text():find("shake"), "panning speed saved, no shake setting")
 
 -- 14b. aircraft size, kept for this aircraft
 local auto_size = CVt.size
@@ -808,6 +820,11 @@ for _, sh in ipairs(cockpit_shots) do
     end
 end
 check(#cockpit_shots > 5 and bobbing == 0, "cockpit shots hold the head steady (" .. #cockpit_shots .. " shots)")
+local fast_pans = 0
+for _, sh in ipairs(cockpit_shots) do
+    if math.abs(sh.dpsi) > math.min(5 * sh.pan * sh.duration * 1.5, 40) + 1e-6 then fast_pans = fast_pans + 1 end
+end
+check(fast_pans == 0, "cockpit pans keep to the panning speed")
 for id, ps in pairs(per_shot) do
     print(string.format("  %-9s frames %5d  max off-axis (x zoom) %5.1f deg  dist %6.1f..%6.1f m  zoom<=%.2f  |roll|<=%.1f",
         id, ps.n, ps.ang, ps.dmin, ps.dmax, ps.zmax, ps.rollmax))
