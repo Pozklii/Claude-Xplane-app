@@ -1,6 +1,6 @@
 # Cinematic View for X-Plane 12
 
-A [FlyWithLua NG+](https://forums.x-plane.org/index.php?/files/file/82888-flywithlua-ng-next-generation-plus-edition-for-x-plane-12-win-lin-mac/) script that turns X-Plane's camera into a self-directing cinematic camera, like the attract modes in the Need for Speed and Forza Horizon games. It cuts between shots outside the aircraft and inside the cockpit, with letterbox bars and fades.
+A [FlyWithLua NG+](https://forums.x-plane.org/index.php?/files/file/82888-flywithlua-ng-next-generation-plus-edition-for-x-plane-12-win-lin-mac/) script that turns X-Plane's camera into a self-directing cinematic camera, like the attract modes in the Need for Speed and Forza Horizon games. It cuts between shots outside the aircraft and inside the cockpit, with letterbox bars and fades. The shots aren't picked from a fixed list: each one is generated as it starts.
 
 It can be switched on and off whenever you like, and it starts by itself after a while with no input (two minutes by default). Pressing a key, moving the mouse or touching the joystick ends it and puts you back in the view you were in. X-Plane's zoom keys (+ and -) zoom the cinematic camera without ending it.
 
@@ -15,7 +15,7 @@ It can be switched on and off whenever you like, and it starts by itself after a
 Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic View**. It has **Start now / Stop** and **Next shot** buttons, all the settings, and a key for each action.
 
 - **Start/stop by hand:** with the button, or a key you set in the window. A cinematic you start yourself keeps running while you use the controls (the autopilot is a good idea) until you stop it or pick another view.
-- **When you're away:** after the away time (2 minutes by default) with no keyboard, mouse, joystick or head-tracking input, it starts by itself. Any input ends it, except the zoom keys and the keys you've set for the cinematic.
+- **When you're away:** after the away time (2 minutes by default) with no keyboard, mouse, joystick or head-tracking input, it starts by itself, but never while the sim is paused. Any input ends it, except the zoom keys and the keys you've set for the cinematic.
 - **Zoom:** hold **=** / **+** to zoom in and **-** to zoom out (main keyboard or keypad). In outside shots this zooms the cinematic camera smoothly: it speeds up gently when you press, eases to a stop when you let go, and a tap makes a small step. The zoom carries on into the next outside shots until the cinematic ends. In the cockpit the keys go to X-Plane's own zoom.
 
 ### Keys
@@ -35,43 +35,42 @@ For joystick buttons, each action is also an X-Plane command, under **Settings �
 
 ## Shots
 
-Outside the aircraft:
+There's no fixed list of shots. Each one is generated as it starts, from random choices within limits that suit what the aircraft is doing, so the same shot rarely comes round twice. Outside the aircraft there are three kinds, and each covers a whole family:
 
-- **Chase cam** — behind and above, lagging a little through turns, leaning into banks and sitting on the flight path in climbs and descents. It's springy like a racing game's: it falls back as the aircraft accelerates, catches up, and widens its view with speed.
-- **Long lens** — far behind and off to one side with a telephoto zoom and a slight hand-held wobble, like a broadcast shot.
-- **Tracking** — alongside, sliding from the nose to the tail (or back).
-- **Flyby** — a camera waiting beside the flight path ahead; the aircraft passes it, zooming to keep it framed. At runway level when you're on or near the ground.
-- **Spotter** — on the ground beside the flight path with a long lens, like a plane spotter by the runway, when you're flying low (below about 2000 ft above the ground).
-- **Orbit** — a slow circle around the aircraft, showroom style.
-- **Pass-by** — starts ahead looking back at the nose, then swings out to the side as the aircraft overtakes it.
-- **Crane** — rises from low beside the aircraft up and over it, tilting down.
-- **Wheels** — low beside the main wheels, like a camera car running alongside, on the ground.
-- **Tail mount**, **Wing mount**, **Nose boom** — cameras fixed to the airframe that pitch and roll with it.
-- **Drone** — high overhead, slowly turning.
+- **Orbiting** — a camera moving around the aircraft, in a frame that turns with its heading. The script picks where it starts (from any direction round the aircraft, from low or high, near or far), how it moves over the shot (round the aircraft, up or down, in or out, or a mix), the lens (wide, or a long lens from further away), how much it lags the aircraft's turns and leans with its bank, and where the aircraft sits in the picture. Chase, tracking, orbit, crane, pass-by, drone and long-lens shots all come out of this.
+- **Trackside** — a camera standing still by the flight path, on the ground when you're low or in the air when you're high, that the aircraft passes, comes towards or leaves behind, zooming to keep it a similar size. Only while moving.
+- **Mounted** — a camera fixed just off the airframe (above and behind the tail, off a wingtip, ahead of the nose looking back, or below to one side), rolling and pitching with it.
 
 Moments that cut in as they happen, the way racing games cut to a jump or a finish:
 
-- **Touchdown** — on short final (below about 130 ft, descending), a camera by the runway just past where you'll touch down, with the aircraft coming towards it.
+- **Touchdown** — on short final (below about 130 ft, descending), a camera by the runway a little past where you'll touch down.
 - **Liftoff** — as the wheels leave the runway, a camera low by the runway as the aircraft lifts off and climbs away.
 
-Inside the cockpit:
+Inside the cockpit, the pilot's head is placed somewhere (the pilot's seat, over the shoulder, leaning towards the panel, or the other seat in a side-by-side cockpit), looks somewhere (forward, out of the side window, at the panel, across the cockpit) and pans slowly. It holds still otherwise: no bobbing.
 
-- **Pilot's eye** — slowly looking around from the pilot's seat.
-- **Over the shoulder** — from behind the pilot's seat, looking forward.
-- **Side window** — looking out of the pilot's side window.
-- **Panel** — leaning in and panning across the instruments.
-- **Co-pilot's seat** — from the other seat, looking across (side-by-side cockpits only).
+### How shots are generated
 
-### How shots are chosen
-
-- **By what you're doing.** Each shot has a weight for each phase of flight: parked, taxiing, the takeoff or landing roll, flying low, and cruise. On the runway you get flybys at runway level, wheel shots, low chase shots and the tail mount. Near the ground in the air you get spotter and flyby shots. In cruise you get air-to-air shots: chase, long lens, orbits, tracking and the drone. Parked, you get showroom shots: orbit, crane, pass-by and drone.
+- **By what you're doing.** Parked, it's mostly orbiting shots from low to fairly high. Taxiing and on the takeoff or landing roll, cameras stay low and trackside cameras stand on the ground. Flying low, trackside shots from the ground are as likely as orbiting ones. In cruise there are more long lenses, shots from below and high above, and trackside cameras in the air.
+- **Variety.** Each orbiting shot starts from a different direction from the last, and the same kind of shot never comes three times running.
 - **Faster cutting when it's busy.** On the takeoff or landing roll and flying low, shots come from the short half of your shot-length range; parked and in cruise, from the long half.
-- **A reveal to open with.** A cinematic starts with a pass-by, crane or orbit (unless it's cockpit-only).
-- **Tilted horizons** now and then on trackside, spotter and long-lens shots.
-- **Camera shake.** Cameras on the airframe shake most and the chase cam less, with turbulence (changes in g-load), runway rumble that grows with speed, and a thump when you touch down that's bigger for firmer landings. Cockpit shots get a little of the same. Cameras on the ground, and the orbit and drone, stay steady. Turn it off with **Camera shake**.
-- **No repeats** of the last few shots, and everything is sized to the aircraft (from its size, or its maximum weight if X-Plane doesn't report one). Cameras never go below the ground.
+- **A reveal to open with.** A cinematic starts with an orbiting shot from ahead, swinging round (unless it's cockpit-only).
+- **Tilted horizons** now and then.
+- **Camera shake.** Mounted cameras shake most and close orbiting ones a little, with turbulence (changes in g-load), runway rumble that grows with speed, and a thump when you touch down that's bigger for firmer landings. Cockpit shots get a little of the same. Long lenses and trackside cameras stay steady. Turn it off with **Camera shake**.
+- **Cameras never go below the ground.**
 
-**Camera speed** sets how fast the cameras move: orbits, drone turns, pans across the panel and look-arounds turn faster or slower, and tracking and pass-by shots cover more or less ground in the same time. It takes effect from the next shot. The flyby is the exception: there the aircraft does the moving.
+### Camera speed
+
+**Camera speed** limits how fast the picture moves:
+
+- An orbiting camera's movement over a shot is limited (about 2.5° a second at the default 0.5, 0.5° a second at the slowest 0.1), and a zoomed-in camera moves less, since zoom magnifies motion.
+- Trackside cameras stand far enough from the flight path that they never have to turn faster than the limit to follow the aircraft (about 20° a second at the default), and zoom out as it passes so the picture doesn't sweep faster than that. The touchdown and liftoff cameras do the same, so with fast aircraft they stand well back from the runway.
+- Mounted cameras' drift and cockpit pans are limited the same way.
+
+It takes effect from the next shot.
+
+### Aircraft size
+
+Shots are framed and kept clear of the aircraft using its size: its span, or a guess from its maximum weight if X-Plane doesn't report one. Cameras stay outside a sphere round the aircraft sized from it. If cameras clip an aircraft (a long fuselage, say), raise **Aircraft size** in the window; it's kept for that aircraft (by its file), and **Auto** goes back to the worked-out size.
 
 ## Settings
 
@@ -81,11 +80,10 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 | --- | --- | --- |
 | `afk_enabled` | `true` | Start by itself when you're away |
 | `afk_timeout` | `120` | Seconds without input before it starts |
-| `afk_when_paused` | `true` | Also start while the sim is paused |
 | `mode` | `mixed` | `mixed`, `outside` or `cockpit` |
 | `cockpit_share` | `30` | Percent of shots in the cockpit in mixed mode |
 | `shot_min`, `shot_max` | `7`, `14` | Shot length range, seconds |
-| `camera_speed` | `1.0` | How fast cameras move, pan and orbit, from `0.25` to `2.5` |
+| `camera_pace` | `0.5` | Camera speed: how fast the picture may move, from `0.1` to `2` (replaces the old `camera_speed`, so earlier settings start at the new slower default) |
 | `letterbox` | `true` | Cinema bars top and bottom |
 | `fades` | `true` | Dip to black when switching between inside and outside, and now and then between other shots |
 | `shake` | `true` | Camera shake from turbulence, runway rumble and touchdowns |
@@ -93,6 +91,7 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 | `joystick_deadband` | `0.03` | How far an axis must move to count as input (raise it for noisy hardware) |
 | `bind_toggle`, `bind_next_shot`, `bind_toggle_afk`, `bind_cycle_mode`, `bind_zoom_in`, `bind_zoom_out`, `bind_settings` | empty | The keys set in the window, as `<virtual key code> <modifiers> <name>` (modifiers: 1 Shift, 2 Ctrl, 4 Alt); easiest set from the window |
 | `chase_view` | `0` | Not a setting: X-Plane's number for its chase view, learned the first time it's needed (see below) |
+| `size:<aircraft file>` | none | An aircraft size set in the window, in metres, one line per aircraft |
 
 ## How it works
 
@@ -113,4 +112,4 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 xplane/test/run.sh
 ```
 
-It also flies a simulated landing and takeoff to check that the touchdown and liftoff shots cut in, with their cameras by the runway, and flies low until spotter shots come up. It can't show what the shots look like in X-Plane, only that they keep the aircraft in frame at sensible distances, never go below the ground, and that starting, stopping, input, view changes, zoom, keys and settings behave.
+It also flies a simulated landing and takeoff to check that the touchdown and liftoff shots cut in, with their cameras by the runway, and flies low until trackside cameras on the ground come up. It checks that generated shots come from all round the aircraft with a mix of lenses and heights, that cameras stay outside the aircraft's clearance sphere, that orbiting and trackside cameras move within the camera speed limit, and that cockpit shots hold the head steady. It can't show what the shots look like in X-Plane, only that they keep the aircraft in frame, never go below the ground, and that starting, stopping, input, view changes, zoom, keys and settings behave.

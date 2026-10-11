@@ -3,9 +3,9 @@
     A FlyWithLua NG+ script
 
     A self-directing camera in the style of the Need for Speed and Forza
-    Horizon attract modes: it cuts between chase, trackside, spotter, orbit,
-    crane, tracking, wheel, mounted and drone shots outside the aircraft, and
-    pilot's-eye, over-the-shoulder, side window and panel shots inside the
+    Horizon attract modes. Every shot is generated as it starts rather than
+    picked from a list: cameras moving around the aircraft, standing by the
+    flight path, or fixed to the airframe, and the pilot's view in the
     cockpit, with letterbox bars and fades. Shots suit what the aircraft is
     doing (runway-level shots on takeoff and landing, air-to-air in cruise),
     liftoff and touchdown get shots of their own, and cameras shake with
@@ -39,7 +39,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "1.3"
+local VERSION = "2.0"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -48,12 +48,11 @@ local VERSION = "1.3"
 local DEFAULTS = {
     afk_enabled = true,           -- start by itself when you're away
     afk_timeout = 120,            -- seconds without input before it starts
-    afk_when_paused = true,       -- also start while the sim is paused
     mode = "mixed",               -- "mixed", "outside" or "cockpit"
     cockpit_share = 30,           -- % of shots in the cockpit in mixed mode
     shot_min = 7,                 -- shortest shot, seconds
     shot_max = 14,                -- longest shot, seconds
-    camera_speed = 1.0,           -- how fast cameras move, pan and orbit (0.25 to 2.5)
+    camera_pace = 0.5,            -- how fast the picture may move (0.1 to 2)
     letterbox = true,             -- cinema bars top and bottom
     fades = true,                 -- dip to black between some shots
     shake = true,                 -- cameras shake with turbulence, runway rumble and touchdowns
@@ -78,6 +77,10 @@ local MODE_LABELS = { mixed = "Mixed", outside = "Outside only", cockpit = "Cock
 local settings = {}
 for k, v in pairs(DEFAULTS) do settings[k] = v end
 
+-- Aircraft sizes set by hand, by aircraft file, saved in the ini as
+-- "size:<file> = <metres>".
+local aircraft_sizes = {}
+
 local function settings_path()
     local dir = SCRIPT_DIRECTORY or ""
     local last = dir:sub(-1)
@@ -92,7 +95,7 @@ local function sanitize_settings()
     s.cockpit_share = math.max(0, math.min(100, math.floor(s.cockpit_share + 0.5)))
     s.shot_min = math.max(3, math.min(60, s.shot_min))
     s.shot_max = math.max(s.shot_min, math.min(90, s.shot_max))
-    s.camera_speed = math.max(0.25, math.min(2.5, s.camera_speed))
+    s.camera_pace = math.max(0.1, math.min(2, s.camera_pace))
     s.chase_view = math.max(0, math.floor(s.chase_view))
     s.joystick_deadband = math.max(0.001, math.min(0.5, s.joystick_deadband))
     for k, v in pairs(s) do
@@ -104,6 +107,8 @@ local function load_settings()
     local f = io.open(settings_path(), "r")
     if not f then return end
     for line in f:lines() do
+        local plane, metres = line:match("^size:(.-)%s*=%s*([%d%.]+)%s*$")
+        if plane and tonumber(metres) then aircraft_sizes[plane] = tonumber(metres) end
         local key, value = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
         local default = key and DEFAULTS[key]
         if default ~= nil then
@@ -128,6 +133,12 @@ local function save_settings()
     for k in pairs(DEFAULTS) do keys[#keys + 1] = k end
     table.sort(keys)
     for _, k in ipairs(keys) do f:write(k, " = ", tostring(settings[k]), "\n") end
+    local planes = {}
+    for plane in pairs(aircraft_sizes) do planes[#planes + 1] = plane end
+    table.sort(planes)
+    for _, plane in ipairs(planes) do
+        f:write("size:", plane, " = ", string.format("%.1f", aircraft_sizes[plane]), "\n")
+    end
     f:close()
 end
 
@@ -293,6 +304,7 @@ do
         vr = "sim/graphics/VR/enabled",
         onground = "sim/flightmodel/failures/onground_any",
         g_nrml = "sim/flightmodel/forces/g_nrml",
+        fov = "sim/graphics/view/field_of_view_deg",
         axes = "sim/joystick/joystick_axis_values",
         buttons = "sim/joystick/joystick_button_values",
     }
@@ -414,6 +426,20 @@ local function aircraft_size()
     return M.clamp(guess, 8, 70)
 end
 
+-- Which aircraft this is, for its size setting.
+local function aircraft_key()
+    local key = (type(AIRCRAFT_FILENAME) == "string" and AIRCRAFT_FILENAME ~= "" and AIRCRAFT_FILENAME)
+        or (type(PLANE_ICAO) == "string" and PLANE_ICAO ~= "" and PLANE_ICAO) or "aircraft"
+    return (key:gsub("[\r\n=]", ""))
+end
+
+-- The size shots are framed and kept clear by: set for this aircraft, or worked out.
+local function current_size()
+    local set = aircraft_sizes[aircraft_key()]
+    if set then return M.clamp(set, 4, 100) end
+    return aircraft_size()
+end
+
 -- The cockpit eye point. X-Plane's default eye point if it agrees with where
 -- the head is (or the head reads zero), otherwise wherever the head is now.
 local function find_eye()
@@ -449,22 +475,39 @@ local function above_ground(x, y, z, margin)
 end
 
 ------------------------------------------------------------------------------
--- Shots
+-- Shots, generated
 --
--- Outside shots compute a camera position and direction every frame from
--- where the aircraft is (c: position, attitude, velocity, size). Cockpit
--- shots return the pilot's head pose as an offset from the eye point (e).
+-- No fixed list: every shot is made up as it starts, from random choices
+-- within limits that suit what the aircraft is doing. Outside there are three
+-- kinds, and each covers a whole family of shots:
+--   orbiting   a camera moving around the aircraft, in a frame that turns
+--              with its heading: where it starts (round, up, how far), how it
+--              moves (round, up or down, in or out), the lens, how it lags
+--              turns. Chase, tracking, orbit, crane, pass-by, drone and
+--              long-lens shots are all versions of it.
+--   trackside  a camera standing still by the flight path, on the ground or
+--              in the air, that the aircraft passes, comes towards or leaves.
+--   mounted    a camera fixed just off the airframe, rolling and pitching
+--              with it.
+-- Inside, the pilot's head looks somewhere and pans slowly, holding still
+-- otherwise.
 --
--- Each shot has a weight for each flight phase (w), so takeoff and landing
--- get runway-level and wheel shots and cruise gets air-to-air ones, and a
--- shake factor: how much it feels turbulence, runway rumble and touchdowns.
+-- The camera speed setting limits how fast the picture moves: how far a
+-- shot's camera travels, and how fast trackside cameras turn to follow (so
+-- they stand further back from fast aircraft). Zooming in magnifies motion,
+-- so a zoomed-in camera moves less.
+--
+-- Cameras keep outside a sphere round the aircraft sized from its span (the
+-- aircraft size setting), so they don't clip it.
 ------------------------------------------------------------------------------
 
 -- Weights for: parked, taxiing, takeoff or landing roll, low (below about
--- 2000 ft), cruise.
+-- 2000 ft), cruise. (X-Plane's own views, without the SDK, use these.)
 local function W(parked, taxi, roll, low, cruise)
     return { parked = parked, taxi = taxi, roll = roll, low = low, cruise = cruise }
 end
+
+local MOTION_RATE = 5 -- degrees a second of camera movement at camera speed 1
 
 -- Point at an offset from the aircraft in a frame turned only by heading.
 local function yaw_point(c, hdg, ox, oy, oz)
@@ -476,6 +519,18 @@ end
 local function body_point(c, ox, oy, oz)
     local wx, wy, wz = M.body_to_world(ox, oy, oz, c.psi, c.the, c.phi)
     return c.x + wx, c.y + wy, c.z + wz
+end
+
+-- Cameras stay outside this distance from the aircraft's centre.
+local function clearance(c) return 0.65 * c.size + 2 end
+
+local function keep_clear(c, x, y, z)
+    local dx, dy, dz = x - c.x, y - c.y, z - c.z
+    local d = sqrt(dx * dx + dy * dy + dz * dz)
+    local r = clearance(c)
+    if d >= r then return x, y, z end
+    if d < 0.01 then dx, dy, dz, d = 0, 1, 0, 1 end
+    return c.x + dx * r / d, c.y + dy * r / d, c.z + dz * r / d
 end
 
 local function aim(out, cx, cy, cz, tx, ty, tz, roll, zoom, margin)
@@ -498,27 +553,133 @@ local function mounted(out, c, ox, oy, oz, tx, ty, tz)
     out.zoom = 1
 end
 
--- A tilted horizon now and then, as racing games do on trackside shots.
+-- A tilted horizon now and then, as racing games do.
 local function maybe_dutch(chance, most)
     if math.random() < chance then return M.sign() * M.rand(most * 0.4, most) end
     return 0
 end
 
--- A camera standing on the ground beside where the aircraft will be in T
--- seconds: lat metres to the right of its track (negative: left), ahead
--- metres further along it.
-local function ground_camera(s, c, T, lat, ahead)
-    local tr = rad(c.track)
-    local fx, fz = sin(tr), -cos(tr)
-    local rx, rz = cos(tr), sin(tr)
-    s.px = c.x + c.vx * T + rx * lat + fx * ahead
-    s.pz = c.z + c.vz * T + rz * lat + fz * ahead
-    s.ground = true
-    s.height = s.height or 1.6
+-- Tangent of half X-Plane's horizontal field of view, for framing.
+local function fov_tan()
+    local fov = gf(R.fov, 60)
+    if fov < 20 or fov > 140 then fov = 60 end
+    return math.tan(rad(fov) / 2)
 end
 
--- Trackside cameras stay put and follow the aircraft, zooming so it stays a
--- similar size as it comes and goes.
+-- The distance at normal zoom, and the zoom at a distance, at which the
+-- aircraft fills fraction f of the picture's width.
+local function framing_distance(S, f) return S / (2 * f * fov_tan()) end
+local function framing_zoom(S, d, f) return 2 * d * f * fov_tan() / S end
+
+-- A round-the-aircraft direction (0 behind, 90 right, 180 ahead) away from
+-- the last few shots'.
+local function fresh_azimuth()
+    local az
+    for _ = 1, 8 do
+        az = M.rand(0, 360)
+        if not CV.last_az or abs(M.wrap180(az - CV.last_az)) > 60 then break end
+    end
+    return az
+end
+
+local ELEVATION = { parked = { 3, 35 }, taxi = { 2, 30 }, roll = { 1, 20 }, low = { -12, 35 }, cruise = { -25, 60 } }
+local LONG_LENS = { parked = 0.1, taxi = 0.15, roll = 0.25, low = 0.25, cruise = 0.3 }
+
+local ORBITING = {
+    id = "orbiting", kind = "outside",
+    init = function(s, c)
+        local S = c.size
+        local phase = CV.phase or "cruise"
+        local el = ELEVATION[phase]
+        s.f = M.rand(0.32, 0.62) -- how much of the picture's width the aircraft fills
+        s.zoom = math.random() < LONG_LENS[phase] and M.rand(2.5, 6) or 1
+        s.d0 = math.max(framing_distance(S, s.f) * s.zoom, clearance(c) + 3)
+        s.az0 = s.def.reveal and (180 + M.rand(-40, 40)) or fresh_azimuth()
+        s.el0 = M.rand(el[1], el[2])
+        if (phase == "cruise" or phase == "parked") and not s.def.reveal and math.random() < 0.12 then
+            s.el0 = M.rand(50, 72) -- now and then from high above
+        end
+        -- the movement this shot has, shared between going round, up or down,
+        -- and in or out
+        local B = MOTION_RATE * s.pace * s.duration / s.zoom
+        local wa, we, wd = math.random(), math.random() * 0.6, math.random() * 0.5
+        if s.def.reveal then wa, we, wd = 1, 0.15, 0.1 end
+        local sum = wa + we + wd
+        s.daz = M.sign() * B * wa / sum
+        s.del = M.clamp(s.el0 + M.sign() * B * we / sum, math.min(el[1], s.el0), 75) - s.el0
+        s.kd = math.exp(M.sign() * (B * wd / sum) / 50)
+        s.tau = M.rand(0.4, 1.8) -- how much it lags the aircraft's turns
+        s.behind = abs(M.wrap180(s.az0)) < 50 and s.zoom == 1
+        s.bank = s.behind and M.rand(0, 0.25) or 0
+        s.lead = M.rand(0, 0.25) * S -- aim a little ahead, leaving room in front
+        s.offh, s.offp = M.rand(-4, 4) / s.zoom, M.rand(-2, 2) / s.zoom
+        s.dutch = maybe_dutch(0.2, 5)
+        s.shake = s.zoom > 1.5 and 0 or 0.3
+        s.hdg = c.track
+        s.gs, s.acc = c.gs, 0
+        CV.last_az = s.az0 + s.daz / 2
+    end,
+    update = function(s, c, t, out)
+        s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, s.tau))
+        if c.dt > 0 then
+            s.acc = s.acc + ((c.gs - s.gs) / c.dt - s.acc) * M.smooth(c.dt, 0.6)
+        end
+        s.gs = c.gs
+        local k = M.ease(t / s.duration)
+        local d = s.d0 * s.kd ^ k
+        if s.behind then d = d + M.clamp(s.acc * 1.5, -4, 10) end -- springs back as it accelerates
+        local a, e = rad(s.az0 + s.daz * k), rad(s.el0 + s.del * k)
+        local cx, cy, cz = yaw_point(c, s.hdg, sin(a) * cos(e) * d, sin(e) * d, cos(a) * cos(e) * d)
+        cx, cy, cz = keep_clear(c, cx, cy, cz)
+        local fx, fz = sin(rad(c.track)), -cos(rad(c.track))
+        aim(out, cx, cy, cz, c.x + fx * s.lead, c.y, c.z + fz * s.lead, s.dutch + c.phi * s.bank, s.zoom)
+        out.heading = out.heading + s.offh
+        out.pitch = out.pitch + s.offp
+    end,
+}
+
+-- The opening shot: from ahead, swinging round.
+local REVEAL = setmetatable({ reveal = true }, { __index = ORBITING })
+
+-- The fastest a camera at (px, py, pz) turns to follow the aircraft over the
+-- next t seconds, in degrees a second.
+local function peak_turn(c, px, py, pz, t)
+    local peak, lh, lp = 0, nil, nil
+    local n = 40
+    for i = 0, n do
+        local tt = t * i / n
+        local h, p = M.look_at(px, py, pz, c.x + c.vx * tt, c.y + c.vy * tt, c.z + c.vz * tt)
+        if lh then peak = math.max(peak, sqrt(M.wrap180(h - lh) ^ 2 + (p - lp) ^ 2) * n / t) end
+        lh, lp = h, p
+    end
+    return peak
+end
+
+-- Stands the camera beside where the aircraft will be in T seconds, lat
+-- metres to the right of its track (left if negative) and ahead metres along
+-- it, on the ground or at its height; then moves it further out until it
+-- never has to turn faster than the pan limit.
+local function plan_trackside(s, c, T, lat, ahead, ground)
+    local tr = rad(c.track)
+    local fx, fz, rx, rz = sin(tr), -cos(tr), cos(tr), sin(tr)
+    local side = lat < 0 and -1 or 1
+    lat = M.clamp(abs(lat), clearance(c) + 10, 700)
+    s.ground = ground
+    s.height = s.height or M.rand(1.2, 3.0)
+    local rise = M.rand(-0.3, 0.6) * c.size
+    for _ = 1, 12 do
+        s.px = c.x + c.vx * T + rx * lat * side + fx * ahead
+        s.pz = c.z + c.vz * T + rz * lat * side + fz * ahead
+        s.py = not ground and (c.y + c.vy * T + rise) or nil
+        local py = s.py or (c.y - c.agl + s.height)
+        if lat >= 700 or peak_turn(c, s.px, py, s.pz, s.duration) <= s.pan_cap then break end
+        lat = math.min(700, lat * 1.3)
+    end
+end
+
+-- Trackside cameras follow the aircraft and zoom to keep it a similar size,
+-- but zoom out when they're turning fast (or about to), so the picture never
+-- sweeps faster than the pan limit.
 local function trackside_update(s, c, t, out)
     local py = s.py
     if s.ground then
@@ -526,233 +687,92 @@ local function trackside_update(s, c, t, out)
         py = g + s.height
     end
     local d = sqrt((c.x - s.px) ^ 2 + (c.y - py) ^ 2 + (c.z - s.pz) ^ 2)
-    local zoom = M.clamp((d / (2.5 * c.size + 25)) ^ 0.85, 1, s.max_zoom or 5)
-    s.zoom = s.zoom and (s.zoom + (zoom - s.zoom) * M.smooth(c.dt, 0.35)) or zoom
+    local h, p = M.look_at(s.px, py, s.pz, c.x, c.y, c.z)
+    if s.lh and c.dt > 0 then
+        local turn = sqrt(M.wrap180(h - s.lh) ^ 2 + (p - s.lp) ^ 2) / c.dt
+        s.turn = s.turn and (s.turn + (turn - s.turn) * M.smooth(c.dt, 0.2)) or turn
+    end
+    s.lh, s.lp = h, p
+    local turn = math.max(s.turn or 0, peak_turn(c, s.px, py, s.pz, 0.6))
+    local zoom = framing_zoom(c.size, d, s.f)
+    if turn > 0.01 then zoom = math.min(zoom, s.pan_cap / turn) end
+    zoom = M.clamp(zoom, 1, 10)
+    -- out quickly, in gently
+    local tau = (s.zoom and zoom < s.zoom) and 0.12 or 0.4
+    s.zoom = s.zoom and (s.zoom + (zoom - s.zoom) * M.smooth(c.dt, tau)) or zoom
     aim(out, s.px, py, s.pz, c.x + c.vx * 0.1, c.y, c.z + c.vz * 0.1, s.dutch or 0, s.zoom)
 end
 
-local OUTSIDE_SHOTS = {
-    {
-        -- springy: falls back as the aircraft accelerates and widens with speed
-        id = "chase", label = "Chase cam", w = W(1, 2, 3, 3, 3), shake = 0.35,
-        init = function(s, c)
-            s.hdg = c.track
-            s.side = M.rand(-0.15, 0.15) * c.size
-            s.phase = M.rand(0, 6.28)
-            s.drop = 0
-            s.gs = c.gs
-            s.acc = 0
-        end,
-        update = function(s, c, t, out)
-            local S = c.size
-            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.8))
-            if c.dt > 0 then
-                local acc = (c.gs - s.gs) / c.dt
-                s.acc = s.acc + (acc - s.acc) * M.smooth(c.dt, 0.6)
-            end
-            s.gs = c.gs
-            local dist = 1.5 * S + 12 + math.min(c.gs, 150) * 0.04 + M.clamp(s.acc * 1.5, -4, 10)
-            -- sit on the flight path behind: lower in a climb, higher in a descent
-            local drop = dist * M.clamp(c.vy / math.max(c.gs, 30), -0.25, 0.25)
-            s.drop = s.drop + (drop - s.drop) * M.smooth(c.dt, 1.0)
-            local lat = s.side + sin(t * 0.35 * s.speed + s.phase) * 0.1 * S
-            local cx, cy, cz = yaw_point(c, s.hdg, lat, 0.22 * S + 2.5 - s.drop, dist)
-            local tx, ty, tz = yaw_point(c, s.hdg, 0, 0.1 * S, -0.5 * S)
-            aim(out, cx, cy, cz, tx, ty, tz, c.phi * 0.25, 1 - 0.15 * M.clamp(c.gs / 120, 0, 1))
-        end,
-    },
-    {
-        id = "longlens", label = "Long lens", w = W(0, 1, 2, 2, 3), shake = 0,
-        init = function(s, c)
-            s.hdg = c.track
-            s.side = M.sign()
-            s.phase = M.rand(0, 6.28)
-            s.dist = 7 * c.size + 80
-            s.dutch = maybe_dutch(0.4, 4)
-        end,
-        update = function(s, c, t, out)
-            local S = c.size
-            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 1.6))
-            local cx, cy, cz = yaw_point(c, s.hdg, s.side * (0.9 * S + 8), 0.25 * S + 3, s.dist)
-            local zoom = M.clamp(s.dist / (2.4 * S + 20), 1.5, 5)
-            aim(out, cx, cy, cz, c.x, c.y, c.z, s.dutch, zoom)
-            -- a hand-held long lens never sits perfectly still
-            local w = t * s.speed
-            out.heading = out.heading + sin(w * 1.7 + s.phase) * 0.12 + sin(w * 0.9) * 0.08
-            out.pitch = out.pitch + sin(w * 1.3 + s.phase * 2) * 0.08
-        end,
-    },
-    {
-        id = "tracking", label = "Tracking", w = W(1, 2, 2, 2, 2), shake = 0.3,
-        init = function(s, c)
-            s.hdg = c.track
-            s.side = M.sign()
-            s.dir = M.sign()
-            s.height = M.rand(-0.03, 0.2) * c.size + 1
-        end,
-        update = function(s, c, t, out)
-            local S = c.size
-            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.5))
-            local reach = (S + 8) * s.speed
-            local z = M.lerp(-reach, reach, M.ease(t / s.duration)) * s.dir
-            local cx, cy, cz = yaw_point(c, s.hdg, s.side * (S + 8), s.height, z)
-            local tx, ty, tz = yaw_point(c, s.hdg, 0, 0, -0.1 * S)
-            aim(out, cx, cy, cz, tx, ty, tz, 0, 1)
-        end,
-    },
-    {
-        -- a camera waiting by the flight path, at runway level near the ground
-        id = "flyby", label = "Flyby", w = W(0, 2, 4, 3, 2), min_gs = 5, shake = 0,
-        init = function(s, c)
-            local gs = math.max(c.gs, 1)
-            local T = M.clamp(gs * 4.5, 60, 900) / gs
-            s.side = M.sign()
-            local lat = (0.8 * c.size + 12 + gs * 0.06) * s.side
-            if c.agl < 40 then
-                ground_camera(s, c, T, lat, 0)
-                s.height = M.rand(1.2, 3.0)
-            else
-                local tr = rad(c.track)
-                s.px = c.x + c.vx * T + cos(tr) * lat
-                s.pz = c.z + c.vz * T + sin(tr) * lat
-                s.py = c.y + c.vy * T + M.rand(-0.35, 0.55) * c.size
-            end
-            s.duration = M.clamp(T + 3.5, 5, 15)
-            s.dutch = maybe_dutch(0.4, 5)
-        end,
-        update = trackside_update,
-    },
-    {
-        -- someone on the ground with a long lens, like a plane spotter by the runway
-        id = "spotter", label = "Spotter", w = W(0, 0, 0, 4, 0), min_gs = 20, shake = 0,
-        init = function(s, c)
-            local T = math.min(M.rand(4, 7), 900 / math.max(c.gs, 1))
-            ground_camera(s, c, T, (0.8 * c.size + 40 + c.agl * 0.25) * M.sign(), 0)
-            s.max_zoom = 6
-            s.duration = M.clamp(T + 4, 6, 16)
-            s.dutch = maybe_dutch(0.5, 4)
-        end,
-        update = trackside_update,
-    },
-    {
-        id = "orbit", label = "Orbit", w = W(3, 1, 0, 1, 2), shake = 0,
-        init = function(s, c)
-            s.r = 1.5 * c.size + 14
-            s.a0 = M.rand(0, 360)
-            s.rate = M.sign() * M.rand(6, 11) -- degrees a second
-            s.height = M.rand(0.05, 0.35) * c.size + 2
-            s.phase = M.rand(0, 6.28)
-        end,
-        update = function(s, c, t, out)
-            local a = rad(s.a0 + s.rate * s.speed * t)
-            local cx = c.x + sin(a) * s.r
-            local cz = c.z - cos(a) * s.r
-            local cy = c.y + s.height + sin(t * 0.25 * s.speed + s.phase) * 0.08 * c.size
-            aim(out, cx, cy, cz, c.x, c.y + 0.05 * c.size, c.z, 0, 1)
-        end,
-    },
-    {
-        -- starts ahead looking back at the nose and swings out as the
-        -- aircraft overtakes it
-        id = "passby", label = "Pass-by", w = W(2, 2, 1, 2, 2), shake = 0.25,
-        init = function(s, c)
-            s.hdg = c.track
-            s.side = M.sign()
-            s.low = c.agl > 30
-        end,
-        update = function(s, c, t, out)
-            local S = c.size
-            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.6))
-            local k = M.ease(t / s.duration)
-            -- the same end point; a faster camera starts further away
-            local reach = M.clamp(s.speed, 0.4, 1.6)
-            local x1, z1 = 1.2 * S + 8, 0.7 * S
-            local x = M.lerp(x1 + (0.3 * S - x1) * reach, x1, k) * s.side
-            local y = M.lerp(s.low and -0.12 * S or 0.15 * S + 1, 0.08 * S + 1, k)
-            local z = M.lerp(z1 + (-(2.8 * S + 20) - z1) * reach, z1, k)
-            local cx, cy, cz = yaw_point(c, s.hdg, x, y, z)
-            aim(out, cx, cy, cz, c.x, c.y, c.z, c.phi * 0.15, M.lerp(1.5, 1, k))
-        end,
-    },
-    {
-        -- rises from low beside the aircraft up and over it, like a camera crane
-        id = "crane", label = "Crane", w = W(2, 1, 1, 1, 1), shake = 0.2,
-        init = function(s, c)
-            s.hdg = c.track
-            s.side = M.sign()
-            s.rise = M.rand(1.2, 1.8)
-        end,
-        update = function(s, c, t, out)
-            local S = c.size
-            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.6))
-            local k = M.ease(t / s.duration)
-            local reach = M.clamp(s.speed, 0.4, 1.6)
-            local x = M.lerp(0.9 * S + 8, 0.35 * S, k) * s.side
-            local y = M.lerp(-0.08 * S, (s.rise * S + 12) * reach, k)
-            local z = M.lerp(0.6 * S + 6, 1.1 * S + 12, k)
-            local cx, cy, cz = yaw_point(c, s.hdg, x, y, z)
-            aim(out, cx, cy, cz, c.x, c.y, c.z, 0, 1)
-        end,
-    },
-    {
-        -- low beside the main wheels, like a camera car running alongside
-        id = "wheels", label = "Wheels", w = W(1, 3, 3, 0, 0), ground_only = true, shake = 0.7,
-        init = function(s, c)
-            s.hdg = c.track
-            s.side = M.sign()
-            s.dir = M.sign()
-        end,
-        update = function(s, c, t, out)
-            local S = c.size
-            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.3))
-            local z = 0.1 * S + s.dir * M.lerp(-0.08, 0.08, M.ease(t / s.duration)) * S * s.speed
-            local cx, cy, cz = yaw_point(c, s.hdg, (0.32 * S + 2.5) * s.side, 0.6 - c.agl, z)
-            local tx, ty, tz = yaw_point(c, s.hdg, 0.1 * S * s.side, 0.9 - c.agl, 0.05 * S)
-            aim(out, cx, cy, cz, tx, ty, tz, 0, 1, 0.4)
-        end,
-    },
-    {
-        id = "tail", label = "Tail mount", w = W(1, 1, 2, 1, 1.5), shake = 1,
-        init = function(s, c) s.phase = M.rand(0, 6.28) end,
-        update = function(s, c, t, out)
-            local S = c.size
-            mounted(out, c, 0, 0.24 * S + 1.5, 0.55 * S + 2.5,
-                sin(t * 0.2 * s.speed + s.phase) * 0.05 * S, 0.05 * S, -1.5 * S)
-        end,
-    },
-    {
-        id = "wing", label = "Wing mount", w = W(1, 1, 2, 1.5, 1.5), shake = 1,
-        init = function(s, c) s.side = M.sign() end,
-        update = function(s, c, t, out)
-            local S = c.size
-            mounted(out, c, s.side * (0.56 * S + 0.6), 0.08 * S + 0.4, 0.1 * S,
-                0, 0.05 * S, -0.3 * S + sin(t * 0.15 * s.speed) * 0.05 * S)
-        end,
-    },
-    {
-        -- a camera on a boom ahead of the nose, looking back
-        id = "nose", label = "Nose boom", w = W(1, 1, 1, 1, 1), shake = 1,
-        init = function(s, c) end,
-        update = function(s, c, t, out)
-            local S = c.size
-            mounted(out, c, 0, 0.1 * S + 0.8, -(0.65 * S + 3), 0, 0.03 * S, 0.3 * S)
-        end,
-    },
-    {
-        id = "drone", label = "Drone", w = W(2, 1, 0, 1, 1.5), shake = 0,
-        init = function(s, c)
-            s.height = 3 * c.size + 30
-            s.back = 0.8 * c.size + 4
-            s.a0 = c.psi + 180
-            s.spin = M.sign() * M.rand(3, 7)
-        end,
-        update = function(s, c, t, out)
-            local a = rad(s.a0 + s.spin * s.speed * t)
-            local cx = c.x + sin(a) * s.back
-            local cz = c.z - cos(a) * s.back
-            aim(out, cx, c.y + s.height, cz, c.x, c.y, c.z, 0, 1)
-        end,
-    },
+local function pan_cap(s) return M.clamp(40 * s.pace, 6, 60) end
+
+local TRACKSIDE = {
+    id = "trackside", kind = "outside", min_gs = 5,
+    init = function(s, c)
+        local v = math.max(c.gs, 1)
+        s.pan_cap = pan_cap(s)
+        s.f = M.rand(0.3, 0.55)
+        local ground = c.agl < 300 and CV.phase ~= "cruise"
+        local r, T, lat = math.random()
+        if r < 0.5 then
+            -- the aircraft passes the camera
+            T = M.rand(3, 6)
+            lat = v / rad(s.pan_cap)
+            s.duration = T + M.rand(2, 4)
+        elseif r < 0.8 then
+            -- it comes towards the camera, and the shot ends before it passes
+            T = M.rand(8, 12)
+            lat = v * T * math.tan(rad(M.rand(4, 10)))
+            s.duration = M.rand(4, T - 3)
+        else
+            -- it leaves the camera behind
+            T = -M.rand(1.5, 3)
+            lat = M.rand(0.5, 1.0) * v
+            s.duration = M.rand(5, 8)
+        end
+        plan_trackside(s, c, T, M.sign() * lat, 0, ground)
+        s.dutch = maybe_dutch(0.35, 4)
+    end,
+    update = trackside_update,
+}
+
+-- Mount points just off the airframe (azimuth from the nose, elevation) and
+-- where each looks, in spans from the centre.
+local MOUNTS = {
+    { az = { 150, 210 }, el = { 10, 35 }, look = { 0, 0.03, -0.8 } },          -- above and behind the tail
+    { az = { 60, 120 }, el = { -5, 15 }, look = { 0, 0.03, -0.25 }, sides = true }, -- off a wingtip
+    { az = { -25, 25 }, el = { 0, 20 }, look = { 0, 0.03, 0.3 } },             -- ahead of the nose, looking back
+    { az = { 30, 150 }, el = { -25, -10 }, look = { 0, 0, 0 }, sides = true, airborne = true }, -- below, off to one side
+}
+
+local MOUNTED = {
+    id = "mounted", kind = "outside", shake = 1,
+    init = function(s, c)
+        local pool = {}
+        for _, m in ipairs(MOUNTS) do
+            if not (m.airborne and c.onground) then pool[#pool + 1] = m end
+        end
+        local m = pool[math.random(#pool)]
+        local az, el = M.rand(m.az[1], m.az[2]), M.rand(m.el[1], m.el[2])
+        if m.sides then az = az * M.sign() end
+        local r = clearance(c) * M.rand(1.0, 1.15)
+        local a, e = rad(az), rad(el)
+        s.mx, s.my, s.mz = sin(a) * cos(e) * r, sin(e) * r, -cos(a) * cos(e) * r
+        s.lx, s.ly, s.lz = m.look[1] * c.size, m.look[2] * c.size, m.look[3] * c.size
+        -- the look point drifts sideways a little over the shot
+        local reach = sqrt((s.mx - s.lx) ^ 2 + (s.my - s.ly) ^ 2 + (s.mz - s.lz) ^ 2)
+        s.drift = M.sign() * math.tan(rad(math.min(MOTION_RATE * s.pace * s.duration * 0.5, 15))) * reach
+    end,
+    update = function(s, c, t, out)
+        local k = M.ease(t / s.duration) - 0.5
+        mounted(out, c, s.mx, s.my, s.mz, s.lx + s.drift * k, s.ly, s.lz)
+    end,
+}
+
+-- How the outside kinds mix in each phase: orbiting, trackside, mounted.
+local GENERATED = { ORBITING, TRACKSIDE, MOUNTED }
+local OUTSIDE_MIX = {
+    parked = { 0.8, 0, 0.2 }, taxi = { 0.6, 0.2, 0.2 }, roll = { 0.45, 0.35, 0.2 },
+    low = { 0.4, 0.4, 0.2 }, cruise = { 0.65, 0.15, 0.2 },
 }
 
 -- Moments: these cut in when they happen instead of waiting their turn.
@@ -760,108 +780,81 @@ local EVENT_SHOTS = {
     -- by the runway a little past where the aircraft is about to touch down
     -- (allowing for the flare)
     touchdown = {
-        id = "touchdown", label = "Touchdown", event = true, shake = 0,
+        id = "touchdown", kind = "outside", event = true,
         init = function(s, c)
             local T = M.clamp(c.agl / math.max(-c.vy, 0.5), 2, 16)
-            s.height = M.rand(1.0, 1.8)
-            ground_camera(s, c, T, (0.6 * c.size + 25) * M.sign(), 0.3 * c.size + 15 + c.gs * 1.5)
-            s.max_zoom = 6
             s.duration = T + 5
+            s.pan_cap = pan_cap(s)
+            s.f = M.rand(0.3, 0.5)
+            s.height = M.rand(1.0, 1.8)
+            plan_trackside(s, c, T, M.sign() * math.max(c.gs, 1) / rad(s.pan_cap),
+                0.3 * c.size + 15 + c.gs * 1.5, true)
             s.dutch = maybe_dutch(0.5, 3)
         end,
         update = trackside_update,
     },
     -- low by the runway as the aircraft lifts off and climbs away
     liftoff = {
-        id = "liftoff", label = "Liftoff", event = true, shake = 0,
+        id = "liftoff", kind = "outside", event = true,
         init = function(s, c)
-            s.height = M.rand(0.8, 1.5)
-            ground_camera(s, c, 0.6, (0.6 * c.size + 25) * M.sign(), 0)
-            s.max_zoom = 6
             s.duration = 7
+            s.pan_cap = pan_cap(s)
+            s.f = M.rand(0.3, 0.5)
+            s.height = M.rand(0.8, 1.5)
+            plan_trackside(s, c, 0.6, M.sign() * math.max(c.gs, 1) / rad(s.pan_cap), 0, true)
             s.dutch = maybe_dutch(0.5, 3)
         end,
         update = trackside_update,
     },
 }
 
--- Opening shots: a cinematic starts with a reveal.
-local HERO_SHOTS = { passby = true, crane = true, orbit = true }
-
 -- Used when the plugin SDK can't be loaded: X-Plane's own outside views.
 local BUILTIN_SHOTS = {
-    { id = "xp_chase", label = "Chase cam", command = "sim/view/chase", w = W(1, 2, 3, 3, 3) },
-    { id = "xp_circle", label = "Orbit", command = "sim/view/circle", w = W(3, 1, 0, 1, 2) },
-    { id = "xp_spot", label = "Flyby", command = "sim/view/still_spot", w = W(0, 1, 3, 3, 2), min_gs = 15 },
-    { id = "xp_linear", label = "Tracking", command = "sim/view/linear_spot", w = W(0, 1, 2, 2, 2), min_gs = 15 },
+    { id = "xp_chase", command = "sim/view/chase", w = W(1, 2, 3, 3, 3) },
+    { id = "xp_circle", command = "sim/view/circle", w = W(3, 1, 0, 1, 2) },
+    { id = "xp_spot", command = "sim/view/still_spot", w = W(0, 1, 3, 3, 2), min_gs = 15 },
+    { id = "xp_linear", command = "sim/view/linear_spot", w = W(0, 1, 2, 2, 2), min_gs = 15 },
 }
-
--- Head pose: dx, dy, dz from the eye point (x right, y up, z aft, metres),
--- then heading, pitch and roll in degrees relative to the aircraft.
-local COCKPIT_SHOTS = {
-    {
-        id = "eye", label = "Pilot's eye", w = W(2, 2, 3, 2, 2),
-        init = function(s, e)
-            s.amp = M.rand(12, 26)
-            s.w = 2 * math.pi / M.rand(16, 24)
-            s.phase = M.rand(0, 6.28)
-            s.pitch = M.rand(-7, -3)
-        end,
-        update = function(s, e, t)
-            local w = s.w * s.speed * t
-            return 0, 0.006 * sin(t * 1.3), 0, s.amp * sin(w + s.phase), s.pitch + 2 * sin(w * 0.7), 0
-        end,
-    },
-    {
-        id = "shoulder", label = "Over the shoulder", w = W(2, 2, 2, 2, 2),
-        init = function(s, e)
-            s.inward = e.seat ~= 0 and -e.seat or 1
-            s.from = M.rand(-8, -2) * s.inward * s.speed
-        end,
-        update = function(s, e, t)
-            local k = M.ease(t / s.duration)
-            return 0.18 * s.inward, 0.12, 0.32, M.lerp(s.from, -s.from, k), -8 + sin(t * 0.4) * 1.5, 0
-        end,
-    },
-    {
-        id = "window", label = "Side window", w = W(2, 2, 2, 3, 2),
-        init = function(s, e)
-            s.out = e.seat ~= 0 and e.seat or M.sign()
-            s.look = M.rand(65, 85)
-            s.phase = M.rand(0, 6.28)
-        end,
-        update = function(s, e, t)
-            local w = t * s.speed
-            return 0, 0, 0, s.out * (s.look + 5 * sin(w * 0.25 + s.phase)), -6 + 2 * sin(w * 0.3), 0
-        end,
-    },
-    {
-        id = "panel", label = "Panel", w = W(2, 1.5, 0.5, 1, 2),
-        init = function(s, e)
-            s.pitch = -M.rand(22, 30)
-            s.span = math.min(M.rand(16, 26) * s.speed, 45) * M.sign()
-        end,
-        update = function(s, e, t)
-            local k = M.ease(t / s.duration)
-            return 0, -0.04, -0.06, M.lerp(-s.span, s.span, k), s.pitch, 0
-        end,
-    },
-    {
-        id = "copilot", label = "Co-pilot's seat", w = W(1.5, 1.5, 1, 1.5, 1.5), side_by_side = true,
-        init = function(s, e)
-            s.look = M.rand(10, 22)
-            s.phase = M.rand(0, 6.28)
-        end,
-        update = function(s, e, t)
-            return -2 * e.x, 0, 0, e.seat * (s.look + 6 * sin(t * 0.2 * s.speed + s.phase)), -6, 0
-        end,
-    },
-}
-
-for _, d in ipairs(OUTSIDE_SHOTS) do d.kind = "outside" end
-for _, d in pairs(EVENT_SHOTS) do d.kind = "outside" end
 for _, d in ipairs(BUILTIN_SHOTS) do d.kind = "builtin" end
-for _, d in ipairs(COCKPIT_SHOTS) do d.kind = "cockpit" end
+
+-- Inside: where the pilot's head is (dx, dy, dz from the eye point: right,
+-- up, aft, metres) and a slow pan from one heading to another, at a steady
+-- pitch. No bobbing.
+local COCKPIT = {
+    id = "cockpit", kind = "cockpit",
+    init = function(s, e)
+        local side = e.seat ~= 0 and e.seat or M.sign() -- the pilot's side: -1 left
+        s.dx, s.dy, s.dz = 0, 0, 0
+        local r = math.random()
+        if r < 0.3 then
+            -- forward through the windscreen
+            s.psi0, s.the = M.rand(-15, 15), M.rand(-8, -2)
+        elseif r < 0.5 then
+            -- out of the side window
+            s.psi0, s.the = side * M.rand(55, 95), M.rand(-10, 0)
+        elseif r < 0.65 then
+            -- across the panel
+            s.psi0, s.the = M.rand(-20, 20), M.rand(-32, -20)
+            s.dy, s.dz = -0.03, -0.05
+        elseif r < 0.82 then
+            -- over the shoulder
+            s.dx, s.dy, s.dz = -side * M.rand(0.12, 0.2), M.rand(0.08, 0.14), M.rand(0.25, 0.38)
+            s.psi0, s.the = M.rand(-10, 10), M.rand(-10, -4)
+        elseif e.seat ~= 0 and abs(e.x) >= 0.2 then
+            -- from the other seat, looking across
+            s.dx = -2 * e.x
+            s.psi0, s.the = side * M.rand(10, 35), M.rand(-10, -4)
+        else
+            s.psi0, s.the = -side * M.rand(20, 45), M.rand(-10, -4)
+        end
+        local B = math.min(MOTION_RATE * s.pace * s.duration * 1.5, 40)
+        s.dpsi = M.sign() * B
+        s.psi0 = s.psi0 - s.dpsi / 2
+    end,
+    update = function(s, e, t)
+        return s.dx, s.dy, s.dz, s.psi0 + s.dpsi * M.ease(t / s.duration), s.the, 0
+    end,
+}
 
 ------------------------------------------------------------------------------
 -- Camera shake: turbulence (changes in g-load), runway rumble and the thump
@@ -945,7 +938,7 @@ local function camera_func(pos, losing)
     end
     s.def.update(s, c, t_now - s.t0, cam_out)
     local level = shake_level(c, c.dt, t_now)
-    local amount = settings.shake and (s.def.shake or 0) or 0
+    local amount = settings.shake and (s.shake or s.def.shake or 0) or 0
     if amount > 0 then
         local a = amount * level * 0.6
         cam_out.heading = cam_out.heading + a * 0.5 * jitter(t_now, 1)
@@ -1045,31 +1038,38 @@ local function pick_from(pool, cond)
     return candidates[#candidates]
 end
 
+-- Which kind of outside shot to generate next.
+local function pick_outside(cond)
+    if not XP.camera_ok then return pick_from(BUILTIN_SHOTS, cond) end
+    local mix = OUTSIDE_MIX[cond.phase]
+    local weights, total = {}, 0
+    for i, def in ipairs(GENERATED) do
+        local w = mix[i]
+        if def.min_gs and (cond.paused or cond.gs < def.min_gs) then w = 0 end
+        if CV.recent[1] == def.id and CV.recent[2] == def.id then w = 0 end -- not three in a row
+        weights[i] = w
+        total = total + w
+    end
+    if total <= 0 then return ORBITING end
+    local r = math.random() * total
+    for i, def in ipairs(GENERATED) do
+        r = r - weights[i]
+        if r <= 0 and weights[i] > 0 then return def end
+    end
+    return ORBITING
+end
+
 local function pick_shot()
     if not CV.eye then CV.eye = find_eye() end
     local cond = conditions()
-    local outside = XP.camera_ok and OUTSIDE_SHOTS or BUILTIN_SHOTS
     if CV.first_shot then
-        -- open with a reveal
         CV.first_shot = false
-        if XP.camera_ok and settings.mode ~= "cockpit" then
-            local heroes = {}
-            for _, def in ipairs(OUTSIDE_SHOTS) do
-                if HERO_SHOTS[def.id] then heroes[#heroes + 1] = def end
-            end
-            local def = pick_from(heroes, cond)
-            if def then return def end
-        end
+        if XP.camera_ok and settings.mode ~= "cockpit" then return REVEAL end -- open with a reveal
     end
-    local cockpit
-    if settings.mode == "cockpit" then
-        cockpit = true
-    elseif settings.mode == "outside" then
-        cockpit = false
-    else
-        cockpit = math.random(100) <= settings.cockpit_share
+    if settings.mode == "cockpit" or (settings.mode == "mixed" and math.random(100) <= settings.cockpit_share) then
+        return COCKPIT
     end
-    return pick_from(cockpit and COCKPIT_SHOTS or outside, cond) or pick_from(outside, cond)
+    return pick_outside(cond)
 end
 
 -- Views are switched by setting X-Plane's view number directly where it's
@@ -1110,7 +1110,7 @@ local function begin_shot(def)
     local busy = CV.phase == "roll" or CV.phase == "low"
     local s = {
         def = def, t0 = now(), duration = busy and M.rand(lo, mid) or M.rand(mid, hi),
-        speed = settings.camera_speed, inited = false,
+        pace = settings.camera_pace, inited = false,
     }
     CV.view_target = nil
     if def.kind == "cockpit" then
@@ -1222,7 +1222,7 @@ local function start(reason)
     CV.saved_head = read_head()
     CV.restore_frames = 0
     CV.restore_view_check = 0
-    CV.size = aircraft_size()
+    CV.size = current_size()
     CV.eye = find_eye()
     CV.base_view = (CV.saved_view == VIEW_3D_COCKPIT) and "cockpit" or nil
     CV.recent = {}
@@ -1551,7 +1551,7 @@ local function tick()
         end
     elseif settings.afk_enabled and CV.afk_armed and t - CV.last_input >= settings.afk_timeout then
         local paused = gi(R.paused, 0) ~= 0
-        if not vr_on() and (settings.afk_when_paused or not paused) then start("afk") end
+        if not vr_on() and not paused then start("afk") end
     end
 
     if CV.dirty and t - CV.dirty_t > 1.5 then
@@ -1902,7 +1902,6 @@ local function build_settings()
     checkbox("Start when I'm away from the controls", "afk_enabled")
     changed, v = imgui.SliderInt("Away for", settings.afk_timeout, 15, 900, "%d s")
     if changed then settings.afk_timeout = v; mark_dirty() end
-    checkbox("Also start while the sim is paused", "afk_when_paused")
     checkbox("Any input also ends a cinematic I started", "manual_exit_on_input")
     imgui.Separator()
 
@@ -1930,8 +1929,25 @@ local function build_settings()
         settings.shot_min = math.min(settings.shot_min, v)
         mark_dirty()
     end
-    changed, v = imgui.SliderFloat("Camera speed", settings.camera_speed, 0.25, 2.5, "%.2fx")
-    if changed then settings.camera_speed = v; mark_dirty() end
+    changed, v = imgui.SliderFloat("Camera speed", settings.camera_pace, 0.1, 2, "%.2fx")
+    if changed then settings.camera_pace = v; mark_dirty() end
+    changed, v = imgui.SliderFloat("Aircraft size", CV.size, 4, 100, "%.0f m")
+    if changed then
+        aircraft_sizes[aircraft_key()] = v
+        CV.size = v
+        mark_dirty()
+    end
+    imgui.SameLine()
+    if aircraft_sizes[aircraft_key()] then
+        if imgui.Button("Auto##size") then
+            aircraft_sizes[aircraft_key()] = nil
+            CV.size = current_size()
+            mark_dirty()
+        end
+    else
+        imgui.TextUnformatted("(auto)")
+    end
+    imgui.TextWrapped("Raise the aircraft size if cameras clip the aircraft. It's kept for this aircraft.")
     checkbox("Letterbox bars", "letterbox")
     imgui.SameLine()
     checkbox("Fades", "fades")
@@ -2028,7 +2044,7 @@ pcall(joystick_setup)
 CV.last_input = now()
 CV.heartbeat = now()
 CV.last_tick = now()
-CV.size = aircraft_size()
+CV.size = current_size()
 
 do_every_frame("CinematicView_tick()")
 do_every_draw("CinematicView_draw()")

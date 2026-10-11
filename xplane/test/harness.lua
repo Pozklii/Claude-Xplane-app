@@ -15,6 +15,7 @@ SCRIPT_DIRECTORY = os.getenv("TMPDIR_TEST") or "."
 SCREEN_WIDTH, SCREEN_HEIGHT = 1920, 1080
 MOUSE_X, MOUSE_Y = 500, 500
 PLANE_ICAO, PLANE_TAILNUMBER = "A320", "D-AXLA"
+AIRCRAFT_FILENAME = "Test A320.acf"
 local chunks = { frame = {}, draw = {}, key = {}, click = {}, wheel = {} }
 local exit_code = {}
 local commands, command_ends, macros, logs, drawn = {}, {}, {}, {}, { rects = 0, strings = {} }
@@ -208,8 +209,20 @@ local function ini_text()
     if f then f:close() end
     return text
 end
-local stats = { shots = {}, cam_frames = 0, cockpit_frames = 0, min_dist = 1e9, max_dist = 0, below_ground = 0 }
+local stats = { shots = {}, cam_frames = 0, cockpit_frames = 0, min_dist = 1e9, max_dist = 0, below_ground = 0,
+    too_close = 0, cruise_ground_trackside = 0 }
 local S_expected = 0.9 * 78000 ^ (1 / 3)
+-- generated shots, as they start
+local orbiting_shots, cockpit_shots = {}, {}
+-- how fast the picture moves, per kind of shot, only while `measuring`
+local measuring, motion, prev = false, {}, nil
+local function note_motion(kind, rate, limit)
+    local m = motion[kind] or { peak = 0, over = 0, n = 0 }
+    motion[kind] = m
+    m.n = m.n + 1
+    m.peak = math.max(m.peak, rate / limit)
+    if rate > limit then m.over = m.over + 1 end
+end
 
 local function frame(dt)
     T = T + dt
@@ -223,6 +236,7 @@ local function frame(dt)
         shots_seen[CVt.shot.def.id] = true
         table.insert(shot_log, CVt.shot.def.id)
         shot_log.last = CVt.shot
+        if CVt.shot.def.kind == "cockpit" then table.insert(cockpit_shots, CVt.shot) end
     end
     if lib and lib.mock_camera_controlled() ~= 0 then
         local r = lib.mock_call_camera(cam, 0)
@@ -248,7 +262,39 @@ local function frame(dt)
             ps.dmin, ps.dmax = math.min(ps.dmin, d), math.max(ps.dmax, d)
             ps.zmax = math.max(ps.zmax, cam.zoom)
             ps.rollmax = math.max(ps.rollmax, math.abs(cam.roll))
-            check(shot_zoom >= 0.84 and shot_zoom <= 6 and cam.zoom >= 0.4 and cam.zoom <= 12, "zoom in range " .. cam.zoom)
+            check(shot_zoom >= 0.99 and shot_zoom <= 10.01 and cam.zoom >= 0.4 and cam.zoom <= 12, "zoom in range " .. cam.zoom)
+            if d < 0.65 * CVt.size + 2 - 0.5 then stats.too_close = stats.too_close + 1 end
+            local sh = CVt.shot
+            if sh and sh.def.id == "orbiting" and sh.inited and not sh.counted then
+                sh.counted = true
+                table.insert(orbiting_shots, sh)
+            end
+            if sh and sh.def.id == "trackside" and CVt.phase == "cruise" and sh.ground then
+                stats.cruise_ground_trackside = stats.cruise_ground_trackside + 1
+            end
+            -- how fast the picture moves: an orbiting camera going round the
+            -- aircraft, a trackside camera turning, both magnified by zoom
+            if measuring and sh and prev and prev.shot == sh and T - sh.t0 > 0.2 then
+                if sh.def.id == "orbiting" then
+                    local a = math.rad(-sh.hdg)
+                    local rx, ry, rz = cam.x - ac.x, cam.y - ac.y, cam.z - ac.z
+                    rx, rz = rx * math.cos(a) + rz * math.sin(a), -rx * math.sin(a) + rz * math.cos(a)
+                    local len = math.sqrt(rx * rx + ry * ry + rz * rz)
+                    rx, ry, rz = rx / len, ry / len, rz / len
+                    if prev.rx then
+                        local dot = math.max(-1, math.min(1, rx * prev.rx + ry * prev.ry + rz * prev.rz))
+                        local rate = math.deg(math.acos(dot)) / dt * shot_zoom
+                        note_motion("orbiting", rate, 5 * sh.pace * 1.5 + 1)
+                    end
+                    prev.rx, prev.ry, prev.rz = rx, ry, rz
+                elseif sh.def.id == "trackside" then
+                    local dh = ((cam.heading - prev.h + 180) % 360) - 180
+                    local rate = math.sqrt(dh * dh + (cam.pitch - prev.p) ^ 2) / dt * shot_zoom
+                    note_motion("trackside", rate, sh.pan_cap * 1.5 + 2)
+                end
+            end
+            if not prev or prev.shot ~= sh then prev = { shot = sh } end
+            prev.h, prev.p = cam.heading, cam.pitch
         end
     end
     in_draw = true
@@ -276,8 +322,9 @@ local saw_letterbox = drawn.rects > 0
 check(saw_letterbox, "letterbox drawn once active")
 
 -- run a long cinematic and record what happens
-local last_label
 local head_moved = false
+check(CVt.shot and CVt.shot.pace == 0.5, "the camera speed starts at 0.5")
+measuring = true
 for i = 1, 30 * 240 do
     frame(1 / 30)
     local vt = get_i("sim/graphics/view/view_type")
@@ -290,13 +337,19 @@ for i = 1, 30 * 240 do
     ac.phi = 25 * math.sin(T * 0.05)
     ac.psi = (ac.psi + 0.02) % 360
 end
+measuring = false
 local n = 0
 for _ in pairs(shots_seen) do n = n + 1 end
 print(string.format("cam frames %d, cockpit frames %d, camera distance %.1f..%.1f m (span %.1f), below ground %d, distinct shots %d",
     stats.cam_frames, stats.cockpit_frames, stats.min_dist, stats.max_dist, S_expected, stats.below_ground, n))
 if mode == "ffi" then
     check(stats.cam_frames > 1000, "outside shots drove the camera")
-    check(stats.min_dist > 0.3 * S_expected, "camera never inside the aircraft")
+    check(stats.too_close == 0, "cameras stay outside the aircraft's clearance: " .. stats.too_close .. " frames inside")
+    for kind, m in pairs(motion) do
+        print(string.format("  %s motion: peak %.2f of the limit over %d frames", kind, m.peak, m.n))
+        check(m.over == 0, kind .. " shots move within the camera speed limit (peak " .. m.peak .. ")")
+    end
+    check(motion.orbiting, "orbiting motion measured")
     check(lib.mock_camera_duration() == 0 or lib.mock_camera_duration() == 2, "camera controlled forever mode")
 else
     local builtin = 0
@@ -306,7 +359,7 @@ end
 check(stats.cockpit_frames > 300, "cockpit shots ran")
 check(head_moved, "head moved in cockpit shots")
 check(stats.below_ground == 0, "camera never below ground")
-check(n >= (mode == "ffi" and 8 or 6), "many different shots (" .. n .. ")") -- the fallback has 9 in all
+check(n >= 3, "several kinds of shot (" .. n .. ")")
 local view_commands = {}
 for _, c in ipairs(command_log) do if c:find("^sim/view/") then view_commands[c] = (view_commands[c] or 0) + 1 end end
 check(not view_commands["sim/view/3d_cockpit_cmnd_look_forward"], "the cockpit view is set directly, not with its command")
@@ -315,7 +368,7 @@ if mode == "ffi" then
     seconds(2)
     check(ini_text():find("chase_view = 1017", 1, true), "the chase view number is remembered")
 end
-check(not shots_seen.wheels and not shots_seen.spotter, "no ground-level shots in cruise")
+check(stats.cruise_ground_trackside == 0, "no ground-level trackside shots in cruise")
 check(#drawn.strings == 0, "no text drawn during the cinematic")
 
 -- 4. a key press ends the AFK cinematic and restores view and head
@@ -404,9 +457,19 @@ run({ commands["FlyWithLua/cinematic_view/toggle"] })
 local before = #shot_log
 seconds(90)
 local parked_shots = shots_since(before)
-check(not parked_shots.flyby and not parked_shots.xp_spot, "no flyby shots while parked")
+check(not parked_shots.trackside and not parked_shots.xp_spot, "no trackside shots while parked")
 run({ commands["FlyWithLua/cinematic_view/toggle"] })
+-- 10a. it doesn't start by itself while paused
+MOUSE_X = MOUSE_X + 40
+seconds(1)
+seconds(150)
+check(not CVt.active, "no auto-start while paused")
 set_i("sim/time/paused", 0)
+seconds(2)
+check(CVt.active and CVt.reason == "afk", "but starts once unpaused")
+tap(0x41)
+seconds(1)
+check(not CVt.active, "and a key ends it")
 
 -- 10b. a landing gets a touchdown shot by the runway, and the touchdown shakes the cameras
 local SHt = upvalue(upvalue(upvalue(CinematicView_tick, "fn"), "watch_flight"), "SH")
@@ -438,7 +501,8 @@ if lib then
     check(touched_at ~= nil, "simulated landing touched down")
     check(touchdown_seen, "a touchdown shot cut in on short final")
     check(touchdown_cam_low, "the touchdown camera stands by the runway")
-    check(touchdown_closest < 90, "and the aircraft passes close by it: " .. touchdown_closest)
+    -- (far enough back that it never has to turn faster than the camera speed allows)
+    check(touchdown_closest > 30 and touchdown_closest < 300, "and the aircraft passes by it: " .. touchdown_closest)
     command("toggle")
 
     -- 10c. a takeoff gets a liftoff shot
@@ -461,20 +525,25 @@ if lib then
     check(liftoff_cam_low, "the liftoff camera is low by the runway")
     command("toggle")
 
-    -- 10d. low and level: spotter shots from the ground (picked at random, so fly until one comes up)
+    -- 10d. low and level: trackside cameras on the ground (generated at random, so fly until some come up)
     ac.y, ac.agl, ac.vy, ac.the, ac.onground = 200, 200, 0, 0, false
     command("cycle_mode") -- outside only
     command("toggle")
-    local spotter_low = true
+    local ground_frames, ground_high = 0, 0
+    measuring = true
     for _ = 1, 30 * 900 do
         frame(1 / 30)
-        if CVt.shot and CVt.shot.def.id == "spotter" and lib.mock_camera_controlled() ~= 0 and cam.y > 2.5 then
-            spotter_low = false
+        local sh = CVt.shot
+        if sh and sh.def.id == "trackside" and sh.ground and lib.mock_camera_controlled() ~= 0 then
+            ground_frames = ground_frames + 1
+            if cam.y > 3.5 then ground_high = ground_high + 1 end
         end
-        if per_shot.spotter and per_shot.spotter.n > 200 then break end
+        if ground_frames > 600 then break end
     end
-    check(per_shot.spotter ~= nil, "spotter shots come up flying low")
-    check(spotter_low, "spotter cameras stand on the ground")
+    measuring = false
+    check(ground_frames > 0, "trackside cameras on the ground come up flying low")
+    check(ground_high == 0, "and stand on the ground")
+    check(motion.trackside and motion.trackside.over == 0, "trackside cameras turn within the camera speed limit")
     command("toggle")
     command("cycle_mode") command("cycle_mode") -- back to mixed
     -- back to parked on the ground for the tests that follow
@@ -619,6 +688,8 @@ for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "Cycle sh
     check(labels:find(l, 1, true), "window shows " .. l)
 end
 check(not labels:find("Caption"), "no captions option")
+check(not labels:find("paused"), "no option to start while paused")
+check(labels:find("Aircraft size", 1, true), "window shows the aircraft size")
 click("Set##set_toggle")
 check(CVt.capturing == "toggle", "waiting for a key")
 check(tap(0x78, { ctrl = true }) == true, "the key being set is swallowed")
@@ -664,17 +735,32 @@ command("toggle")
 command("cycle_mode") -- back to mixed
 
 -- 14. camera speed
-imgui_clicks["Camera speed"] = 2.5 build() imgui_clicks = {}
+imgui_clicks["Camera speed"] = 2 build() imgui_clicks = {}
 command("toggle")
 seconds(40)
-check(CVt.shot and CVt.shot.speed == 2.5, "shots use the camera speed")
+check(CVt.shot and CVt.shot.pace == 2, "shots use the camera speed")
 command("toggle")
-imgui_clicks["Camera speed"] = 0.25 build() imgui_clicks = {}
+imgui_clicks["Camera speed"] = 0.1 build() imgui_clicks = {}
 command("toggle")
 seconds(40)
-check(CVt.shot and CVt.shot.speed == 0.25, "slow camera speed too")
+check(CVt.shot and CVt.shot.pace == 0.1, "slow camera speed too")
 command("toggle")
-imgui_clicks["Camera speed"] = 1 build() imgui_clicks = {}
+imgui_clicks["Camera speed"] = 0.5 build() imgui_clicks = {}
+
+-- 14b. aircraft size, kept for this aircraft
+local auto_size = CVt.size
+imgui_clicks["Aircraft size"] = 60 build() imgui_clicks = {}
+check(CVt.size == 60, "the aircraft size slider sets the size")
+seconds(2)
+check(ini_text():find("size:Test A320.acf = 60.0", 1, true), "and it's saved for this aircraft:\n" .. ini_text())
+command("toggle")
+seconds(30)
+check(stats.too_close == 0, "cameras keep clear of the bigger aircraft too")
+command("toggle")
+click("Auto##size")
+check(math.abs(CVt.size - auto_size) < 1e-6, "Auto goes back to the worked-out size")
+seconds(2)
+check(not ini_text():find("size:Test A320.acf", 1, true), "and forgets the setting")
 command("settings")
 
 -- 15. settings window
@@ -699,6 +785,29 @@ seconds(2)
 run(exit_code)
 check(lib == nil or lib.mock_camera_controlled() == 0, "camera released on exit")
 
+if mode == "ffi" then
+    local sectors, zoomed, wide, el_lo, el_hi = {}, false, false, 90, -90
+    local nsec = 0
+    for _, sh in ipairs(orbiting_shots) do
+        local sec = math.floor((sh.az0 % 360) / 45)
+        if not sectors[sec] then sectors[sec] = true nsec = nsec + 1 end
+        if sh.zoom > 1 then zoomed = true else wide = true end
+        el_lo, el_hi = math.min(el_lo, sh.el0), math.max(el_hi, sh.el0)
+    end
+    print(string.format("  %d orbiting shots generated: %d of 8 directions, elevations %.0f..%.0f", #orbiting_shots, nsec, el_lo, el_hi))
+    check(#orbiting_shots >= 20 and nsec >= 6, "orbiting shots come from all round the aircraft")
+    check(zoomed and wide, "with long lenses and wide ones")
+    check(el_hi - el_lo > 40, "from low and high")
+end
+local bobbing = 0
+for _, sh in ipairs(cockpit_shots) do
+    local _, y0, _, _, the0 = sh.def.update(sh, CVt.eye or { x = -0.55, seat = -1 }, 0)
+    for i = 1, 10 do
+        local _, y, _, _, the = sh.def.update(sh, CVt.eye or { x = -0.55, seat = -1 }, sh.duration * i / 10)
+        if math.abs(y - y0) > 1e-9 or math.abs(the - the0) > 1e-9 then bobbing = bobbing + 1 end
+    end
+end
+check(#cockpit_shots > 5 and bobbing == 0, "cockpit shots hold the head steady (" .. #cockpit_shots .. " shots)")
 for id, ps in pairs(per_shot) do
     print(string.format("  %-9s frames %5d  max off-axis (x zoom) %5.1f deg  dist %6.1f..%6.1f m  zoom<=%.2f  |roll|<=%.1f",
         id, ps.n, ps.ang, ps.dmin, ps.dmax, ps.zmax, ps.rollmax))
