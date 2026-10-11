@@ -108,3 +108,70 @@ def catmull_rom(pts, samples=24):
                              for k in range(len(p1))))
     out.append(tuple(pts[-1]))
     return out
+
+
+# ---- reference lines for surface detail ----------------------------------
+
+# Fuselage crown without the fin (under the fin it follows the fin root).
+CROWN = SILHOUETTE[:30] + [(1500, 516), (1560, 526), (1640, 536), (1720, 543),
+                           (1783, 548), (1800, 549), (1830, 561), (1855, 569),
+                           (1868, 576)]
+BELLY = sorted(SILHOUETTE[SILHOUETTE.index((1858, 597)) + 1:]) + [(1858, 597)]
+
+
+def _interp(pts, x):
+    if x <= pts[0][0]:
+        return pts[0][1]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x <= x1:
+            return y0 + (y1 - y0) * (x - x0) / ((x1 - x0) or 1)
+    return pts[-1][1]
+
+
+def crown(x):
+    return _interp(CROWN, x)
+
+
+def belly(x):
+    return _interp(BELLY, x)
+
+
+def axis(x):
+    """The window line, extended along the fuselage axis at both ends."""
+    if x < _WY[0][0]:
+        return _WY[0][1] + 0.08 * (x - _WY[0][0])
+    if x > _WY[-1][0]:
+        return _WY[-1][1] + 0.08 * (x - _WY[-1][0])
+    return window_y(x)
+
+
+# Circumferential butt joints: major section breaks, then lighter frames.
+JOINTS_MAJOR = [240, 560, 830, 1110, 1250, 1450, 1640, 1790]
+JOINTS_MINOR = [400, 700, 975, 1350, 1545, 1715]
+RADOME = [(93, 470), (86, 490), (80, 512), (76, 535), (74, 562)]
+# Longitudinal lap joints, as offsets from the window line.
+LAPS = [-38, -13, 13, 50, 90]
+FAIRING = [(790, 641), (850, 629), (1000, 622), (1200, 627), (1350, 640),
+           (1470, 663)]
+
+# Small items: (x, y) on the skin.
+STATIC_PORTS = [(232, 506), (232, 516)]
+PROBES = [(88, 486, 3.0, 2.0), (104, 515, 2.6, 1.8), (88, 532, 2.6, 1.8)]
+AOA_VANE = (117, 488)
+# Blade antennas on the crown: (x, length, height); negative height = belly.
+ANTENNAS = [(372, 5, 4), (408, 5, 4), (508, 13, 14), (1232, 10, 10),
+            (1440, 8, 8), (460, 8, -7), (1060, 10, -8)]
+BEACONS = [(450, 1), (650, -1)]        # x, +1 on top / -1 under the belly
+DOOR_FITTINGS = {                      # viewport (x, y) and handle (x, y)
+    0: ((316, 440), (333, 466)),
+    2: ((1476, 540), (1492, 566)),
+}
+EXIT_HANDLE = (866, 495)
+ACCESS_PANELS = [(395, 586, 425, 597), (700, 600, 722, 611), (1560, 626, 1586, 637)]
+# Fin: rudder hinge line, rudder bottom and split, static dischargers.
+RUDDER_HINGE = [(1824, 268), (1742, 532)]
+RUDDER_SPLIT_Y = 400
+FIN_TE = [(1845, 265), (1783, 540)]
+FIN_LE = [(1592, 463), (1782, 265)]
+DISCHARGERS = [(1845, 271), (1832, 340), (1818, 410), (1806, 470)]
+EMBRAER_190 = dict(center=(199, 476), width=46)
