@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-typedef struct { char name[128]; int type; int i; float f; double d; float *vf; int *vi; int n; } DR; // type 1 int, 2 float, 4 double, 8 float array, 16 int array
+typedef struct { char name[128]; int type; int i; float f; double d; float *vf; int *vi; int n; int readonly; } DR; // type 1 int, 2 float, 4 double, 8 float array, 16 int array
 static DR drs[128];
 static int ndrs = 0;
 static float elapsed = 0;
@@ -32,6 +32,10 @@ static void init(void) {
     for (int i = 0; dbl[i]; i++) add(dbl[i], 4);
     for (int i = 0; flt[i]; i++) add(flt[i], 2);
     for (int i = 0; ints[i]; i++) add(ints[i], 1);
+    // made-up focus settings, to check the script finds and drives them by name
+    add("mock/camera/focus_distance_m", 2);
+    add("mock/camera/auto_focus", 1);
+    add("mock/camera/dof_enabled", 1)->readonly = 1;
     DR *a = add("sim/joystick/joystick_axis_values", 8); a->vf = axes; a->n = 500;
     DR *b = add("sim/joystick/joystick_button_values", 16); b->vi = buttons; b->n = 3200;
 }
@@ -42,6 +46,12 @@ void XPLMSetDatai(void *r, int v) { if (r) ((DR *)r)->i = v; }
 float XPLMGetDataf(void *r) { return r ? ((DR *)r)->f : 0; }
 void XPLMSetDataf(void *r, float v) { if (r) ((DR *)r)->f = v; }
 double XPLMGetDatad(void *r) { return r ? ((DR *)r)->d : 0; }
+void XPLMSetDatad(void *r, double v) { if (r) ((DR *)r)->d = v; }
+// the dataref list (X-Plane 12)
+typedef struct { int structSize; const char *name; int type; int writable; int owner; } drinfo_t;
+int XPLMCountDataRefs(void) { init(); return ndrs; }
+void XPLMGetDataRefsByIndex(int offset, int count, void **out) { for (int i = 0; i < count; i++) out[i] = (offset + i < ndrs) ? &drs[offset + i] : 0; }
+void XPLMGetDataRefInfo(void *r, drinfo_t *info) { DR *d = r; if (!d || info->structSize != sizeof(drinfo_t)) return; info->name = d->name; info->type = d->type; info->writable = !d->readonly; info->owner = 0; }
 int XPLMGetDatavf(void *r, float *out, int off, int max) { DR *d = r; if (!d || d->type != 8) return 0; if (!out) return d->n; int n = 0; for (int i = off; i < d->n && n < max; i++) out[n++] = d->vf[i]; return n; }
 int XPLMGetDatavi(void *r, int *out, int off, int max) { DR *d = r; if (!d || d->type != 16) return 0; if (!out) return d->n; int n = 0; for (int i = off; i < d->n && n < max; i++) out[n++] = d->vi[i]; return n; }
 float XPLMGetElapsedTime(void) { return elapsed; }

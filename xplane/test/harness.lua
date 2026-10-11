@@ -115,7 +115,7 @@ if mode == "ffi" then
     get_f = function(n) return lib.XPLMGetDataf(lib.XPLMFindDataRef(n)) end
     get_d = function(n) return lib.XPLMGetDatad(lib.XPLMFindDataRef(n)) end
     -- doubles: the mock has no setter, so write the field through its struct layout
-    ffi.cdef("typedef struct { char name[128]; int type; int i; float f; double d; float *vf; int *vi; int n; } mock_dr_t;")
+    ffi.cdef("typedef struct { char name[128]; int type; int i; float f; double d; float *vf; int *vi; int n; int readonly; } mock_dr_t;")
     set_d = function(n, v) ffi.cast("mock_dr_t *", lib.XPLMFindDataRef(n)).d = v end
 else
     -- FlyWithLua's own wrappers
@@ -187,6 +187,10 @@ set_f("sim/graphics/view/pilots_head_x", -0.55)
 set_f("sim/graphics/view/pilots_head_y", 2.3)
 set_f("sim/graphics/view/pilots_head_z", -16.5)
 set_f("sim/aircraft/weight/acf_m_max", 78000)
+if mode == "ffi" then
+    set_f("mock/camera/focus_distance_m", 500)
+    set_i("mock/camera/auto_focus", 1)
+end
 set_f("sim/operation/misc/frame_rate_period", 1 / 30)
 set_i("sim/graphics/view/view_type", 1026)
 push_aircraft()
@@ -257,7 +261,7 @@ local function ini_text()
     return text
 end
 local stats = { shots = {}, cam_frames = 0, cockpit_frames = 0, min_dist = 1e9, max_dist = 0, below_ground = 0,
-    too_close = 0, cruise_ground_trackside = 0 }
+    too_close = 0, cruise_ground_trackside = 0, focus_frames = 0, focus_off = 0, focus_kept = 0, focus_back = 0 }
 local S_expected = 0.9 * 78000 ^ (1 / 3)
 -- generated shots, as they start
 local orbiting_shots, cockpit_shots = {}, {}
@@ -311,6 +315,11 @@ local function frame(dt)
             ps.rollmax = math.max(ps.rollmax, math.abs(cam.roll))
             check(shot_zoom >= 0.99 and shot_zoom <= 10.01 and cam.zoom >= 0.4 and cam.zoom <= 12, "zoom in range " .. cam.zoom)
             if d < 0.65 * CVt.size + 2 - 0.5 then stats.too_close = stats.too_close + 1 end
+            if mode == "ffi" then
+                stats.focus_frames = stats.focus_frames + 1
+                if math.abs(get_f("mock/camera/focus_distance_m") - math.max(d, 1)) > 0.05 * d + 0.5 then stats.focus_off = stats.focus_off + 1 end
+                if get_i("mock/camera/auto_focus") ~= 0 then stats.focus_kept = stats.focus_kept + 1 end
+            end
             local sh = CVt.shot
             if sh and sh.def.id == "orbiting" and sh.inited and not sh.counted then
                 sh.counted = true
@@ -342,6 +351,12 @@ local function frame(dt)
             end
             if not prev or prev.shot ~= sh then prev = { shot = sh } end
             prev.h, prev.p = cam.heading, cam.pitch
+        end
+    end
+    -- and back to X-Plane's own focus whenever the camera isn't ours
+    if mode == "ffi" and (not CVt.shot or CVt.shot.def.kind ~= "outside") and lib.mock_camera_controlled() == 0 then
+        if get_i("mock/camera/auto_focus") ~= 1 or math.abs(get_f("mock/camera/focus_distance_m") - 500) > 1e-3 then
+            stats.focus_back = stats.focus_back + 1
         end
     end
     in_draw = true
@@ -397,6 +412,12 @@ if mode == "ffi" then
         check(m.over == 0, kind .. " shots move within the camera speed limit (peak " .. m.peak .. ")")
     end
     check(motion.orbiting, "orbiting motion measured")
+    check(stats.focus_frames > 1000 and stats.focus_off == 0, "outside shots focus on the aircraft (" .. stats.focus_off .. " frames off)")
+    check(stats.focus_kept == 0, "X-Plane's auto-focus is paused during outside shots")
+    check(stats.focus_back == 0, "and X-Plane's focus settings are back otherwise (" .. stats.focus_back .. " frames not)")
+    local found_log = false
+    for _, l in ipairs(logs) do if l:find("focusing outside shots with mock/camera/focus_distance_m, pausing mock/camera/auto_focus", 1, true) then found_log = true end end
+    check(found_log, "the focus settings it found are logged")
     check(lib.mock_camera_duration() == 0 or lib.mock_camera_duration() == 2, "camera controlled forever mode")
 else
     local builtin = 0
@@ -654,14 +675,14 @@ if lib then
         end
         return trace, (stopped_at or T) - released_at
     end
-    local function smooth_trace(trace, dir, label)
+    local function smooth_trace(trace, dir, label, limit)
         local worst = 0
         for i = 2, #trace do
             local step = math.log(trace[i] / trace[i - 1]) * dir
             check(step > -1e-9, label .. ": zoom never jumps back")
             worst = math.max(worst, step)
         end
-        check(worst < 0.03, label .. ": no frame-to-frame jumps (largest step " .. worst .. ")")
+        check(worst < (limit or 0.03), label .. ": no frame-to-frame jumps (largest step " .. worst .. ")")
     end
     for _, style in ipairs({ "released", "pressed", "none" }) do
         local from = CVt.zoom_target
@@ -692,7 +713,25 @@ if lib then
     local zoomed = CVt.zoom_target
     hold(0x6D, 0.5, "released") -- keypad -
     check(CVt.zoom_target < zoomed, "keypad - zooms out")
-    check(CVt.active, "zooming didn't end the AFK cinematic")
+    -- the mouse wheel: a step a notch, eased in, without ending the cinematic
+    local function wheel(notches)
+        MOUSE_WHEEL_CLICKS, MOUSE_WHEEL_NUMBER, RESUME_MOUSE_WHEEL = notches, 0, false
+        run(chunks.wheel)
+        return RESUME_MOUSE_WHEEL
+    end
+    local before_wheel = CVt.zoom_target
+    check(wheel(2) == true, "the wheel is taken by the cinematic camera")
+    check(math.abs(CVt.zoom_target / before_wheel - 1.12 ^ 2) < 1e-6, "two notches zoom 1.25x: " .. CVt.zoom_target / before_wheel)
+    MOUSE_X = MOUSE_X + 2 -- the hand on the mouse moves it a little
+    local wheel_trace = { CVt.user_zoom }
+    for _ = 1, 60 do frame(1 / 60) wheel_trace[#wheel_trace + 1] = CVt.user_zoom end
+    -- two notches at once (a 25% step) spread over frames: none takes a fifth of it
+    smooth_trace(wheel_trace, 1, "wheel", math.log(1.12 ^ 2) / 5)
+    check(math.abs(CVt.user_zoom - CVt.zoom_target) < 0.01, "the zoom settles on it")
+    wheel(-2)
+    seconds(1)
+    check(math.abs(CVt.zoom_target - before_wheel) < 1e-6, "and back out")
+    check(CVt.active, "scrolling didn't end the AFK cinematic")
     -- a joystick button that runs one of our commands isn't input either
     lib.mock_set_button(40, 1)
     run({ commands["FlyWithLua/cinematic_view/next_shot"] })
@@ -707,11 +746,22 @@ if lib then
     check(CVt.shot.def.kind == "cockpit", "cockpit shot running")
     check(key(0xB0, "pressed") == false, "= goes on to X-Plane in the cockpit")
     key(0xB0, "released")
-    check(CVt.active, "and doesn't end the cinematic")
+    MOUSE_WHEEL_CLICKS, MOUSE_WHEEL_NUMBER, RESUME_MOUSE_WHEEL = 1, 0, false
+    run(chunks.wheel)
+    check(RESUME_MOUSE_WHEEL == false, "and so does the wheel")
+    seconds(0.5)
+    check(CVt.active, "and neither ends the cinematic")
     tap(0x41)
     seconds(0.5)
     check(not CVt.active, "other keys still end it")
     set_mode("mixed")
+    -- when it isn't running, the wheel is input like any other
+    local idle_from = CVt.last_input
+    seconds(2)
+    MOUSE_WHEEL_CLICKS, MOUSE_WHEEL_NUMBER, RESUME_MOUSE_WHEEL = 1, 0, false
+    run(chunks.wheel)
+    seconds(0.1)
+    check(CVt.last_input > idle_from + 1.5 and RESUME_MOUSE_WHEEL == false, "the wheel counts as input when not running")
 end
 
 -- 13. keys set in the settings window

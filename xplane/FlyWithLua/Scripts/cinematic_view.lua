@@ -12,7 +12,8 @@
 
     It can be switched on and off by hand, and it starts by itself after a
     while with no keyboard, mouse or joystick input (any input ends it again).
-    X-Plane's zoom keys (+ and -) zoom the cinematic camera.
+    X-Plane's zoom keys (+ and -) and the mouse wheel zoom the cinematic
+    camera, and X-Plane's depth of field stays focused on the aircraft.
 
     Install: copy this file to X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
 
@@ -35,7 +36,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.3"
+local VERSION = "2.4"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -199,6 +200,7 @@ do
         -- doesn't stop the rest. Pointers are void * so they match any
         -- earlier declaration too.
         local function cdef(s) pcall(ffi.cdef, s) end
+        XP.cdef = cdef
         cdef("typedef struct { float x, y, z, pitch, heading, roll, zoom; } cinematic_view_cam_t;")
         cdef("typedef int (*cinematic_view_cam_f)(cinematic_view_cam_t *, int, void *);")
         cdef([[typedef struct { int structSize; float locationX, locationY, locationZ;
@@ -209,6 +211,7 @@ do
         cdef("void XPLMSetDatai(void *, int);")
         cdef("float XPLMGetDataf(void *);")
         cdef("void XPLMSetDataf(void *, float);")
+        cdef("void XPLMSetDatad(void *, double);")
         cdef("double XPLMGetDatad(void *);")
         cdef("int XPLMGetDatavf(void *, float *, int, int);")
         cdef("int XPLMGetDatavi(void *, int *, int, int);")
@@ -258,12 +261,14 @@ if XP.lib then
     XP.getd = function(r) return lib.XPLMGetDatad(r) end
     XP.seti = function(r, v) lib.XPLMSetDatai(r, v) end
     XP.setf = function(r, v) lib.XPLMSetDataf(r, v) end
+    XP.setd = function(r, v) lib.XPLMSetDatad(r, v) end
 else
     XP.geti = function(r) return XPLMGetDatai(r) end
     XP.getf = function(r) return XPLMGetDataf(r) end
     XP.getd = function(r) return XPLMGetDatad(r) end
     XP.seti = function(r, v) XPLMSetDatai(r, v) end
     XP.setf = function(r, v) XPLMSetDataf(r, v) end
+    XP.setd = function(r, v) XPLMSetDatad(r, v) end
 end
 
 local R = {}
@@ -366,6 +371,7 @@ local CV = {
     learned_views = {},     -- X-Plane's numbers for its own views, by command
     capturing = nil,        -- action waiting for its new key in the settings window
     ignore_buttons_until = 0, -- joystick buttons that just ran one of our commands aren't "input"
+    wheel_t = -100,         -- when the mouse wheel last turned
 }
 
 local function now()
@@ -852,6 +858,109 @@ local COCKPIT = {
 -- Camera control
 ------------------------------------------------------------------------------
 
+------------------------------------------------------------------------------
+-- Focus: X-Plane 12's own depth of field can't tell where a plugin's camera
+-- is, so its auto-focus misses the aircraft in outside shots. While one runs,
+-- the script pauses that auto-focus and sets the focus distance itself, to
+-- the distance from its camera to the aircraft, then puts both back. The
+-- settings are found by name when the script loads (from X-Plane's list of
+-- datarefs) and listed in X-Plane's Log.txt.
+------------------------------------------------------------------------------
+
+local FOCUS = { dist = nil, auto = nil, held = false }
+
+local function name_has(name, ...)
+    for _, part in ipairs({ ... }) do
+        if not name:find(part, 1, true) then return false end
+    end
+    return true
+end
+
+local function find_focus_settings()
+    if not XP.lib then return end
+    local ffi = XP.ffi
+    XP.cdef("typedef struct { int structSize; const char *name; int type; int writable; int owner; } cinematic_view_drinfo_t;")
+    XP.cdef("int XPLMCountDataRefs(void);")
+    XP.cdef("void XPLMGetDataRefsByIndex(int, int, void *);")
+    XP.cdef("void XPLMGetDataRefInfo(void *, void *);")
+    local total = XP.lib.XPLMCountDataRefs() -- (X-Plane 12 and later; an error before)
+    local refs = ffi.new("void *[256]")
+    local info = ffi.new("cinematic_view_drinfo_t[1]")
+    local found = {}
+    for offset = 0, total - 1, 256 do
+        local count = math.min(256, total - offset)
+        XP.lib.XPLMGetDataRefsByIndex(offset, count, refs)
+        for i = 0, count - 1 do
+            if refs[i] ~= nil then
+                info[0].structSize = ffi.sizeof("cinematic_view_drinfo_t")
+                info[0].name = nil
+                XP.lib.XPLMGetDataRefInfo(refs[i], info)
+                if info[0].name ~= nil then
+                    local name = ffi.string(info[0].name)
+                    local lower = name:lower()
+                    if lower:find("focus", 1, true) or lower:find("dof", 1, true)
+                        or lower:find("depth_of_field", 1, true) then
+                        local d = { ref = refs[i], name = name, lower = lower, type = info[0].type,
+                            writable = info[0].writable ~= 0 }
+                        found[#found + 1] = d
+                        local number = d.type % 8 >= 2 -- float or double
+                        if d.writable and number and name_has(lower, "focus") and
+                            (lower:find("dist", 1, true)) and (not FOCUS.dist or lower:sub(1, 4) == "sim/") then
+                            FOCUS.dist = d
+                        elseif d.writable and d.type % 2 == 1 and name_has(lower, "focus", "auto") then
+                            FOCUS.auto = d
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #found > 0 then
+        local names = {}
+        for i = 1, math.min(#found, 30) do
+            names[i] = found[i].name .. (found[i].writable and "" or " (read-only)")
+        end
+        log("focus-related datarefs: " .. table.concat(names, ", "))
+    end
+    log(FOCUS.dist and ("focusing outside shots with " .. FOCUS.dist.name
+        .. (FOCUS.auto and (", pausing " .. FOCUS.auto.name) or ""))
+        or "found no focus distance setting to drive")
+end
+
+local function focus_get(d)
+    if d.type % 8 >= 4 then return XP.getd(d.ref) end
+    if d.type % 4 >= 2 then return XP.getf(d.ref) end
+    return XP.geti(d.ref)
+end
+
+local function focus_set(d, v)
+    if d.type % 8 >= 4 then XP.setd(d.ref, v)
+    elseif d.type % 4 >= 2 then XP.setf(d.ref, v)
+    else XP.seti(d.ref, math.floor(v + 0.5)) end
+end
+
+-- Each frame of an outside shot: focus on the aircraft.
+local function focus_on(distance)
+    if not FOCUS.dist then return end
+    if not FOCUS.held then
+        FOCUS.saved_dist = focus_get(FOCUS.dist)
+        if FOCUS.auto then
+            FOCUS.saved_auto = focus_get(FOCUS.auto)
+            focus_set(FOCUS.auto, 0)
+        end
+        FOCUS.held = true
+    end
+    focus_set(FOCUS.dist, math.max(distance, 1))
+end
+
+-- And when it isn't one: X-Plane's own focus back.
+local function focus_release()
+    if not FOCUS.held then return end
+    FOCUS.held = false
+    focus_set(FOCUS.dist, FOCUS.saved_dist)
+    if FOCUS.auto and FOCUS.saved_auto then focus_set(FOCUS.auto, FOCUS.saved_auto) end
+end
+
 local update_zoom -- (below, with the rest of the zoom)
 local cam_ctx = {}
 local cam_out = { x = 0, y = 0, z = 0, heading = 0, pitch = 0, roll = 0, zoom = 1 }
@@ -911,6 +1020,7 @@ local function camera_func(pos, losing)
     pos.x, pos.y, pos.z = cam_out.x, cam_out.y, cam_out.z
     pos.heading, pos.pitch, pos.roll = cam_out.heading, cam_out.pitch, cam_out.roll
     update_zoom(c.dt)
+    focus_on(sqrt((cam_out.x - c.x) ^ 2 + (cam_out.y - c.y) ^ 2 + (cam_out.z - c.z) ^ 2))
     pos.zoom = M.clamp(cam_out.zoom * CV.user_zoom, 0.4, 12)
     return 1
 end
@@ -1076,6 +1186,7 @@ local function begin_shot(def)
         pace = settings.camera_pace, pan = settings.pan_pace, inited = false,
     }
     CV.view_target = nil
+    if def.kind ~= "outside" then focus_release() end
     if def.kind == "cockpit" then
         release_camera()
         switch_view("cockpit")
@@ -1132,6 +1243,7 @@ end
 local ZOOM_MIN, ZOOM_MAX = 0.5, 4
 local ZOOM_RATE = 0.7  -- while held: about 2x a second once it has ramped up
 local ZOOM_STEP = 1.1  -- the least a tap zooms
+local WHEEL_STEP = 1.12 -- each notch of the mouse wheel
 
 local function zoom_end()
     if CV.zoom_dir ~= 0 then
@@ -1149,6 +1261,11 @@ local function zoom_begin(dir)
     CV.zoom_dir = dir
     CV.zoom_held = 0
     CV.zoom_from = CV.zoom_target
+end
+
+-- A step for each notch of the mouse wheel (eased in like the rest).
+local function zoom_wheel(notches)
+    CV.zoom_target = M.clamp(CV.zoom_target * WHEEL_STEP ^ notches, ZOOM_MIN, ZOOM_MAX)
 end
 
 -- Each frame of an outside shot: the target moves while a zoom is held,
@@ -1198,6 +1315,7 @@ local function stop(reason)
     CV.expected_view = nil
     zoom_end()
     release_camera()
+    focus_release()
     -- put the user back in the view they were in, unless they just picked one
     if reason ~= "view" and CV.saved_view and CV.saved_view ~= 0 and view_type() ~= CV.saved_view then
         if R.view_type then XP.seti(R.view_type, CV.saved_view) end
@@ -1298,7 +1416,8 @@ local function had_input(t)
     CV.input_flag = false
     -- mouse movement
     local mx, my = MOUSE_X or 0, MOUSE_Y or 0
-    if CV.mx and abs(mx - CV.mx) + abs(my - CV.my) >= 3 then any = true end
+    -- (a hand on the mouse to turn the wheel moves it a little: not input)
+    if CV.mx and abs(mx - CV.mx) + abs(my - CV.my) >= 3 and t - CV.wheel_t > 0.4 then any = true end
     CV.mx, CV.my = mx, my
     -- joystick, ten times a second
     if t - CV.joy_t >= 0.1 then
@@ -2111,6 +2230,21 @@ CinematicView_on_mouse = guarded("mouse", function()
     CV.input_flag = true
 end)
 
+-- During a cinematic the mouse wheel zooms instead of ending it: our camera
+-- in outside shots (X-Plane's zoom can't move it), X-Plane's own elsewhere.
+CinematicView_on_wheel = guarded("mouse wheel", function()
+    CV.wheel_t = now()
+    if not CV.active then
+        CV.input_flag = true
+        return
+    end
+    local notches = MOUSE_WHEEL_CLICKS or 0
+    if outside_shot() and (MOUSE_WHEEL_NUMBER or 0) == 0 and notches ~= 0 then
+        zoom_wheel(notches)
+        RESUME_MOUSE_WHEEL = true
+    end
+end)
+
 function CinematicView_on_exit()
     pcall(function()
         if CV.active then stop("exit") end
@@ -2121,6 +2255,7 @@ function CinematicView_on_exit()
     end)
     pcall(zoom_end)
     pcall(release_camera)
+    pcall(focus_release)
     if XP.probe then
         pcall(function() XP.lib.XPLMDestroyProbe(XP.probe) end)
         XP.probe = nil
@@ -2136,6 +2271,9 @@ math.randomseed(os.time())
 math.random(); math.random()
 load_settings()
 pcall(joystick_setup)
+if not pcall(find_focus_settings) then
+    log("couldn't list X-Plane's datarefs to find its focus setting")
+end
 CV.last_input = now()
 CV.heartbeat = now()
 CV.last_tick = now()
@@ -2145,7 +2283,7 @@ do_every_frame("CinematicView_tick()")
 do_every_draw("CinematicView_draw()")
 do_on_keystroke("CinematicView_on_key()")
 do_on_mouse_click("CinematicView_on_mouse()")
-do_on_mouse_wheel("CinematicView_on_mouse()")
+do_on_mouse_wheel("CinematicView_on_wheel()")
 do_on_exit("CinematicView_on_exit()")
 
 -- every action as an X-Plane command too, for joystick buttons (the release
