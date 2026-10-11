@@ -72,13 +72,16 @@ def edge(pts, crown_x=None, blend=50 * DEG, after=None):
 # edge's top part comes from the eye-level photo of the right side: points are
 # (station in photo-1 px, degrees from the crown), matched through the windows.
 # Below `switch` degrees the eye-level points are used, above it photo 1.
+# The first point of each is the tip on the crown: the top ~15 deg sit within a
+# pixel of the outline at eye level, so it is the straight-line continuation of
+# the reliable points, giving the pointed V's the design shows from above.
 CROWN = {
-    'B1': ([(799.5, 0), (805.8, 14.0), (831.5, 19.8), (857.2, 28.2), (882.1, 33.2), (907.1, 38.9),
+    'B1': ([(752.0, 0), (805.8, 14.0), (831.5, 19.8), (857.2, 28.2), (882.1, 33.2), (907.1, 38.9),
             (932.4, 45.3)], 45),
     'B2': ([(955.3, 30.8), (970.6, 36.1), (983.3, 40.3)], 40),
     'B3': ([(955.3, 30.8), (970.6, 31.0), (996.1, 31.6), (1021.6, 31.6), (1046.8, 32.4),
             (1059.3, 36.1), (1072.0, 39.6), (1085.0, 42.8), (1098.0, 45.9)], 45),
-    'B5': ([(1040.5, 0), (1046.8, 15.6), (1059.3, 21.0), (1072.0, 25.3), (1085.0, 30.8),
+    'B5': ([(1002.0, 0), (1046.8, 15.6), (1059.3, 21.0), (1072.0, 25.3), (1085.0, 30.8),
             (1098.0, 33.9), (1111.0, 38.3)], 38),
 }
 
@@ -107,20 +110,45 @@ APEX_X = 955.3
 E_B2[XG < APEX_X] = 0.0
 E_B3[XG < APEX_X] = 0.0
 # thin light-green sliver over the dark green's tip, white above it (eye level)
-B4_PTS = [(947.6, 0), (957.8, 9.9), (970.6, 14.0), (983.3, 17.1), (996.1, 19.8),
+B4_PTS = [(916.0, 0), (957.8, 9.9), (970.6, 14.0), (983.3, 17.1), (996.1, 19.8),
           (1008.8, 22.2), (1021.6, 26.3), (1034.3, 29.9), (1046.8, 32.4)]
 b4 = np.interp(XG, [p[0] for p in B4_PTS], [p[1] * DEG for p in B4_PTS], left=0.0, right=0.0)
 E_B43 = np.where(XG <= 1046.8, b4, E_B3)
-# darker red, traced from the eye-level photo of the right side: a thin
-# bright strip runs along the crown above it from a bright front tip; its back
-# edge comes diagonally down from the crown to above the rear door and then
-# straight down the door to the bottom of the red. Bright red behind the door.
-BR_PTS = [(1040, 25.0), (1062, 21.5), (1080, 22.0), (1100, 23.0), (1173, 24.4), (1236, 26.0),
-          (1300, 26.0), (1336.5, 25.5), (1349, 26.0), (1374, 34.2), (1399, 40.6), (1426, 51.8),
-          (1451, 57.5), (1476, 69.0), (1489, 71.0), (1497, 110.0), (1503, 180.0)]
-E_BR = np.interp(XG, [p[0] for p in BR_PTS], [p[1] * DEG for p in BR_PTS], right=math.pi)
-EDGES = [E_B1, E_B2, E_B3, E_B5, E_BR, E_B43]
-DEDGES = [np.gradient(e, XG) for e in EDGES]
+# Darker red: one feather, matched between the eye-level photo of the right
+# side, the first photo (from below) and the same design on a 737. Points are
+# (station in photo-1 px, degrees from the crown).
+# - front tip at the pinstripe just behind its crown junction;
+# - above it, bright leaf A along the crown, its tip dipping back into the dark;
+# - behind leaf A's tip the dark reaches the crown, until bright leaf B, whose
+#   lower edge sweeps down to the back tip over the rear door, at window level;
+# - its lower edge follows the pinstripe to the wing, then runs just below the
+#   windows with bright red between it and the pinstripe.
+DR_FRONT, DR_BACK = 1086.0, 1480.0
+LA_BOT = [(1086, 29.5), (1090, 29.2), (1111, 27.4), (1131, 27.2), (1151, 25.3), (1172, 25.4),
+          (1192, 27.4), (1212, 27.5), (1233, 29.4), (1253, 31.2), (1274, 34.4), (1294, 36.0),
+          (1306, 35.5)]
+LA_TOP = [(1086, 0.0), (1225, 0.0), (1233, 18.7), (1253, 23.6), (1274, 27.7), (1294, 31.3),
+          (1306, 35.5)]
+LB_BOT = [(1306, 0.0), (1335, 0.0), (1344, 21.0), (1365, 29.5), (1385, 34.5), (1405, 40.5),
+          (1426, 46.5), (1446, 52.5), (1462, 58.5), (1480, 66.0)]
+DR_LOW = [(1290, 76.5), (1320, 76.4), (1360, 76.1), (1400, 74.6), (1430, 72.0), (1460, 69.6),
+          (1480, 66.0)]
+
+
+def curve(pts, lo, hi, outside):
+    v = np.interp(XG, [q[0] for q in pts], [q[1] * DEG for q in pts])
+    return np.where((XG >= lo) & (XG <= hi), v, outside)
+
+
+E_LAB = curve(LA_BOT, DR_FRONT, 1306, 0.0)
+E_LAT = curve(LA_TOP, DR_FRONT, 1306, 0.0)
+E_DUP = np.where(XG < 1306, 0.0, curve(LB_BOT, 1306, DR_BACK, math.pi))
+low = np.where(XG < 1290, math.pi, np.interp(XG, [q[0] for q in DR_LOW], [q[1] * DEG for q in DR_LOW]))
+E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), np.minimum(E_B5, low), 0.0)
+EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB]
+# slopes for edge anti-aliasing; capped so the cut-offs where a shape ends
+# (a jump in the curve) stay sharp instead of leaving a faint line
+DEDGES = [np.clip(np.gradient(e, XG), -0.25, 0.25) for e in EDGES]
 
 # U (8K) per photo px, for each section
 U8 = (np.arange(N) + 0.5)
@@ -155,10 +183,12 @@ for r0 in range(0, N, 512):
     t_ = th[rr, cc]
     g_ = np.maximum(gv[rr, cc], math.pi / 4000)
     cov = [coverage(k, x, t_, g_, dudx) for k in range(len(EDGES))]
-    L, B2, B3, B5, BR, B43 = cov
+    L, B2, B3, B5, B43, DUP, DLO, LAT, LAB = cov
+    leaf_a = LAB * (1 - LAT)
+    dark = B5 * DLO * (1 - DUP) * (1 - leaf_a)
     col = np.ones((len(rr), 3), np.float32) * C['W']
     for c_, a_ in ((C['L'], L), (C['D'], np.clip(B2 - B3, 0, 1)), (C['W'], B43),
-                   (C['R'], B5), (C['DR'], B5 * (1 - BR))):
+                   (C['R'], B5), (C['DR'], dark)):
         col = col * (1 - a_[:, None]) + c_ * a_[:, None]
     paint[rs][rr, cc] = col
     print('rows', r0, flush=True)
@@ -188,7 +218,7 @@ def to_tex(x, y):
     aft = x > 1028
     U = x_to_u(x, aft)
     th = t_unwarp((y - G.crown(x)) / (G.belly(x) - G.crown(x)), x)
-    if aft and U >= DART_U:
+    if aft and U >= BLEND_U[0]:
         col = int(U * 2)
         rows = np.nonzero(al)[0]
         v = np.interp(th, theta[rows, col], rows)

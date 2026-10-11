@@ -13,7 +13,7 @@ N = 8192
 AX_F, CROWN_F = 997.0, 0.0            # forward section: belly axis, crown
 AX_A, CROWN_A = 3096.9, 2100.0        # aft section
 SPLIT_V = 2020.0                      # rows above: forward; below: aft
-DART_U = 2050.0                       # aft columns from here use arc length
+BLEND_U = (1850.0, 2250.0)            # ...blended in over this range (4K U)
 
 # texture U <-> photo x, from the cabin windows (and the L1 door, tail end)
 FWD = ([993, 1323, 1499.5, 1675.5, 1852.5, 2029.5, 2206, 2382.5, 2559, 2735,
@@ -96,19 +96,24 @@ def build_theta(mask_path='layers/fus__paintmask.png'):
     # aft: linear before the darts...
     al = (V4 >= SPLIT_V) & (V4 < AX_A)
     ar = V4 >= AX_A
-    lin_cols = U4 < DART_U
+    lin_cols = U4 < BLEND_U[0]
     th_l = np.clip(np.pi * (V4[al] - CROWN_A) / (AX_A - CROWN_A), 0, np.pi)
     th_r = np.clip(np.pi * (2 * AX_A - V4[ar] - CROWN_A) / (AX_A - CROWN_A), 0, np.pi)
     theta[np.ix_(al, lin_cols)] = th_l[:, None]
     theta[np.ix_(ar, lin_cols)] = th_r[:, None]
-    # ...then arc length measured over the skin only, skipping the darts
-    dart_cols = np.nonzero(~lin_cols)[0]
+    # ...then arc length measured over the skin only, skipping the darts,
+    # blended in over BLEND_U so the edges don't jump where the methods meet
+    dart_cols = np.nonzero(U4 >= BLEND_U[0])[0]
+    w = np.clip((U4[dart_cols] - BLEND_U[0]) / (BLEND_U[1] - BLEND_U[0]), 0, 1)
+    w = (w * w * (3 - 2 * w))[None, :]
     rows_l, rows_r = np.nonzero(al)[0], np.nonzero(ar)[0]
     ml = mask8[np.ix_(rows_l, dart_cols)].astype(np.float32)
     cl = np.cumsum(ml, 0)
-    theta[np.ix_(rows_l, dart_cols)] = np.pi * cl / np.maximum(cl[-1:], 1)
+    arc_l = np.pi * cl / np.maximum(cl[-1:], 1)
+    theta[np.ix_(rows_l, dart_cols)] = (1 - w) * th_l[:, None] + w * arc_l
     mr = mask8[np.ix_(rows_r, dart_cols)][::-1].astype(np.float32)
     cr = np.cumsum(mr, 0)
-    theta[np.ix_(rows_r, dart_cols)] = (np.pi * cr / np.maximum(cr[-1:], 1))[::-1]
+    arc_r = (np.pi * cr / np.maximum(cr[-1:], 1))[::-1]
+    theta[np.ix_(rows_r, dart_cols)] = (1 - w) * th_r[:, None] + w * arc_r
 
     return theta, mask8, V4, U4, al, ar
