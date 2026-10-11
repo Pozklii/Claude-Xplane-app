@@ -128,8 +128,15 @@ DR_FRONT, DR_BACK = 1086.0, 1480.0
 LA_BOT = [(1086, 29.5), (1090, 29.2), (1111, 27.4), (1131, 27.2), (1151, 25.3), (1172, 25.4),
           (1192, 27.4), (1212, 27.5), (1233, 29.4), (1253, 31.2), (1274, 34.4), (1294, 36.0),
           (1306, 35.5)]
-LA_TOP = [(1086, 0.0), (1225, 0.0), (1233, 18.7), (1253, 23.6), (1274, 27.7), (1294, 31.3),
-          (1306, 35.5)]
+# Leaf A's top: up to the crown at the front; from the upper dark feather's
+# slender tip back it is the feather's lower side.
+LA_TOP = [(1086, 0.0), (1158.9, 0.0), (1159, 12.0), (1200, 15.0), (1233, 18.7), (1253, 23.6),
+          (1274, 27.7), (1294, 31.3), (1306, 35.5)]
+# Bright crown band above that feather: the feather's tip floats between it and
+# leaf A (as the design shows from above on the 737; on the eye-level E190
+# photo the top edge starts darkening at this same station), and the band
+# tapers away to let the dark reach the crown ahead of leaf B.
+CROWN_BAND = [(1159, 12.0), (1200, 9.0), (1250, 6.0), (1290, 2.5), (1313, 0.0)]
 LB_BOT = [(1306, 0.0), (1335, 0.0), (1344, 21.0), (1365, 29.5), (1385, 34.5), (1405, 40.5),
           (1426, 46.5), (1446, 52.5), (1462, 58.5), (1480, 66.0)]
 DR_LOW = [(1290, 76.5), (1320, 76.4), (1360, 76.1), (1400, 74.6), (1430, 72.0), (1460, 69.6),
@@ -143,6 +150,7 @@ def curve(pts, lo, hi, outside):
 
 E_LAB = curve(LA_BOT, DR_FRONT, 1306, 0.0)
 E_LAT = curve(LA_TOP, DR_FRONT, 1306, 0.0)
+E_CB = curve(CROWN_BAND, 1159, 1313, 0.0)
 E_DUP = np.where(XG < 1306, 0.0, curve(LB_BOT, 1306, DR_BACK, math.pi))
 low = np.where(XG < 1290, math.pi, np.interp(XG, [q[0] for q in DR_LOW], [q[1] * DEG for q in DR_LOW]))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), np.minimum(E_B5, low), 0.0)
@@ -173,14 +181,14 @@ def smooth_edge(E, rms_px=2.0, px_per_deg=1.5):
 
 
 _raw = dict(B1=E_B1, B2=E_B2, B3=E_B3, B5=E_B5, B43=E_B43, DUP=E_DUP, DLO=E_DLO,
-            LAT=E_LAT, LAB=E_LAB)
+            LAT=E_LAT, LAB=E_LAB, CB=E_CB)
 E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5, E_B43))
-E_DUP, E_DLO, E_LAT, E_LAB = (smooth_edge(e) for e in (E_DUP, E_DLO, E_LAT, E_LAB))
-for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB)):
+E_DUP, E_DLO, E_LAT, E_LAB, E_CB = (smooth_edge(e) for e in (E_DUP, E_DLO, E_LAT, E_LAB, E_CB))
+for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_CB)):
     print(f'smoothed {k}: max change {np.degrees(np.abs(e - _raw[k]).max()):.1f} deg', flush=True)
 
 
-EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB]
+EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_CB]
 # slopes for edge anti-aliasing; capped so the cut-offs where a shape ends
 # (a jump in the curve) stay sharp instead of leaving a faint line
 DEDGES = [np.clip(np.gradient(e, XG), -0.25, 0.25) for e in EDGES]
@@ -218,9 +226,9 @@ for r0 in range(0, N, 512):
     t_ = th[rr, cc]
     g_ = np.maximum(gv[rr, cc], math.pi / 4000)
     cov = [coverage(k, x, t_, g_, dudx) for k in range(len(EDGES))]
-    L, B2, B3, B5, B43, DUP, DLO, LAT, LAB = cov
+    L, B2, B3, B5, B43, DUP, DLO, LAT, LAB, CB = cov
     leaf_a = LAB * (1 - LAT)
-    dark = B5 * DLO * (1 - DUP) * (1 - leaf_a)
+    dark = B5 * DLO * (1 - DUP) * (1 - leaf_a) * (1 - CB)
     col = np.ones((len(rr), 3), np.float32) * C['W']
     for c_, a_ in ((C['L'], L), (C['D'], np.clip(B2 - B3, 0, 1)), (C['W'], B43),
                    (C['R'], B5), (C['DR'], dark)):
