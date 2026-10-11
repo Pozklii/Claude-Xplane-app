@@ -195,9 +195,12 @@ push_aircraft()
 local ok, err = pcall(dofile, script)
 check(ok, "script loads: " .. tostring(err))
 check(commands["FlyWithLua/cinematic_view/toggle"] ~= nil, "toggle command created")
-for _, id in ipairs({ "toggle", "next_shot", "toggle_afk", "cycle_mode", "zoom_in", "zoom_out", "settings" }) do
+for _, id in ipairs({ "toggle", "next_shot", "toggle_afk", "settings" }) do
     check(commands["FlyWithLua/cinematic_view/" .. id] and command_ends["FlyWithLua/cinematic_view/" .. id] ~= "",
         id .. " command with press and release")
+end
+for _, id in ipairs({ "cycle_mode", "zoom_in", "zoom_out" }) do
+    check(commands["FlyWithLua/cinematic_view/" .. id] == nil, "no " .. id .. " command")
 end
 local macro_count = 0
 for name in pairs(macros) do macro_count = macro_count + 1 end
@@ -236,6 +239,16 @@ end
 local function command(id)
     run({ commands["FlyWithLua/cinematic_view/" .. id] })
     run({ command_ends["FlyWithLua/cinematic_view/" .. id] })
+end
+local MODE_BUTTONS = { mixed = "Mixed##mode", outside = "Outside##mode", cockpit = "Cockpit##mode" }
+local function set_mode(m)
+    local opened = next(windows) == nil
+    if opened then command("settings") end
+    local w = next(windows)
+    imgui_clicks[MODE_BUTTONS[m]] = true
+    _G[w.builder](w, 0, 0)
+    imgui_clicks = {}
+    if opened then command("settings") end
 end
 local function ini_text()
     local f = io.open(SCRIPT_DIRECTORY .. "/cinematic_view.ini", "r")
@@ -446,7 +459,7 @@ check(drawn.rects == r4, "cinematic stopped after the user picked a view")
 
 -- 7. another plugin takes the camera
 if lib then
-    run({ commands["FlyWithLua/cinematic_view/cycle_mode"] }) -- outside only
+    set_mode("outside")
     run({ commands["FlyWithLua/cinematic_view/toggle"] })
     seconds(3)
     check(lib.mock_camera_controlled() ~= 0, "outside-only mode holds the camera")
@@ -455,13 +468,12 @@ if lib then
     check(lib.mock_camera_controlled() == 0, "doesn't fight for the camera")
     local r5 = drawn.rects seconds(2)
     check(drawn.rects == r5, "cinematic stopped after losing the camera")
-    run({ commands["FlyWithLua/cinematic_view/cycle_mode"] })
-    run({ commands["FlyWithLua/cinematic_view/cycle_mode"] }) -- back to mixed
+    set_mode("mixed")
 end
 
 -- 8. a stalled script hands the camera back (heartbeat)
 if lib then
-    run({ commands["FlyWithLua/cinematic_view/cycle_mode"] }) -- outside
+    set_mode("outside")
     run({ commands["FlyWithLua/cinematic_view/toggle"] })
     seconds(3)
     T = T + 5 lib.mock_set_time(T)
@@ -471,8 +483,7 @@ if lib then
     check(lib.mock_camera_controlled() ~= 0, "camera taken back once ticking resumes")
     run({ commands["FlyWithLua/cinematic_view/toggle"] })
     seconds(1)
-    run({ commands["FlyWithLua/cinematic_view/cycle_mode"] })
-    run({ commands["FlyWithLua/cinematic_view/cycle_mode"] })
+    set_mode("mixed")
 end
 
 -- 9. ground: on a runway at takeoff speed, camera stays above ground
@@ -557,7 +568,7 @@ if lib then
 
     -- 10d. low and level: trackside cameras on the ground (generated at random, so fly until some come up)
     ac.y, ac.agl, ac.vy, ac.the, ac.onground = 200, 200, 0, 0, false
-    command("cycle_mode") -- outside only
+    set_mode("outside")
     command("toggle")
     local ground_frames, ground_high = 0, 0
     measuring = true
@@ -575,7 +586,7 @@ if lib then
     check(ground_high == 0, "and stand on the ground")
     check(motion.trackside and motion.trackside.over == 0, "trackside cameras turn within the camera speed limit")
     command("toggle")
-    command("cycle_mode") command("cycle_mode") -- back to mixed
+    set_mode("mixed")
     -- back to parked on the ground for the tests that follow
     ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, 0, 0, true
     seconds(2)
@@ -606,7 +617,7 @@ end
 
 -- 12. + and - zoom an outside shot without ending an AFK cinematic
 if lib then
-    command("cycle_mode") -- outside only
+    set_mode("outside")
     MOUSE_X = MOUSE_X + 40
     seconds(1)
     seconds(125)
@@ -691,7 +702,7 @@ if lib then
     seconds(1)
     check(CVt.active, "a joystick button bound to next shot doesn't end it")
     -- in the cockpit, + and - go on to X-Plane's own zoom
-    command("cycle_mode") -- cockpit only
+    set_mode("cockpit")
     seconds(2)
     check(CVt.shot.def.kind == "cockpit", "cockpit shot running")
     check(key(0xB0, "pressed") == false, "= goes on to X-Plane in the cockpit")
@@ -700,7 +711,7 @@ if lib then
     tap(0x41)
     seconds(0.5)
     check(not CVt.active, "other keys still end it")
-    command("cycle_mode") -- back to mixed
+    set_mode("mixed")
 end
 
 -- 13. keys set in the settings window
@@ -718,7 +729,10 @@ widgets = {}
 build()
 local labels = table.concat(widgets, "|")
 check(labels:find("Running", 1, true) == nil or not labels:find("Running %(.-%):"), "no shot names in the status line")
-for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "Cycle shot types", "Zoom in", "Zoom out", "This window",
+for _, l in ipairs({ "Cycle shot types", "Zoom in", "Zoom out", "never starts", "while the sim is paused" }) do
+    check(not labels:find(l, 1, true), "window no longer has " .. l)
+end
+for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "This window",
     "Camera speed", "Panning speed", "Letterbox bars", "Fades" }) do
     check(labels:find(l, 1, true), "window shows " .. l)
 end
@@ -768,22 +782,22 @@ check(ini_text():find("bind_next_shot = 120 2 Ctrl+F9", 1, true) and ini_text():
 click("Clear##clear_next_shot")
 seconds(2)
 check(ini_text():find("bind_next_shot = \n", 1, true), "Clear removes it")
--- a key for zoom in: X-Plane's own zoom in the cockpit
-click("Set##set_zoom_in")
-tap(0x5A) -- Z
-command("cycle_mode") command("cycle_mode") -- cockpit only
+-- a held key set for Next shot cuts once, however long it's held
+click("Set##set_next_shot")
+tap(0x4E) -- N
 command("toggle")
 seconds(2)
-check(key(0x5A, "pressed") == true and held_commands["sim/general/zoom_in"], "Z holds X-Plane's zoom in the cockpit")
-seconds(0.5)
-key(0x5A, "released") -- a key repeat, as FlyWithLua reports them
-seconds(0.03)
-check(held_commands["sim/general/zoom_in"], "a key repeat doesn't let go of it")
-key(0x5A, "released")
-seconds(0.5)
-check(not held_commands["sim/general/zoom_in"], "and lets go once the key's events stop")
+local shots_before = #shot_log
+check(key(0x4E, "pressed") == true, "N is ours now")
+for _ = 1, 20 do
+    seconds(1 / 30)
+    key(0x4E, "released") -- key repeats, as FlyWithLua reports them
+end
+key(0x4E, "released")
+seconds(1.2) -- (time for a fade)
+check(#shot_log - shots_before == 1, "holding N cut to the next shot once: " .. (#shot_log - shots_before))
 command("toggle")
-command("cycle_mode") -- back to mixed
+click("Clear##clear_next_shot")
 
 -- 14. camera speed
 imgui_clicks["##camera_pace"] = 2 build() imgui_clicks = {}

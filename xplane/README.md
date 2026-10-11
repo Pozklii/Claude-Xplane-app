@@ -30,11 +30,9 @@ In the window's **Keys** tab, press **Set** next to an action, then the key you 
 | Start / stop | Start or stop the cinematic |
 | Next shot | Cut to the next shot now |
 | Auto-start on/off | Turn starting when you're away on or off |
-| Cycle shot types | Mixed → outside only → cockpit only |
-| Zoom in / Zoom out | Zoom while held (as well as + and -) |
 | This window | Show or hide the window |
 
-For joystick buttons, each action is also an X-Plane command, under **Settings → Joystick** (search for "cinematic"): `FlyWithLua/cinematic_view/toggle`, `next_shot`, `toggle_afk`, `cycle_mode`, `zoom_in`, `zoom_out` and `settings`. Pressing one of these buttons doesn't count as the input that ends a cinematic.
+For joystick buttons, each action is also an X-Plane command, under **Settings → Joystick** (search for "cinematic"): `FlyWithLua/cinematic_view/toggle`, `next_shot`, `toggle_afk` and `settings`. Pressing one of these buttons doesn't count as the input that ends a cinematic.
 
 ## Shots
 
@@ -92,7 +90,7 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 | `fades` | `true` | Dip to black when switching between inside and outside, and now and then between other shots |
 | `manual_exit_on_input` | `false` | Any input also ends a cinematic you started yourself |
 | `joystick_deadband` | `0.03` | How far an axis must move to count as input (raise it for noisy hardware) |
-| `bind_toggle`, `bind_next_shot`, `bind_toggle_afk`, `bind_cycle_mode`, `bind_zoom_in`, `bind_zoom_out`, `bind_settings` | empty | The keys set in the window, as `<virtual key code> <modifiers> <name>` (modifiers: 1 Shift, 2 Ctrl, 4 Alt); easiest set from the window |
+| `bind_toggle`, `bind_next_shot`, `bind_toggle_afk`, `bind_settings` | empty | The keys set in the window, as `<virtual key code> <modifiers> <name>` (modifiers: 1 Shift, 2 Ctrl, 4 Alt); easiest set from the window |
 | `chase_view` | `0` | Not a setting: X-Plane's number for its chase view, learned the first time it's needed (see below) |
 | `size:<aircraft file>` | none | An aircraft size set in the window, in metres, one line per aircraft |
 
@@ -100,7 +98,7 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 
 - **Outside shots** take control of X-Plane's camera through the plugin SDK's `XPLMControlCamera`, called from Lua through LuaJIT's FFI, which FlyWithLua NG+ includes. The camera is worked out in X-Plane's camera callback from where the aircraft is that frame, so it keeps up with the aircraft at speed, and terrain probes keep it above the ground. The view underneath is X-Plane's chase view, so you hear the outside sounds.
 - **Cockpit shots** switch to the 3D cockpit and move the pilot's head (`sim/graphics/view/pilots_head_*`), so cockpit lighting, sounds and reflections stay right.
-- **Zoom:** X-Plane's own zoom can't act on a camera a plugin controls, so in outside shots the script catches + and - and zooms its camera itself. FlyWithLua reports X-Plane's key repeats (while a key is held) as releases, so the script treats a key as held until it's let go quickly after the press (a tap) or its events stop coming, which also copes with slow key-repeat settings. The zoom ramps up over a quarter of a second and the camera eases after it. In the cockpit the keys go through to X-Plane, and a key or joystick button set for zoom holds X-Plane's `sim/general/zoom_in`/`zoom_out` commands.
+- **Zoom:** X-Plane's own zoom can't act on a camera a plugin controls, so in outside shots the script catches + and - and zooms its camera itself. FlyWithLua reports X-Plane's key repeats (while a key is held) as releases, so the script treats a key as held until it's let go quickly after the press (a tap) or its events stop coming, which also copes with slow key-repeat settings. The zoom ramps up over a quarter of a second and the camera eases after it. In the cockpit the keys go straight through to X-Plane's own zoom.
 - **Switching views quietly:** X-Plane announces a view change on screen when its view commands are used, so the script switches views by setting X-Plane's view number (`sim/graphics/view/view_type`) directly. The 3D cockpit's number is fixed; the chase view's (used under the outside shots) is learned the first time with X-Plane's chase command, so you may see its name that once, and kept in `cinematic_view.ini` as `chase_view`. If a direct switch doesn't take, the script falls back to the command.
 - **Keys** set in the window are caught with FlyWithLua's keyboard sniffer, which runs before X-Plane's own key bindings.
 - If the SDK library can't be loaded, outside shots fall back to X-Plane's own chase, circle and flyby (still spot/linear spot) views.

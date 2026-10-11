@@ -26,9 +26,6 @@
         FlyWithLua/cinematic_view/toggle       start/stop
         FlyWithLua/cinematic_view/next_shot    cut to the next shot
         FlyWithLua/cinematic_view/toggle_afk   auto-start when away on/off
-        FlyWithLua/cinematic_view/cycle_mode   mixed / outside / cockpit shots
-        FlyWithLua/cinematic_view/zoom_in      zoom in (hold)
-        FlyWithLua/cinematic_view/zoom_out     zoom out (hold)
         FlyWithLua/cinematic_view/settings     show/hide the window
 
     How it moves the camera: outside shots take control of X-Plane's camera
@@ -38,7 +35,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.2"
+local VERSION = "2.3"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -61,9 +58,6 @@ local DEFAULTS = {
     bind_toggle = "",
     bind_next_shot = "",
     bind_toggle_afk = "",
-    bind_cycle_mode = "",
-    bind_zoom_in = "",
-    bind_zoom_out = "",
     bind_settings = "",
     -- learned, not set: X-Plane's number for its chase view, so views can be
     -- switched without X-Plane announcing each change (0 until learned)
@@ -71,7 +65,6 @@ local DEFAULTS = {
 }
 
 local MODES = { "mixed", "outside", "cockpit" }
-local MODE_LABELS = { mixed = "Mixed", outside = "Outside only", cockpit = "Cockpit only" }
 
 local settings = {}
 for k, v in pairs(DEFAULTS) do settings[k] = v end
@@ -365,7 +358,6 @@ local CV = {
     zoom_from = 1,          -- the target when this zoom began, so a tap still makes a step
     zoom_dir = 0,           -- +1 zooming in, -1 zooming out
     zoom_held = 0,          -- seconds this zoom has been held; it ramps up
-    native_zoom = nil,      -- X-Plane zoom command held for a bound key or joystick button
     taken = {},             -- keys we're holding on to, by virtual key (see take_key)
     taken_recent = {},      -- keys let go of in the last second
     view_target = nil,      -- a view being switched to, checked once it has settled
@@ -1150,22 +1142,13 @@ local function zoom_end()
         end
     end
     CV.zoom_dir = 0
-    if CV.native_zoom then
-        command_end(CV.native_zoom)
-        CV.native_zoom = nil
-    end
 end
 
 local function zoom_begin(dir)
     zoom_end()
-    if outside_shot() then
-        CV.zoom_dir = dir
-        CV.zoom_held = 0
-        CV.zoom_from = CV.zoom_target
-    else
-        CV.native_zoom = dir > 0 and "sim/general/zoom_in" or "sim/general/zoom_out"
-        command_begin(CV.native_zoom)
-    end
+    CV.zoom_dir = dir
+    CV.zoom_held = 0
+    CV.zoom_from = CV.zoom_target
 end
 
 -- Each frame of an outside shot: the target moves while a zoom is held,
@@ -1624,26 +1607,12 @@ local function toggle_afk()
         or "Cinematic view won't start by itself")
 end
 
-local function cycle_mode()
-    local i = 1
-    for k, mode in ipairs(MODES) do if mode == settings.mode then i = k end end
-    settings.mode = MODES[i % #MODES + 1]
-    mark_dirty()
-    toast("Cinematic shots: " .. MODE_LABELS[settings.mode])
-    if CV.active then next_shot(true) end
-end
-
 -- id: the X-Plane command (FlyWithLua/cinematic_view/<id>) and the ini key (bind_<id>)
 local ACTIONS = {
     { id = "toggle", label = "Start / stop", desc = "start/stop", press = toggle_cinematic },
     { id = "next_shot", label = "Next shot", desc = "cut to the next shot",
         press = function() if CV.active then next_shot(false) end end },
     { id = "toggle_afk", label = "Auto-start on/off", desc = "auto-start when away on/off", press = toggle_afk },
-    { id = "cycle_mode", label = "Cycle shot types", desc = "cycle mixed/outside/cockpit shots", press = cycle_mode },
-    { id = "zoom_in", label = "Zoom in", desc = "zoom in (hold)",
-        press = function() zoom_begin(1) end, release = zoom_end },
-    { id = "zoom_out", label = "Zoom out", desc = "zoom out (hold)",
-        press = function() zoom_begin(-1) end, release = zoom_end },
     { id = "settings", label = "This window", desc = "show/hide the settings window", press = toggle_settings },
 }
 local ACTION_BY_ID = {}
@@ -1712,9 +1681,9 @@ local function press_action(a, from_command)
     a.press()
 end
 
+-- (a joystick button let go of after running one of our commands)
 local function release_action(a, from_command)
     if from_command then CV.ignore_buttons_until = now() + 0.5 end
-    if a.release then a.release() end
 end
 
 -- X-Plane's zoom keys: = and - on the main keyboard, + and - on the keypad.
@@ -1801,11 +1770,7 @@ local function on_key()
     local a = action_for_key(vk, mods)
     if a then
         RESUME_KEY = true -- ours, not X-Plane's
-        if a.release then
-            take_key(vk, function() release_action(a, false) end, a.press)
-        else
-            take_key(vk) -- (so holding it doesn't repeat the action)
-        end
+        take_key(vk) -- (so holding it doesn't repeat the action)
         press_action(a, false)
         return
     end
@@ -2051,8 +2016,6 @@ local function tab_auto()
     if changed then settings.afk_timeout = v; mark_dirty() end
     imgui.EndDisabled()
     checkbox("Any input also ends a cinematic I started", "manual_exit_on_input")
-    imgui.Spacing()
-    muted_text("It never starts by itself while the sim is paused.", true)
 end
 
 local function tab_keys()
