@@ -307,6 +307,14 @@ check(stats.cockpit_frames > 300, "cockpit shots ran")
 check(head_moved, "head moved in cockpit shots")
 check(stats.below_ground == 0, "camera never below ground")
 check(n >= (mode == "ffi" and 8 or 6), "many different shots (" .. n .. ")") -- the fallback has 9 in all
+local view_commands = {}
+for _, c in ipairs(command_log) do if c:find("^sim/view/") then view_commands[c] = (view_commands[c] or 0) + 1 end end
+check(not view_commands["sim/view/3d_cockpit_cmnd_look_forward"], "the cockpit view is set directly, not with its command")
+for c, count in pairs(view_commands) do check(count == 1, c .. " used once, to learn its view number, then set directly: " .. count) end
+if mode == "ffi" then
+    seconds(2)
+    check(ini_text():find("chase_view = 1017", 1, true), "the chase view number is remembered")
+end
 check(not shots_seen.wheels and not shots_seen.spotter, "no ground-level shots in cruise")
 check(#drawn.strings == 0, "no text drawn during the cinematic")
 
@@ -506,19 +514,74 @@ if lib then
     check(CVt.active and CVt.reason == "afk", "AFK started for the zoom test")
     seconds(2)
     check(CVt.shot.def.kind == "outside", "outside shot running")
-    check(key(0xB0, "pressed") == true, "= is taken by the cinematic camera")
-    for _ = 1, 5 do key(0xB0, "pressed") end -- auto-repeat
-    seconds(1)
+    -- Hold a key for `duration` seconds the way X-Plane sends it: a press,
+    -- then (after the repeat delay) key repeats, which FlyWithLua reports as
+    -- "released" (style "released") or "pressed", or no repeats at all
+    -- ("none"); then the real release. Records the zoom shown every frame.
+    local function hold(vk, duration, style, interval)
+        interval = interval or 1 / 30
+        local trace = {}
+        local t0 = T
+        check(key(vk, "pressed") == true, "zoom key taken (" .. style .. ")")
+        local next_repeat = t0 + 0.4
+        while T - t0 < duration do
+            frame(1 / 60)
+            if style ~= "none" and T >= next_repeat and T - t0 < duration then
+                key(vk, style)
+                next_repeat = next_repeat + interval
+            end
+            trace[#trace + 1] = CVt.user_zoom
+        end
+        key(vk, "released")
+        local released_at = T
+        local stopped_at
+        local last_target = CVt.zoom_target
+        while T - released_at < 1.5 do
+            frame(1 / 60)
+            if CVt.zoom_target ~= last_target then stopped_at = nil else stopped_at = stopped_at or T end
+            last_target = CVt.zoom_target
+            trace[#trace + 1] = CVt.user_zoom
+        end
+        return trace, (stopped_at or T) - released_at
+    end
+    local function smooth_trace(trace, dir, label)
+        local worst = 0
+        for i = 2, #trace do
+            local step = math.log(trace[i] / trace[i - 1]) * dir
+            check(step > -1e-9, label .. ": zoom never jumps back")
+            worst = math.max(worst, step)
+        end
+        check(worst < 0.03, label .. ": no frame-to-frame jumps (largest step " .. worst .. ")")
+    end
+    for _, style in ipairs({ "released", "pressed", "none" }) do
+        local from = CVt.zoom_target
+        local trace, stop_delay = hold(0xB0, 1.0, style)
+        local ratio = CVt.zoom_target / from
+        check(ratio > 1.6 and ratio < 2.3, style .. " repeats: holding = for a second zooms about 2x: " .. ratio)
+        check(stop_delay < 0.3, style .. " repeats: stops within 0.3 s of letting go: " .. stop_delay)
+        check(math.abs(CVt.user_zoom - CVt.zoom_target) < 0.01, style .. " repeats: the zoom shown settles on it")
+        smooth_trace(trace, 1, style .. " repeats")
+        hold(0xB1, 1.0, style) -- back out
+    end
+    -- slow key repeats (2 a second) still count as one long hold
+    local from = CVt.zoom_target
+    hold(0xB0, 2.0, "released", 0.5)
+    check(CVt.zoom_target / from > 2.5, "slow key repeats still hold the zoom: " .. CVt.zoom_target / from)
+    hold(0xB1, 2.0, "released", 0.5)
+    -- a tap makes a small smooth step
+    from = CVt.zoom_target
+    local before_tap = CVt.user_zoom
+    key(0xB0, "pressed")
+    frame(1 / 60) frame(1 / 60)
     key(0xB0, "released")
-    local zoomed = CVt.user_zoom
-    check(zoomed > 2.5 and zoomed < 3.2, "holding = for a second zooms in about 2.9x: " .. zoomed)
-    seconds(0.5)
-    check(math.abs(CVt.user_zoom - zoomed) < 1e-6, "zoom stops on release")
-    check(cam.zoom >= zoomed * 0.99, "camera zoom includes it: " .. cam.zoom)
-    key(0x6D, "pressed") -- keypad -
-    seconds(0.5)
-    key(0x6D, "released")
-    check(CVt.user_zoom < zoomed, "keypad - zooms out")
+    local tap_trace = { before_tap }
+    for _ = 1, 60 do frame(1 / 60) tap_trace[#tap_trace + 1] = CVt.user_zoom end
+    check(math.abs(CVt.zoom_target / from - 1.1) < 0.01, "a tap zooms a 10% step: " .. CVt.zoom_target / from)
+    smooth_trace(tap_trace, 1, "tap")
+    check(cam.zoom >= CVt.user_zoom * 0.84, "camera zoom includes it: " .. cam.zoom)
+    local zoomed = CVt.zoom_target
+    hold(0x6D, 0.5, "released") -- keypad -
+    check(CVt.zoom_target < zoomed, "keypad - zooms out")
     check(CVt.active, "zooming didn't end the AFK cinematic")
     -- a joystick button that runs one of our commands isn't input either
     lib.mock_set_button(40, 1)
@@ -550,6 +613,7 @@ local function click(label) imgui_clicks[label] = true build() imgui_clicks = {}
 widgets = {}
 build()
 local labels = table.concat(widgets, "|")
+check(labels:find("Running", 1, true) == nil or not labels:find("Running %(.-%):"), "no shot names in the status line")
 for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "Cycle shot types", "Zoom in", "Zoom out", "This window",
     "Camera speed", "Letterbox bars", "Fades" }) do
     check(labels:find(l, 1, true), "window shows " .. l)
@@ -590,8 +654,12 @@ command("toggle")
 seconds(2)
 check(key(0x5A, "pressed") == true and held_commands["sim/general/zoom_in"], "Z holds X-Plane's zoom in the cockpit")
 seconds(0.5)
+key(0x5A, "released") -- a key repeat, as FlyWithLua reports them
+seconds(0.03)
+check(held_commands["sim/general/zoom_in"], "a key repeat doesn't let go of it")
 key(0x5A, "released")
-check(not held_commands["sim/general/zoom_in"], "and lets go on release")
+seconds(0.5)
+check(not held_commands["sim/general/zoom_in"], "and lets go once the key's events stop")
 command("toggle")
 command("cycle_mode") -- back to mixed
 

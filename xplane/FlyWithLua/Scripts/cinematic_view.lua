@@ -39,7 +39,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "1.2"
+local VERSION = "1.3"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -67,6 +67,9 @@ local DEFAULTS = {
     bind_zoom_in = "",
     bind_zoom_out = "",
     bind_settings = "",
+    -- learned, not set: X-Plane's number for its chase view, so views can be
+    -- switched without X-Plane announcing each change (0 until learned)
+    chase_view = 0,
 }
 
 local MODES = { "mixed", "outside", "cockpit" }
@@ -90,6 +93,7 @@ local function sanitize_settings()
     s.shot_min = math.max(3, math.min(60, s.shot_min))
     s.shot_max = math.max(s.shot_min, math.min(90, s.shot_max))
     s.camera_speed = math.max(0.25, math.min(2.5, s.camera_speed))
+    s.chase_view = math.max(0, math.floor(s.chase_view))
     s.joystick_deadband = math.max(0.001, math.min(0.5, s.joystick_deadband))
     for k, v in pairs(s) do
         if k:match("^bind_") and v ~= "" and not v:match("^%d+ %d+ .+$") then s[k] = "" end
@@ -345,12 +349,18 @@ local CV = {
     draw_last = nil,
     tick_last = nil,
     size = 15,
-    user_zoom = 1,          -- zoom set with + and - during a cinematic
+    user_zoom = 1,          -- zoom set with + and - during a cinematic, as shown (eased)
+    zoom_target = 1,        -- where the zoom is heading
+    zoom_from = 1,          -- the target when this zoom began, so a tap still makes a step
     zoom_dir = 0,           -- +1 zooming in, -1 zooming out
-    zoom_vk = nil,          -- the + or - key being held
+    zoom_held = 0,          -- seconds this zoom has been held; it ramps up
     native_zoom = nil,      -- X-Plane zoom command held for a bound key or joystick button
-    keys_down = {},         -- bound keys held down (to ignore auto-repeat)
-    held = {},              -- hold actions (zoom) by the key that started them
+    taken = {},             -- keys we're holding on to, by virtual key (see take_key)
+    taken_recent = {},      -- keys let go of in the last second
+    view_target = nil,      -- a view being switched to, checked once it has settled
+    view_before = nil,
+    view_by_command = false,
+    learned_views = {},     -- X-Plane's numbers for its own views, by command
     capturing = nil,        -- action waiting for its new key in the settings window
     ignore_buttons_until = 0, -- joystick buttons that just ran one of our commands aren't "input"
 }
@@ -877,6 +887,7 @@ end
 -- Camera control
 ------------------------------------------------------------------------------
 
+local update_zoom -- (below, with the rest of the zoom)
 local cam_ctx = {}
 local cam_out = { x = 0, y = 0, z = 0, heading = 0, pitch = 0, roll = 0, zoom = 1 }
 
@@ -943,6 +954,7 @@ local function camera_func(pos, losing)
     end
     pos.x, pos.y, pos.z = cam_out.x, cam_out.y, cam_out.z
     pos.heading, pos.pitch, pos.roll = cam_out.heading, cam_out.pitch, cam_out.roll
+    update_zoom(c.dt)
     pos.zoom = M.clamp(cam_out.zoom * CV.user_zoom, 0.4, 12)
     return 1
 end
@@ -1060,6 +1072,37 @@ local function pick_shot()
     return pick_from(cockpit and COCKPIT_SHOTS or outside, cond) or pick_from(outside, cond)
 end
 
+-- Views are switched by setting X-Plane's view number directly where it's
+-- known, rather than with the view commands, so X-Plane doesn't announce each
+-- change on screen. The chase view's number is learned the first time (with
+-- its command) and remembered; a direct switch that doesn't take falls back
+-- to the command.
+local function view_number(kind)
+    if kind == "cockpit" then return VIEW_3D_COCKPIT end
+    if kind == "chase" then return settings.chase_view > 0 and settings.chase_view or nil end
+    return CV.learned_views[kind]
+end
+
+local function view_command(kind)
+    if kind == "cockpit" then return CMD_COCKPIT end
+    if kind == "chase" then return CMD_CHASE end
+    return kind
+end
+
+local function switch_view(kind)
+    local known = view_number(kind)
+    local vt = view_type()
+    if known and vt == known then return end
+    CV.view_target, CV.view_before = kind, vt
+    if known and R.view_type then
+        XP.seti(R.view_type, known)
+        CV.view_by_command = false
+    else
+        command_once(view_command(kind))
+        CV.view_by_command = true
+    end
+end
+
 local function begin_shot(def)
     -- quicker cuts on takeoff and landing, longer shots in the calm
     local lo, hi = settings.shot_min, settings.shot_max
@@ -1069,24 +1112,24 @@ local function begin_shot(def)
         def = def, t0 = now(), duration = busy and M.rand(lo, mid) or M.rand(mid, hi),
         speed = settings.camera_speed, inited = false,
     }
+    CV.view_target = nil
     if def.kind == "cockpit" then
         release_camera()
-        if view_type() ~= VIEW_3D_COCKPIT then command_once(CMD_COCKPIT) end
+        switch_view("cockpit")
         CV.base_view = "cockpit"
         def.init(s, CV.eye)
         s.inited = true
     elseif def.kind == "outside" then
-        if CV.base_view ~= "chase" then command_once(CMD_CHASE) end
+        if CV.base_view ~= "chase" then switch_view("chase") end
         CV.base_view = "chase"
         take_camera()
     else
         release_camera()
-        command_once(def.command)
+        switch_view(def.command)
         CV.base_view = def.command
     end
     CV.shot = s
     CV.settle = 3
-    CV.view_retries = 0
     CV.expected_view = nil
     table.insert(CV.recent, 1, def.id)
     while #CV.recent > 3 do table.remove(CV.recent) end
@@ -1123,9 +1166,19 @@ local function outside_shot()
     return CV.active and CV.shot ~= nil and CV.shot.def.kind == "outside"
 end
 
+local ZOOM_MIN, ZOOM_MAX = 0.5, 4
+local ZOOM_RATE = 0.7  -- while held: about 2x a second once it has ramped up
+local ZOOM_STEP = 1.1  -- the least a tap zooms
+
 local function zoom_end()
+    if CV.zoom_dir ~= 0 then
+        -- a tap still makes a step (eased in like the rest)
+        local step = math.log(CV.zoom_target / CV.zoom_from) * CV.zoom_dir
+        if step < math.log(ZOOM_STEP) then
+            CV.zoom_target = M.clamp(CV.zoom_from * ZOOM_STEP ^ CV.zoom_dir, ZOOM_MIN, ZOOM_MAX)
+        end
+    end
     CV.zoom_dir = 0
-    CV.zoom_vk = nil
     if CV.native_zoom then
         command_end(CV.native_zoom)
         CV.native_zoom = nil
@@ -1136,11 +1189,24 @@ local function zoom_begin(dir)
     zoom_end()
     if outside_shot() then
         CV.zoom_dir = dir
-        CV.user_zoom = M.clamp(CV.user_zoom * (dir > 0 and 1.06 or 1 / 1.06), 0.5, 4) -- a tap still zooms a little
+        CV.zoom_held = 0
+        CV.zoom_from = CV.zoom_target
     else
         CV.native_zoom = dir > 0 and "sim/general/zoom_in" or "sim/general/zoom_out"
         command_begin(CV.native_zoom)
     end
+end
+
+-- Each frame of an outside shot: the target moves while a zoom is held,
+-- ramping up over a quarter of a second, and the zoom shown eases after it,
+-- so starting and stopping are smooth.
+function update_zoom(dt)
+    if CV.zoom_dir ~= 0 then
+        CV.zoom_held = CV.zoom_held + dt
+        local rate = ZOOM_RATE * math.min(1, CV.zoom_held / 0.25)
+        CV.zoom_target = M.clamp(CV.zoom_target * math.exp(CV.zoom_dir * rate * dt), ZOOM_MIN, ZOOM_MAX)
+    end
+    CV.user_zoom = CV.user_zoom + (CV.zoom_target - CV.user_zoom) * M.smooth(dt, 0.12)
 end
 
 local function start(reason)
@@ -1164,7 +1230,7 @@ local function start(reason)
     CV.first_shot = true
     CV.input_flag = false
     zoom_end()
-    CV.user_zoom = 1
+    CV.user_zoom, CV.zoom_target, CV.zoom_from = 1, 1, 1
     next_shot(true)
 end
 
@@ -1362,19 +1428,37 @@ local function watch_view()
         CV.settle = CV.settle - 1
         if CV.settle == 0 and CV.shot then
             local vt = view_type()
-            if CV.shot.def.kind == "cockpit" and vt ~= VIEW_3D_COCKPIT and CV.view_retries < 2 and R.view_type then
-                -- the command didn't switch to the 3D cockpit; set the view directly
-                CV.view_retries = CV.view_retries + 1
-                XP.seti(R.view_type, VIEW_3D_COCKPIT)
-                CV.settle = 3
-            else
-                CV.expected_view = vt
+            local kind = CV.view_target
+            if kind then
+                local switched = (kind == "cockpit") and vt == VIEW_3D_COCKPIT or (kind ~= "cockpit" and vt ~= CV.view_before)
+                if not switched and not CV.view_by_command then
+                    -- setting the view directly didn't take: use the command
+                    command_once(view_command(kind))
+                    CV.view_by_command = true
+                    CV.settle = 3
+                    return
+                end
+                if switched and CV.view_by_command and kind ~= "cockpit" and vt ~= VIEW_3D_COCKPIT then
+                    -- remember the number, to switch directly from now on
+                    if kind == "chase" then
+                        if settings.chase_view ~= vt then
+                            settings.chase_view = vt
+                            mark_dirty()
+                        end
+                    else
+                        CV.learned_views[kind] = vt
+                    end
+                end
+                CV.view_target = nil
             end
+            CV.expected_view = vt
         end
     elseif CV.expected_view and view_type() ~= CV.expected_view then
         stop("view") -- the user picked another view: leave them in it
     end
 end
+
+local check_taken_keys -- (below, with the keys)
 
 local function tick()
     if not XP.lib then CV.fclock = CV.fclock + gf(R.frame_period, 1 / 30) end
@@ -1398,6 +1482,7 @@ local function tick()
         CV.afk_armed = true
     end
     local cond = watch_flight(t)
+    check_taken_keys(t)
 
     -- after a cinematic: put the head back where it was and check the view
     if not CV.active then
@@ -1457,10 +1542,6 @@ local function tick()
                     CV.fade = 0
                 end
             end
-        end
-
-        if CV.zoom_dir ~= 0 and outside_shot() then
-            CV.user_zoom = M.clamp(CV.user_zoom * math.exp(CV.zoom_dir * dt), 0.5, 4)
         end
 
         local s = CV.shot
@@ -1547,8 +1628,7 @@ end
 local function status_text()
     if CV.disabled then return "Switched off after errors (see X-Plane's Log.txt)" end
     if CV.active then
-        local label = CV.shot and CV.shot.def.label or "starting"
-        return "Running (" .. (CV.reason == "afk" and "you were away" or "started by you") .. "): " .. label
+        return "Running (" .. (CV.reason == "afk" and "you were away" or "started by you") .. ")"
     end
     if not settings.afk_enabled then return "Off. Auto-start when away is off." end
     if vr_on() then return "Off. Not available in VR." end
@@ -1690,25 +1770,76 @@ end
 -- X-Plane's zoom keys: = and - on the main keyboard, + and - on the keypad.
 local ZOOM_KEYS = { [0xB0] = 1, [0x6B] = 1, [0xB1] = -1, [0x6D] = -1 }
 
+-- Keys we take (bound keys, and + and - while they zoom our camera) stay ours
+-- until they're let go. FlyWithLua reports X-Plane's key repeats as releases,
+-- so a release doesn't mean the key is up: a key counts as held until it's
+-- let go quickly after the press (a tap) or its events stop coming.
+local TAP_TIME = 0.2 -- key repeats never start this soon after a press
+
+local function take_key(vk, on_end, on_resume)
+    local t = now()
+    CV.taken[vk] = { t0 = t, last = t, events = 0, gap = 0.2, on_end = on_end, on_resume = on_resume }
+    CV.taken_recent[vk] = nil
+end
+
+local function let_go(vk)
+    local k = CV.taken[vk]
+    if not k then return end
+    CV.taken[vk] = nil
+    CV.taken_recent[vk] = { t = now(), k = k }
+    if k.on_end then k.on_end() end
+end
+
+-- An event for a key we've taken (true), or for none (false).
+local function taken_key_event(vk, pressed)
+    local t = now()
+    local k = CV.taken[vk]
+    if not k then
+        -- events just after we let go: the real release, or slow key repeats
+        -- (in which case the key is still held after all)
+        local r = CV.taken_recent[vk]
+        if pressed or not r or t - r.t > 1.0 then return false end
+        if r.k.on_resume then
+            local k2 = r.k
+            CV.taken[vk], CV.taken_recent[vk] = k2, nil
+            k2.gap = M.clamp(2.5 * (t - k2.last), 0.12, 1.5)
+            k2.last = t
+            k2.events = k2.events + 1
+            k2.on_resume()
+        end
+        return true
+    end
+    if not pressed and k.events == 0 and t - k.t0 < TAP_TIME then
+        let_go(vk)
+        return true
+    end
+    -- the gap that means "let go": a few key repeats' worth
+    if k.events >= 1 then k.gap = M.clamp(2.5 * (t - k.last), 0.12, 1.5) end
+    k.events = k.events + 1
+    k.last = t
+    return true
+end
+
+-- Each frame: let go of keys whose events have stopped.
+function check_taken_keys(t)
+    for vk, k in pairs(CV.taken) do
+        if (k.events > 0 and t - k.last > k.gap) or t - k.last > 8 then let_go(vk) end
+    end
+    for vk, r in pairs(CV.taken_recent) do
+        if t - r.t > 1.0 then CV.taken_recent[vk] = nil end
+    end
+end
+
 local function on_key()
     local vk = VKEY or 0
     if vk < 0 then vk = vk + 256 end -- FlyWithLua passes it as a signed char
     local mods = (SHIFT_KEY and 1 or 0) + (CONTROL_KEY and 2 or 0) + (OPTION_KEY and 4 or 0)
-    if KEY_ACTION ~= "pressed" then
-        if CV.keys_down[vk] then
-            CV.keys_down[vk] = nil
-            RESUME_KEY = true
-        end
-        if CV.held[vk] then
-            release_action(CV.held[vk], false)
-            CV.held[vk] = nil
-        end
-        if CV.zoom_vk == vk then
-            zoom_end()
-            RESUME_KEY = true
-        end
+    local pressed = KEY_ACTION == "pressed"
+    if taken_key_event(vk, pressed) then
+        RESUME_KEY = true
         return
     end
+    if not pressed then return end
 
     if CV.capturing then
         if vk ~= 0x1B then set_bind(CV.capturing, vk, mods) end -- Esc cancels
@@ -1720,11 +1851,11 @@ local function on_key()
     local a = action_for_key(vk, mods)
     if a then
         RESUME_KEY = true -- ours, not X-Plane's
-        local t = now()
-        local down = CV.keys_down[vk]
-        CV.keys_down[vk] = t
-        if down and t - down < 3 then return end -- auto-repeat
-        if a.release then CV.held[vk] = a end
+        if a.release then
+            take_key(vk, function() release_action(a, false) end, a.press)
+        else
+            take_key(vk) -- (so holding it doesn't repeat the action)
+        end
         press_action(a, false)
         return
     end
@@ -1733,10 +1864,9 @@ local function on_key()
     if ZOOM_KEYS[vk] and CV.active and not CONTROL_KEY and not OPTION_KEY then
         if outside_shot() then
             RESUME_KEY = true -- X-Plane's zoom can't move our camera, so we zoom it
-            if CV.zoom_vk ~= vk then
-                zoom_begin(ZOOM_KEYS[vk])
-                CV.zoom_vk = vk
-            end
+            local dir = ZOOM_KEYS[vk]
+            take_key(vk, zoom_end, function() if outside_shot() then CV.zoom_dir = dir end end)
+            zoom_begin(dir)
         end
         return
     end

@@ -16,7 +16,7 @@ Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → 
 
 - **Start/stop by hand:** with the button, or a key you set in the window. A cinematic you start yourself keeps running while you use the controls (the autopilot is a good idea) until you stop it or pick another view.
 - **When you're away:** after the away time (2 minutes by default) with no keyboard, mouse, joystick or head-tracking input, it starts by itself. Any input ends it, except the zoom keys and the keys you've set for the cinematic.
-- **Zoom:** hold **=** / **+** to zoom in and **-** to zoom out (main keyboard or keypad). In outside shots this zooms the cinematic camera, and the zoom carries on into the next outside shots until the cinematic ends. In the cockpit the keys go to X-Plane's own zoom.
+- **Zoom:** hold **=** / **+** to zoom in and **-** to zoom out (main keyboard or keypad). In outside shots this zooms the cinematic camera smoothly: it speeds up gently when you press, eases to a stop when you let go, and a tap makes a small step. The zoom carries on into the next outside shots until the cinematic ends. In the cockpit the keys go to X-Plane's own zoom.
 
 ### Keys
 
@@ -92,12 +92,14 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 | `manual_exit_on_input` | `false` | Any input also ends a cinematic you started yourself |
 | `joystick_deadband` | `0.03` | How far an axis must move to count as input (raise it for noisy hardware) |
 | `bind_toggle`, `bind_next_shot`, `bind_toggle_afk`, `bind_cycle_mode`, `bind_zoom_in`, `bind_zoom_out`, `bind_settings` | empty | The keys set in the window, as `<virtual key code> <modifiers> <name>` (modifiers: 1 Shift, 2 Ctrl, 4 Alt); easiest set from the window |
+| `chase_view` | `0` | Not a setting: X-Plane's number for its chase view, learned the first time it's needed (see below) |
 
 ## How it works
 
 - **Outside shots** take control of X-Plane's camera through the plugin SDK's `XPLMControlCamera`, called from Lua through LuaJIT's FFI, which FlyWithLua NG+ includes. The camera is worked out in X-Plane's camera callback from where the aircraft is that frame, so it keeps up with the aircraft at speed, and terrain probes keep it above the ground. The view underneath is X-Plane's chase view, so you hear the outside sounds.
 - **Cockpit shots** switch to the 3D cockpit and move the pilot's head (`sim/graphics/view/pilots_head_*`), so cockpit lighting, sounds and reflections stay right.
-- **Zoom:** X-Plane's own zoom can't act on a camera a plugin controls, so in outside shots the script catches + and - and zooms its camera itself. In the cockpit the keys go through to X-Plane, and a key or joystick button set for zoom holds X-Plane's `sim/general/zoom_in`/`zoom_out` commands.
+- **Zoom:** X-Plane's own zoom can't act on a camera a plugin controls, so in outside shots the script catches + and - and zooms its camera itself. FlyWithLua reports X-Plane's key repeats (while a key is held) as releases, so the script treats a key as held until it's let go quickly after the press (a tap) or its events stop coming, which also copes with slow key-repeat settings. The zoom ramps up over a quarter of a second and the camera eases after it. In the cockpit the keys go through to X-Plane, and a key or joystick button set for zoom holds X-Plane's `sim/general/zoom_in`/`zoom_out` commands.
+- **Switching views quietly:** X-Plane announces a view change on screen when its view commands are used, so the script switches views by setting X-Plane's view number (`sim/graphics/view/view_type`) directly. The 3D cockpit's number is fixed; the chase view's (used under the outside shots) is learned the first time with X-Plane's chase command, so you may see its name that once, and kept in `cinematic_view.ini` as `chase_view`. If a direct switch doesn't take, the script falls back to the command.
 - **Keys** set in the window are caught with FlyWithLua's keyboard sniffer, which runs before X-Plane's own key bindings.
 - If the SDK library can't be loaded, outside shots fall back to X-Plane's own chase, circle and flyby (still spot/linear spot) views.
 - **Ending a cinematic** puts back the view and head position you had. If you pick a view yourself during one, it stops and leaves you in that view.
