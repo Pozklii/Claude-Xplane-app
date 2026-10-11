@@ -311,7 +311,7 @@ for _, l in ipairs(logs) do check(not l:find("not started") and not l:find("fail
 
 local cine, A, S, BIND, getB = CinematicViews._state()
 local SHOTS, ORDER = CinematicViews._shots()
-local RT = CinematicViews._random()
+local RT = CinematicViews._geometry()
 local n_wide, n_close, n_int = 0, 0, 0
 for _, id in ipairs(ORDER) do
   if id:sub(1, 5) == "wide_" then n_wide = n_wide + 1
@@ -344,6 +344,75 @@ check(a == false and b == false, "= passed on to X-Plane")
 check(tap(0xB1, "-") == false, "- passed on to X-Plane")
 check(tap(0x41, "a") == false, "other keys passed on")
 check(X.mock_handler_count() == 0 and X.mock_press("sim/general/zoom_in", 0) == 1, "zoom commands left alone")
+
+-- ---------------------------------------------------------------------------
+section("it films where you are: cockpit views in the cockpit, exterior views outside")
+check(in_cockpit(), "starting in the cockpit")
+run_command("toggle")
+step(3)
+check(cine.active and cine.def and cine.def.id == "scan", "Camera on in the cockpit starts a cockpit shot (" .. tostring(cine.def and cine.def.id) .. ")")
+for _ = 1, 8 do
+  CinematicViews.next_shot()
+  step(3)
+  check(cine.def.kind == "int" and in_cockpit(), "Next stays in the cockpit (" .. cine.def.id .. ")")
+end
+for _ = 1, 8 do
+  CinematicViews.previous_shot()
+  step(3)
+  check(cine.def.kind == "int" and in_cockpit(), "Previous stays in the cockpit (" .. cine.def.id .. ")")
+end
+run_command("toggle")
+step(3)
+check(not cine.active and in_cockpit(), "Camera off")
+X.mock_set_view(1017, 1)
+step(3)
+run_command("toggle")
+step(3)
+check(cine.active and cine.def and cine.def.id == "wide_rear" and X.mock_camera_controlled() == 1,
+      "Camera on outside starts an exterior shot (" .. tostring(cine.def and cine.def.id) .. ")")
+CinematicViews.previous_shot()
+step(3)
+check(cine.active and cine.def.id == "close_nosegear" and X.mock_camera_controlled() == 1,
+      "Previous from the first exterior shot goes to the last one (" .. cine.def.id .. ")")
+for _ = 1, 15 do
+  CinematicViews.previous_shot()
+  step(3)
+  check(cine.active and cine.def.kind == "ext" and X.mock_camera_controlled() == 1, "Previous stays outside (" .. cine.def.id .. ")")
+end
+for _ = 1, 15 do
+  CinematicViews.next_shot()
+  step(3)
+  check(cine.active and cine.def.kind == "ext" and X.mock_camera_controlled() == 1, "Next stays outside (" .. cine.def.id .. ")")
+end
+run_command("toggle")
+step(3)
+check(not cine.active and X.mock_camera_controlled() == 0 and get("sim/graphics/view/view_is_external") == 1,
+      "Camera off leaves you outside")
+X.mock_set_view(1026, 0)
+step(3)
+run_command("toggle")
+step(3)
+check(cine.active and cine.def.id == "scan", "back in the cockpit, Camera on picks up the cockpit shots again")
+run_command("toggle")
+step(3)
+
+-- X-Plane 12 may give the cockpit a different view number: any view that
+-- isn't an exterior one is the cockpit.
+X.mock_set_view(1000, 0)
+step(3)
+CinematicViews.next_shot()
+step(60)
+local hd = head()
+check(cine.active and cine.def.kind == "int" and (math.abs(hd[4] - EYE[4]) > 0.01 or math.abs(hd[5] - EYE[5]) > 0.01),
+      "cockpit shots work whatever number the cockpit view has")
+CinematicViews.previous_shot()
+step(200)
+check(cine.active and cine.def.kind == "int", "and Previous works there too")
+CinematicViews.stop()
+step(6)
+X.mock_set_view(1026, 0)
+step(3)
+for _, l in ipairs(logs) do check(not l:find("could not"), "log: " .. l) end
 
 -- ---------------------------------------------------------------------------
 -- Measure the running exterior shot over n frames: is its subject in the
@@ -533,6 +602,7 @@ for _, f in ipairs(focus) do
   local pts, hds = m.pitches, m.headings
   local n, hit = #pts, 0
   for k = 1, n do if f[3](hds[k], pts[k]) then hit = hit + 1 end end
+  if os.getenv("VERBOSE") then print(("   %s %.1f%%"):format(f[1], 100 * hit / math.max(n, 1))) end
   check(hit / math.max(n, 1) >= f[4], ("%s looks at %s %.0f%% of the time"):format(f[1], f[2], 100 * hit / math.max(n, 1)))
 end
 check(share({ 1 }, function() return true end) == 1, "share helper")
@@ -589,7 +659,7 @@ CinematicViews.shot("close_tail")
 step(3)
 CinematicViews.next_shot()
 step(3)
-check(cine.def.id == "scan", "with the gear up, Next from the tail skips the gear close-ups (" .. cine.def.id .. ")")
+check(cine.def.id == "wide_rear", "with the gear up, Next from the tail skips the gear close-ups (" .. cine.def.id .. ")")
 CinematicViews.previous_shot()
 step(3)
 check(cine.def.id == "close_tail", "and Previous comes back (" .. cine.def.id .. ")")
@@ -601,14 +671,10 @@ CinematicViews.shot("autopilot")
 step(3)
 CinematicViews.next_shot()
 step(3)
-check(cine.def.id == "wide_rear", "after the last cockpit shot, back to the start (" .. cine.def.id .. ")")
-S.cockpit_in_cycle = false
-CinematicViews.shot("close_nosegear")
+check(cine.def.id == "scan", "after the last cockpit shot, back to the first (" .. cine.def.id .. ")")
+CinematicViews.previous_shot()
 step(3)
-CinematicViews.next_shot()
-step(3)
-check(cine.def.id == "wide_rear", "cockpit shots can be left out of Next/Previous (" .. cine.def.id .. ")")
-S.cockpit_in_cycle = true
+check(cine.def.id == "autopilot", "and Previous goes back round (" .. cine.def.id .. ")")
 CinematicViews.stop()
 step(3)
 
@@ -662,7 +728,7 @@ step(2)
 check(BIND.prev and BIND.prev.n == 58, "button 58 assigned to previous view")
 plane.u = 1000
 steer(150, 0, 0, 0, false)
-local last = cine.last_id
+local last = cine.last[in_cockpit() and "int" or "ext"]
 X.mock_set_button(57, 1) step(3) X.mock_set_button(57, 0) step(3)
 check(cine.active and cine.def.id == last, "with the camera off, next view starts it with your last shot (" .. tostring(cine.def and cine.def.id) .. ")")
 X.mock_set_button(57, 1) step(30)
@@ -862,15 +928,18 @@ CinematicViews.stop()
 step(3)
 CinematicViews.toggle_window()
 labels = build()
-local want = { "Camera OFF", "< Previous", "Next >", "Random", "Save", "Camera on/off", "Next view", "Previous view",
-               "New random view", "Camera distance", "Camera shake", "Shot transition", "Cockpit head movement",
+local want = { "Camera OFF", "< Previous", "Next >", "Camera on/off", "Next view", "Previous view",
+               "Open/close window", "Camera distance", "Camera shake", "Shot transition", "Cockpit head movement",
                "Aircraft size" }
 for _, w in ipairs(want) do
   local found = false
   for _, l in ipairs(labels) do if l:find(w, 1, true) then found = true end end
   check(found, "window shows " .. w)
 end
-check(#labels < 40, "window kept small (" .. #labels .. " items)")
+check(#labels < 36, "window kept small (" .. #labels .. " items)")
+for _, l in ipairs(labels) do
+  check(not l:find("Random", 1, true) and not l:find("Save", 1, true), "no random views or saving (" .. l .. ")")
+end
 check(ui.depth == 0, "style colours balanced")
 build("Camera OFF")
 step(3)
@@ -887,117 +956,38 @@ ini = f and f:read("*a") or ""
 if f then f:close() end
 check(ini:find("shake = 0.8", 1, true) ~= nil, "settings saved")
 
--- ---------------------------------------------------------------------------
-section("random exterior shots: wide or close-up, framed, moving, never inside the aircraft")
-local families, parts = { wide = 0, close = 0 }, {}
-local total = { frames = 0, out = 0, too_big = 0, inside = 0, under = 0, bad = 0, still = 0, zoom_min = 99, worst = 0 }
-local rscenes = {
-  function() plane.u = GROUND_H steer(40, 90, 0, 0, true) end,
-  function() plane.u = 1500 steer(150, 30, 0, 20, false) end,
-  function() plane.u = 200 steer(70, 270, -3.5, 0, false) end,
-}
-for n = 1, 150 do
-  if n % 50 == 1 then
-    rscenes[math.floor(n / 50) + 1]()
-    CinematicViews.shot("wide_rear")
-    step(240)
-  end
-  local r = RT.exterior()
-  families[r.family] = families[r.family] + 1
-  if r.part then parts[r.part] = true end
-  RT.start(r)
-  step(3)
-  local mm = measure_exterior(150)
-  for k, v in pairs(mm) do
-    if k == "zoom_min" or k == "fill" then total[k] = math.min(total[k] or 9, v)
-    elseif k == "worst" then total.worst = math.max(total.worst, v)
-    else total[k] = total[k] + v end
-  end
-end
-local nparts = 0
-for _ in pairs(parts) do nparts = nparts + 1 end
-check(families.wide > 40 and families.close > 40, ("wide shots (%d) and close-ups (%d)"):format(families.wide, families.close))
-check(nparts >= 6, nparts .. " different parts in close-ups")
-report("150 random exterior shots", total)
-
-section("random cockpit shots: realistic, inside the safe space")
-CinematicViews.stop()
-step(6)
-plane.u = GROUND_H
-steer(30, 90, 0, 0, true)
-local ctot = { outside_space = 0, jump = 0, fast = 0, still = 0, bad = 0 }
-for n = 1, 30 do
-  RT.start(RT.cockpit())
-  step(2)
-  local mm = measure_cockpit(240)
-  for k in pairs(ctot) do ctot[k] = ctot[k] + mm[k] end
-end
-check(ctot.outside_space == 0, "random cockpit shots left the safe space on " .. ctot.outside_space .. " frames")
-check(ctot.jump == 0 and ctot.fast == 0 and ctot.still == 0 and ctot.bad == 0,
-      ("random cockpit shots: jumps %d, too fast %d, frozen %d, bad %d"):format(ctot.jump, ctot.fast, ctot.still, ctot.bad))
-check(in_cockpit(), "in the cockpit")
-
-section("recipes save and load exactly")
-local r = RT.exterior()
-local back = RT.parse(RT.serialize(r))
-local same_r = back ~= nil
-for k, v in pairs(r) do
-  if type(v) == "number" then
-    if not back or math.abs(v - back[k]) > math.max(1e-3, math.abs(v) * 1e-3) then same_r = false end
-  elseif type(v) ~= "table" and (not back or v ~= back[k]) then same_r = false end
-end
-check(same_r, "an exterior recipe survives the settings file")
-local rc = RT.cockpit()
-local backc = RT.parse(RT.serialize(rc))
-check(backc and backc.kind == "int" and next(backc.w) ~= nil, "a cockpit recipe survives the settings file")
-check(RT.parse("kind=ext,family=wide,d=-50,az=nonsense,zz=1").d == 0.05, "bad values are clamped")
-check(RT.parse("kind=ext,anchor=orbit,az0=90") == nil, "old (3.x) recipes are dropped")
-check(RT.parse("garbage") == nil, "garbage is ignored")
-
-section("Random, Save, and saved shots in Next / Previous")
-plane.u = 1500
-steer(150, 0, 0, 0, false)
-CinematicViews.shot("wide_front")
-step(3)
-CinematicViews.random_shot("ext")
-step(3)
-check(cine.def.id:sub(1, 3) == "rnd", "Random makes a random shot")
-CinematicViews.next_shot()
-step(3)
-check(cine.def.id == "wide_side", "Next from a random shot carries on the list after the last listed one (" .. cine.def.id .. ")")
-CinematicViews.random_shot("ext")
-step(3)
-local rrecipe = RT.serialize(RT.parse(RT.serialize(cine.st.r)))
+section("an optional key or button opens and closes the window")
 CinematicViews.toggle_window()
-build("Save")
-step(3)
-check(#RT.MY == 1, "Save keeps the random shot")
+build("Assign##window")
+tap(0x57, "w", { ctrl = true })
+check(BIND.window and BIND.window.vk == 0x57 and BIND.window.ctrl, "Ctrl+W assigned to the window")
+check(windows == 1, "assigning doesn't close it")
+check(tap(0x57, "w", { ctrl = true }) == true and windows == 0, "Ctrl+W closes the window (and X-Plane doesn't get it)")
+tap(0x57, "w", { ctrl = true })
+check(windows == 1, "and opens it again")
+check(tap(0x57, "w") == false and windows == 1, "plain W is left to X-Plane")
+build("Assign##window")
+X.mock_set_button(60, 1)
+step(2)
+X.mock_set_button(60, 0)
+step(2)
+check(BIND.window and BIND.window.kind == "joy" and BIND.window.n == 60 and windows == 1, "or a joystick button")
+X.mock_set_button(60, 1) step(2) X.mock_set_button(60, 0) step(2)
+check(windows == 0, "the button closes the window")
+X.mock_set_button(60, 1) step(2) X.mock_set_button(60, 0) step(2)
+check(windows == 1, "and opens it")
 CinematicViews.toggle_window()
+check(windows == 0, "closed")
 f = io.open(SCRIPT_DIRECTORY .. "Cinematic_Views.ini")
 ini = f and f:read("*a") or ""
 if f then f:close() end
-check(ini:find("myshot = ", 1, true) ~= nil, "saved shot written to the settings file")
-CinematicViews.shot("autopilot")
-step(3)
-CinematicViews.next_shot()
-step(3)
-check(cine.def.id == RT.MY[1].id and RT.serialize(cine.st.r) == rrecipe, "saved shot joins Next / Previous after the last listed shot")
-CinematicViews.toggle_window()
-build("Delete")
-step(3)
-CinematicViews.toggle_window()
-check(#RT.MY == 0, "Delete removes it")
-CinematicViews.toggle_window()
-build("Assign##random")
-tap(0x52, "r")
-check(BIND.random and BIND.random.vk == 0x52, "a key assigned to New random view")
-CinematicViews.toggle_window()
-local before_id = cine.def.id
-tap(0x52, "r")
-step(3)
-check(cine.def.id ~= before_id and cine.def.id:sub(1, 3) == "rnd", "the key makes a new random view")
-CinematicViews.stop()
-step(3)
+check(ini:find("bind.window = joy:60", 1, true) ~= nil, "the window button is saved")
+check(ini:find("myshot", 1, true) == nil and ini:find("random", 1, true) == nil, "nothing about random views in the settings")
+
+-- ---------------------------------------------------------------------------
+section("no random views")
+for name in pairs(commands) do check(not name:find("random") and not name:find("save_shot"), "command " .. name) end
+check(CinematicViews.random_shot == nil and CinematicViews.save_shot == nil, "no random or save functions")
 
 -- ---------------------------------------------------------------------------
 section("no errors logged")
