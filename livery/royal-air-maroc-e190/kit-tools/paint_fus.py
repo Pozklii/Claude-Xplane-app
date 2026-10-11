@@ -111,10 +111,12 @@ B4_PTS = [(947.6, 0), (957.8, 9.9), (970.6, 14.0), (983.3, 17.1), (996.1, 19.8),
           (1008.8, 22.2), (1021.6, 26.3), (1034.3, 29.9), (1046.8, 32.4)]
 b4 = np.interp(XG, [p[0] for p in B4_PTS], [p[1] * DEG for p in B4_PTS], left=0.0, right=0.0)
 E_B43 = np.where(XG <= 1046.8, b4, E_B3)
-# darker red: a band right behind the white pinstripe. Its back edge comes down
-# from the crown about four windows ahead of the rear door and meets the
-# bottom of the red just past the door; bright red behind it.
-BR_PTS = [(1310, 0), (1336.5, 18.6), (1377, 30.8), (1414, 43.7), (1451, 53.6), (1488, 75.0),
+# darker red: a band right behind the white pinstripe, with bright red above
+# it along the crown (eye-level photo: a bright strip ~20-25 deg wide that
+# tapers to a point at the front of the red) and bright red behind its back
+# edge, which comes down to the bottom of the red just past the rear door.
+BR_PTS = [(1046, 0), (1060, 12.0), (1072, 17.0), (1090, 21.0), (1130, 23.0), (1200, 24.0),
+          (1270, 25.0), (1336, 26.0), (1377, 31.0), (1414, 43.7), (1451, 53.6), (1488, 75.0),
           (1512, 105.0), (1530, 135.0), (1545, 180.0)]
 E_BR = np.interp(XG, [p[0] for p in BR_PTS], [p[1] * DEG for p in BR_PTS], left=0.0, right=math.pi)
 EDGES = [E_B1, E_B2, E_B3, E_B5, E_BR, E_B43]
