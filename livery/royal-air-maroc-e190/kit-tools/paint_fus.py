@@ -68,18 +68,56 @@ def edge(pts, crown_x=None, blend=50 * DEG, after=None):
     return out
 
 
-E_B1 = edge(G.B1, crown_x=750, after=math.pi)
-E_B2 = edge(G.B2, crown_x=830, after=math.pi)
-E_B3 = edge(G.B3, crown_x=955, after=math.pi)
-E_B5 = edge(G.B5, crown_x=985)
-# darker red: a wedge at the front of the red, tapering to a point ahead of
-# the rear door (traced from the photo's dark/bright red)
-DR_UP = [(1383, 503), (1400, 519.5), (1420, 527.5), (1440, 535.5), (1462, 548), (1486, 556.5)]
-DR_LOW = [(1300, 556.5), (1320, 557.5), (1360, 560.5), (1400, 561.5), (1440, 560.5), (1470, 558.5), (1486, 556.5)]
-E_DRU = edge(DR_UP, after=math.pi)
-E_DRL = np.where(XG <= 1300, E_B5, edge(DR_LOW, after=0.0))
-E_DRL[XG > 1486] = 0.0
-EDGES = [E_B1, E_B2, E_B3, E_B5, E_DRU, E_DRL]
+# Near the crown the first photo (taken from below) can't be trusted, so each
+# edge's top part comes from the eye-level photo of the right side: points are
+# (station in photo-1 px, degrees from the crown), matched through the windows.
+# Below `switch` degrees the eye-level points are used, above it photo 1.
+CROWN = {
+    'B1': ([(799.5, 0), (805.8, 14.0), (831.5, 19.8), (857.2, 28.2), (882.1, 33.2), (907.1, 38.9),
+            (932.4, 45.3)], 45),
+    'B2': ([(955.3, 30.8), (970.6, 36.1), (983.3, 40.3)], 40),
+    'B3': ([(955.3, 30.8), (970.6, 31.0), (996.1, 31.6), (1021.6, 31.6), (1046.8, 32.4),
+            (1059.3, 36.1), (1072.0, 39.6), (1085.0, 42.8), (1098.0, 45.9)], 45),
+    'B5': ([(1040.5, 0), (1046.8, 15.6), (1059.3, 21.0), (1072.0, 25.3), (1085.0, 30.8),
+            (1098.0, 33.9), (1111.0, 38.3)], 38),
+}
+
+
+def edge_mixed(pts, key, after=None):
+    """photo-1 edge with its crown part replaced by eye-level points"""
+    base = edge(pts, after=after)
+    cpts, sw = CROWN[key]
+    cx = np.array([p[0] for p in cpts]); ct = np.array([p[1] for p in cpts]) * DEG
+    # extend the eye-level curve to where photo 1 reaches the switch angle
+    xs_sw = XG[np.argmax(base >= sw * DEG)]
+    cx = np.append(cx, xs_sw); ct = np.append(ct, sw * DEG)
+    order = np.argsort(cx)
+    crown = np.interp(XG, cx[order], ct[order], left=0.0)
+    out = np.where(XG < xs_sw, crown, base)
+    out[XG < cx.min()] = 0.0
+    return out
+
+
+E_B1 = edge_mixed(G.B1, 'B1', after=math.pi)
+E_B2 = edge_mixed(G.B2, 'B2', after=math.pi)
+E_B3 = edge_mixed(G.B3, 'B3', after=math.pi)
+E_B5 = edge_mixed(G.B5, 'B5')
+# the dark green ends in a point below the crown: no dark green ahead of it
+APEX_X = 955.3
+E_B2[XG < APEX_X] = 0.0
+E_B3[XG < APEX_X] = 0.0
+# thin light-green sliver over the dark green's tip, white above it (eye level)
+B4_PTS = [(947.6, 0), (957.8, 9.9), (970.6, 14.0), (983.3, 17.1), (996.1, 19.8),
+          (1008.8, 22.2), (1021.6, 26.3), (1034.3, 29.9), (1046.8, 32.4)]
+b4 = np.interp(XG, [p[0] for p in B4_PTS], [p[1] * DEG for p in B4_PTS], left=0.0, right=0.0)
+E_B43 = np.where(XG <= 1046.8, b4, E_B3)
+# darker red: a band right behind the white pinstripe. Its back edge comes down
+# from the crown about four windows ahead of the rear door and meets the
+# bottom of the red just past the door; bright red behind it.
+BR_PTS = [(1310, 0), (1336.5, 18.6), (1377, 30.8), (1414, 43.7), (1451, 53.6), (1488, 75.0),
+          (1512, 105.0), (1530, 135.0), (1545, 180.0)]
+E_BR = np.interp(XG, [p[0] for p in BR_PTS], [p[1] * DEG for p in BR_PTS], left=0.0, right=math.pi)
+EDGES = [E_B1, E_B2, E_B3, E_B5, E_BR, E_B43]
 DEDGES = [np.gradient(e, XG) for e in EDGES]
 
 # U (8K) per photo px, for each section
@@ -115,10 +153,10 @@ for r0 in range(0, N, 512):
     t_ = th[rr, cc]
     g_ = np.maximum(gv[rr, cc], math.pi / 4000)
     cov = [coverage(k, x, t_, g_, dudx) for k in range(len(EDGES))]
-    L, B2, B3, B5, DRU, DRL = cov
+    L, B2, B3, B5, BR, B43 = cov
     col = np.ones((len(rr), 3), np.float32) * C['W']
-    for c_, a_ in ((C['L'], L), (C['D'], np.clip(B2 - B3, 0, 1)), (C['W'], B3),
-                   (C['R'], B5), (C['DR'], B5 * DRL * (1 - DRU))):
+    for c_, a_ in ((C['L'], L), (C['D'], np.clip(B2 - B3, 0, 1)), (C['W'], B43),
+                   (C['R'], B5), (C['DR'], B5 * (1 - BR))):
         col = col * (1 - a_[:, None]) + c_ * a_[:, None]
     paint[rs][rr, cc] = col
     print('rows', r0, flush=True)
@@ -188,8 +226,8 @@ def stamp(art, cx, cy, w, ax_v, aspect=None, top=None, bottom=None, sides='LR'):
 
 
 en = E.words_layer(['Royal', 'Air', 'Maroc'], f'{FONTS}/outfit-latin-600-normal.woff', 600, G.RED)
-ar_ = E.text_layer('الخطوط الملكية المغربية', f'{FONTS}/aref-ruqaa-arabic-700-normal.woff',
-                   600, G.RED, direction='rtl', pad=0)
+# the airline's own Arabic logotype, traced from the photo (kit-tools/trace_ar.py)
+ar_ = Image.open(f'{FONTS}/../artwork/ram_title_ar_logotype.png').convert('RGBA')
 reg = E.text_layer('CN-RGO', f'{FONTS}/outfit-latin-600-normal.woff', 300, REG_BLACK, pad=0)
 emb = E.text_layer('EMBRAER 190', f'{FONTS}/outfit-latin-600-normal.woff', 200, (30, 30, 30), pad=0)
 
@@ -197,18 +235,21 @@ emb = E.text_layer('EMBRAER 190', f'{FONTS}/outfit-latin-600-normal.woff', 200, 
 GAP8 = 30
 WL_TOP8, WL_BOT8 = (378 - 36) * 2, (378 + 36) * 2
 WR_CROWN8, WR_BELLY8 = (1616 + 36) * 2, (1616 - 36) * 2
-# left side: Arabic above the windows, English below (photo 1)
+# left side (photo 1): Arabic above the windows, English below
 ex, ey = G.TITLE_EN['center']
 stamp(en, ex, ey, G.TITLE_EN['width'], AX_F, top=WL_BOT8 + GAP8, sides='L')
-stamp(ar_, G.TITLE_AR['center'][0], 458.5, G.TITLE_AR['width'], AX_F, aspect=6.0,
-      bottom=WL_TOP8 - GAP8, sides='L')
-# right side: English above the windows and larger, Arabic below (photo 2);
-# spans measured in windows, U in 4K units
-en_w = (2750 - 1215) * 2
-put(en, (1215 + 2750), WR_CROWN8 + GAP8 + en_w * en.height / en.width / 2,
-    en_w, en_w * en.height / en.width, True)
-ar_w = (2358 - 1294) * 2
-put(ar_, (1294 + 2358), WR_BELLY8 - GAP8 - ar_w / 6.0 / 2, ar_w, ar_w / 6.0, True)
+stamp(ar_, G.TITLE_AR['center'][0], 458.5, G.TITLE_AR['width'], AX_F,
+      bottom=WL_TOP8 - 25, sides='L')
+# right side (eye-level photo of the right side, spans measured against its
+# windows; U in 4K units): English above the windows, a smaller Arabic below
+en_u0, en_u1 = 1457, 2934
+en_w = (en_u1 - en_u0) * 2
+en_h = en_w * en.height / en.width
+put(en, en_u0 + en_u1, WR_CROWN8 + 15 + en_h / 2, en_w, en_h, True)
+ar_u0, ar_u1 = 1457, 2525
+ar_w = (ar_u1 - ar_u0) * 2
+ar_h = ar_w * ar_.height / ar_.width
+put(ar_, ar_u0 + ar_u1, WR_BELLY8 - 65 - ar_h / 2, ar_w, ar_h, True)
 
 rx, ry = G.REG['center']
 stamp(reg, rx, ry, G.REG['width'], AX_A)
