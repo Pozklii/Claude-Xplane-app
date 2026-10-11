@@ -106,6 +106,11 @@ E_B1 = edge_mixed(G.B1, 'B1', after=math.pi)
 E_B2 = edge_mixed(G.B2, 'B2', after=math.pi)
 E_B3 = edge_mixed(G.B3, 'B3', after=math.pi)
 E_B5 = edge_mixed(G.B5, 'B5')
+# Behind the rear door the red comes down the side to a pinstripe of constant
+# width just above the belly (both E190 photos; the same scheme from under a
+# 737). The traced edge put it higher there: from below, photo 1's lower
+# outline is past the belly, not on it. Below the stripe it is white.
+E_B5 = np.where(XG >= 1480, np.maximum(E_B5, np.minimum(E_B3 - 14 * DEG, 150 * DEG)), E_B5)
 # the dark green ends in a point below the crown: no dark green ahead of it
 APEX_X = 955.3
 E_B2[XG < APEX_X] = 0.0

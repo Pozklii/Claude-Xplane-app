@@ -116,4 +116,17 @@ def build_theta(mask_path='layers/fus__paintmask.png'):
     arc_r = (np.pi * cr / np.maximum(cr[-1:], 1))[::-1]
     theta[np.ix_(rows_r, dart_cols)] = (1 - w) * th_r[:, None] + w * arc_r
 
+    # The arc-length counts change by a pixel or two from one column to the
+    # next where a dart edge steps, which made edges ragged (up to ~0.45 deg
+    # column to column). Smooth along U with a mask-normalised Gaussian.
+    from scipy.ndimage import gaussian_filter1d
+    c0 = int(BLEND_U[0] * 2) - 64
+    for rows in (np.nonzero(al)[0], np.nonzero(ar)[0]):
+        blk = theta[rows, c0:]
+        m = mask8[rows, c0:] & np.isfinite(blk)
+        num = gaussian_filter1d(np.where(m, blk, 0).astype(np.float32), 14, axis=1)
+        den = gaussian_filter1d(m.astype(np.float32), 14, axis=1)
+        sm = num / np.maximum(den, 1e-6)
+        theta[rows, c0:] = np.where(m, sm, blk)
+
     return theta, mask8, V4, U4, al, ar
