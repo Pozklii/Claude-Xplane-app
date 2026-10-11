@@ -111,14 +111,16 @@ B4_PTS = [(947.6, 0), (957.8, 9.9), (970.6, 14.0), (983.3, 17.1), (996.1, 19.8),
           (1008.8, 22.2), (1021.6, 26.3), (1034.3, 29.9), (1046.8, 32.4)]
 b4 = np.interp(XG, [p[0] for p in B4_PTS], [p[1] * DEG for p in B4_PTS], left=0.0, right=0.0)
 E_B43 = np.where(XG <= 1046.8, b4, E_B3)
-# darker red: a band right behind the white pinstripe, with bright red above
-# it along the crown (eye-level photo: a bright strip ~20-25 deg wide that
-# tapers to a point at the front of the red) and bright red behind its back
-# edge, which comes down to the bottom of the red just past the rear door.
-BR_PTS = [(1046, 0), (1060, 12.0), (1072, 17.0), (1090, 21.0), (1130, 23.0), (1200, 24.0),
-          (1270, 25.0), (1336, 26.0), (1377, 31.0), (1414, 43.7), (1451, 53.6), (1488, 75.0),
-          (1512, 105.0), (1530, 135.0), (1545, 180.0)]
-E_BR = np.interp(XG, [p[0] for p in BR_PTS], [p[1] * DEG for p in BR_PTS], left=0.0, right=math.pi)
+# darker red, traced from the eye-level photo of the right side: bright red
+# is a strip along the crown (the top ~25 deg) from a bright front tip back
+# over the rear windows, deepening to ~70 deg around the rear door and the
+# registration and rising a little towards the tail; dark red fills the rest
+# of the red below it, all the way back to the stabiliser fairing.
+BR_PTS = [(1040, 32.0), (1080, 32.0), (1095, 26.0), (1112, 26.4), (1173, 24.4), (1236, 27.0),
+          (1300, 26.0), (1345, 25.0), (1370, 34.2), (1395, 40.6), (1426, 51.8), (1451, 57.5),
+          (1489, 69.0), (1516, 68.5), (1543, 68.5), (1570, 69.0), (1597, 66.4), (1624, 57.6),
+          (1638, 53.0), (1900, 53.0)]
+E_BR = np.interp(XG, [p[0] for p in BR_PTS], [p[1] * DEG for p in BR_PTS])
 EDGES = [E_B1, E_B2, E_B3, E_B5, E_BR, E_B43]
 DEDGES = [np.gradient(e, XG) for e in EDGES]
 
