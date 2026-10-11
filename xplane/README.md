@@ -37,14 +37,22 @@ For joystick buttons, each action is also an X-Plane command, under **Settings �
 
 Outside the aircraft:
 
-- **Chase cam** — behind and above, lagging a little through turns, leaning into banks and sitting on the flight path in climbs and descents.
+- **Chase cam** — behind and above, lagging a little through turns, leaning into banks and sitting on the flight path in climbs and descents. It's springy like a racing game's: it falls back as the aircraft accelerates, catches up, and widens its view with speed.
 - **Long lens** — far behind and off to one side with a telephoto zoom and a slight hand-held wobble, like a broadcast shot.
 - **Tracking** — alongside, sliding from the nose to the tail (or back).
-- **Flyby** — a camera waiting beside the flight path ahead; the aircraft passes it, zooming to keep it framed. At ground level when you're on or near the ground. Only while moving.
+- **Flyby** — a camera waiting beside the flight path ahead; the aircraft passes it, zooming to keep it framed. At runway level when you're on or near the ground.
+- **Spotter** — on the ground beside the flight path with a long lens, like a plane spotter by the runway, when you're flying low (below about 2000 ft above the ground).
 - **Orbit** — a slow circle around the aircraft, showroom style.
 - **Pass-by** — starts ahead looking back at the nose, then swings out to the side as the aircraft overtakes it.
+- **Crane** — rises from low beside the aircraft up and over it, tilting down.
+- **Wheels** — low beside the main wheels, like a camera car running alongside, on the ground.
 - **Tail mount**, **Wing mount**, **Nose boom** — cameras fixed to the airframe that pitch and roll with it.
 - **Drone** — high overhead, slowly turning.
+
+Moments that cut in as they happen, the way racing games cut to a jump or a finish:
+
+- **Touchdown** — on short final (below about 130 ft, descending), a camera by the runway just past where you'll touch down, with the aircraft coming towards it.
+- **Liftoff** — as the wheels leave the runway, a camera low by the runway as the aircraft lifts off and climbs away.
 
 Inside the cockpit:
 
@@ -54,7 +62,14 @@ Inside the cockpit:
 - **Panel** — leaning in and panning across the instruments.
 - **Co-pilot's seat** — from the other seat, looking across (side-by-side cockpits only).
 
-Shots are picked at random, weighted, without repeating the last few, and sized to the aircraft (from its size, or its maximum weight if X-Plane doesn't report one). Cameras never go below the ground.
+### How shots are chosen
+
+- **By what you're doing.** Each shot has a weight for each phase of flight: parked, taxiing, the takeoff or landing roll, flying low, and cruise. On the runway you get flybys at runway level, wheel shots, low chase shots and the tail mount. Near the ground in the air you get spotter and flyby shots. In cruise you get air-to-air shots: chase, long lens, orbits, tracking and the drone. Parked, you get showroom shots: orbit, crane, pass-by and drone.
+- **Faster cutting when it's busy.** On the takeoff or landing roll and flying low, shots come from the short half of your shot-length range; parked and in cruise, from the long half.
+- **A reveal to open with.** A cinematic starts with a pass-by, crane or orbit (unless it's cockpit-only).
+- **Tilted horizons** now and then on trackside, spotter and long-lens shots.
+- **Camera shake.** Cameras on the airframe shake most and the chase cam less, with turbulence (changes in g-load), runway rumble that grows with speed, and a thump when you touch down that's bigger for firmer landings. Cockpit shots get a little of the same. Cameras on the ground, and the orbit and drone, stay steady. Turn it off with **Camera shake**.
+- **No repeats** of the last few shots, and everything is sized to the aircraft (from its size, or its maximum weight if X-Plane doesn't report one). Cameras never go below the ground.
 
 **Camera speed** sets how fast the cameras move: orbits, drone turns, pans across the panel and look-arounds turn faster or slower, and tracking and pass-by shots cover more or less ground in the same time. It takes effect from the next shot. The flyby is the exception: there the aircraft does the moving.
 
@@ -73,6 +88,7 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 | `camera_speed` | `1.0` | How fast cameras move, pan and orbit, from `0.25` to `2.5` |
 | `letterbox` | `true` | Cinema bars top and bottom |
 | `fades` | `true` | Dip to black when switching between inside and outside, and now and then between other shots |
+| `shake` | `true` | Camera shake from turbulence, runway rumble and touchdowns |
 | `manual_exit_on_input` | `false` | Any input also ends a cinematic you started yourself |
 | `joystick_deadband` | `0.03` | How far an axis must move to count as input (raise it for noisy hardware) |
 | `bind_toggle`, `bind_next_shot`, `bind_toggle_afk`, `bind_cycle_mode`, `bind_zoom_in`, `bind_zoom_out`, `bind_settings` | empty | The keys set in the window, as `<virtual key code> <modifiers> <name>` (modifiers: 1 Shift, 2 Ctrl, 4 Alt); easiest set from the window |
@@ -89,10 +105,10 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 
 ## Testing without X-Plane
 
-[`test/run.sh`](test/run.sh) builds a mock of X-Plane's SDK library (`test/xplm_mock.c`), runs the script in a simulated FlyWithLua with and without the SDK, flying a simulated aircraft through cruise, takeoff and parked-and-paused, and checks the camera math against X-Plane's conventions. It needs `luajit` and a C compiler:
+[`test/run.sh`](test/run.sh) builds a mock of X-Plane's SDK library (`test/xplm_mock.c`), runs the script in a simulated FlyWithLua with and without the SDK, flying a simulated aircraft through cruise, a landing, a takeoff, low flying and parked-and-paused, and checks the camera math against X-Plane's conventions. It needs `luajit` and a C compiler:
 
 ```bash
 xplane/test/run.sh
 ```
 
-It can't show what the shots look like in X-Plane, only that they keep the aircraft in frame at sensible distances, never go below the ground, and that starting, stopping, input, view changes, zoom, keys and settings behave.
+It also flies a simulated landing and takeoff to check that the touchdown and liftoff shots cut in, with their cameras by the runway, and flies low until spotter shots come up. It can't show what the shots look like in X-Plane, only that they keep the aircraft in frame at sensible distances, never go below the ground, and that starting, stopping, input, view changes, zoom, keys and settings behave.

@@ -26,8 +26,9 @@ static void init(void) {
         "sim/graphics/view/pilots_head_x","sim/graphics/view/pilots_head_y","sim/graphics/view/pilots_head_z",
         "sim/graphics/view/pilots_head_psi","sim/graphics/view/pilots_head_the","sim/graphics/view/pilots_head_phi",
         "sim/aircraft/view/acf_peX","sim/aircraft/view/acf_peY","sim/aircraft/view/acf_peZ",
-        "sim/aircraft/weight/acf_m_max",0};   // acf_size_x/z deliberately missing
-    const char *ints[] = {"sim/time/paused","sim/graphics/view/view_type","sim/graphics/VR/enabled",0};
+        "sim/aircraft/weight/acf_m_max","sim/flightmodel/forces/g_nrml",0};   // acf_size_x/z deliberately missing
+    const char *ints[] = {"sim/time/paused","sim/graphics/view/view_type","sim/graphics/VR/enabled",
+        "sim/flightmodel/failures/onground_any",0};
     for (int i = 0; dbl[i]; i++) add(dbl[i], 4);
     for (int i = 0; flt[i]; i++) add(flt[i], 2);
     for (int i = 0; ints[i]; i++) add(ints[i], 1);

@@ -93,7 +93,8 @@ else
         "sim/graphics/view/pilots_head_psi", "sim/graphics/view/pilots_head_the", "sim/graphics/view/pilots_head_phi",
         "sim/aircraft/view/acf_peX", "sim/aircraft/view/acf_peY", "sim/aircraft/view/acf_peZ",
         "sim/aircraft/weight/acf_m_max", "sim/time/paused", "sim/graphics/view/view_type", "sim/graphics/VR/enabled",
-        "sim/joystick/joystick_axis_values" }) do known[n] = true store[n] = 0 end
+        "sim/joystick/joystick_axis_values", "sim/flightmodel/failures/onground_any",
+        "sim/flightmodel/forces/g_nrml" }) do known[n] = true store[n] = 0 end
     function XPLMFindDataRef(n) if known[n] then return n end return nil end
     function XPLMGetDatai(r) return math.floor(store[r]) end
     function XPLMGetDataf(r) return store[r] end
@@ -126,7 +127,8 @@ local function run(list) for _, c in ipairs(list) do local f = assert(loadstring
 
 -- aircraft state ----------------------------------------------------------
 local T = 0
-local ac = { x = 1000, y = 3000, z = -2000, psi = 90, the = 3, phi = 0, vx = 120, vy = 2, vz = 0, agl = 2900 }
+local ac = { x = 1000, y = 3000, z = -2000, psi = 90, the = 3, phi = 0, vx = 120, vy = 2, vz = 0, agl = 2900,
+    onground = false, g = 1 }
 local function push_aircraft()
     set_d("sim/flightmodel/position/local_x", ac.x)
     set_d("sim/flightmodel/position/local_y", ac.y)
@@ -139,6 +141,8 @@ local function push_aircraft()
     set_f("sim/flightmodel/position/local_vy", ac.vy)
     set_f("sim/flightmodel/position/local_vz", ac.vz)
     set_f("sim/flightmodel/position/y_agl", ac.agl)
+    set_i("sim/flightmodel/failures/onground_any", ac.onground and 1 or 0)
+    set_f("sim/flightmodel/forces/g_nrml", ac.g)
 end
 
 set_f("sim/aircraft/view/acf_peX", -0.55)
@@ -244,7 +248,7 @@ local function frame(dt)
             ps.dmin, ps.dmax = math.min(ps.dmin, d), math.max(ps.dmax, d)
             ps.zmax = math.max(ps.zmax, cam.zoom)
             ps.rollmax = math.max(ps.rollmax, math.abs(cam.roll))
-            check(shot_zoom >= 0.99 and shot_zoom <= 6 and cam.zoom >= 0.4 and cam.zoom <= 12, "zoom in range " .. cam.zoom)
+            check(shot_zoom >= 0.84 and shot_zoom <= 6 and cam.zoom >= 0.4 and cam.zoom <= 12, "zoom in range " .. cam.zoom)
         end
     end
     in_draw = true
@@ -302,7 +306,8 @@ end
 check(stats.cockpit_frames > 300, "cockpit shots ran")
 check(head_moved, "head moved in cockpit shots")
 check(stats.below_ground == 0, "camera never below ground")
-check(n >= 8, "many different shots (" .. n .. ")")
+check(n >= (mode == "ffi" and 8 or 6), "many different shots (" .. n .. ")") -- the fallback has 9 in all
+check(not shots_seen.wheels and not shots_seen.spotter, "no ground-level shots in cruise")
 check(#drawn.strings == 0, "no text drawn during the cinematic")
 
 -- 4. a key press ends the AFK cinematic and restores view and head
@@ -376,7 +381,7 @@ if lib then
 end
 
 -- 9. ground: on a runway at takeoff speed, camera stays above ground
-ac.y, ac.agl, ac.vy, ac.the, ac.phi = 2.5, 2.5, 0, 0, 0
+ac.y, ac.agl, ac.vy, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, true
 if lib then lib.mock_set_ground(0) end
 stats.below_ground = 0
 run({ commands["FlyWithLua/cinematic_view/toggle"] })
@@ -394,6 +399,80 @@ local parked_shots = shots_since(before)
 check(not parked_shots.flyby and not parked_shots.xp_spot, "no flyby shots while parked")
 run({ commands["FlyWithLua/cinematic_view/toggle"] })
 set_i("sim/time/paused", 0)
+
+-- 10b. a landing gets a touchdown shot by the runway, and the touchdown shakes the cameras
+local SHt = upvalue(upvalue(upvalue(CinematicView_tick, "fn"), "watch_flight"), "SH")
+if lib then
+    ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 300, 300, 70, -3.5, 0, 2, 0, 90, false
+    command("toggle")
+    local touchdown_seen, touchdown_closest, touchdown_cam_low, touched_at = false, 1e9, true, nil
+    for _ = 1, 30 * 140 do
+        if not ac.onground then
+            if ac.y <= 2.5 then
+                ac.y, ac.vy, ac.onground = 2.5, 0, true
+                touched_at = T
+            end
+        else
+            ac.vx = math.max(0, ac.vx - 2 / 30)
+        end
+        ac.agl = ac.y
+        frame(1 / 30)
+        if CVt.shot and CVt.shot.def.id == "touchdown" and lib.mock_camera_controlled() ~= 0 then
+            touchdown_seen = true
+            local d = math.sqrt((cam.x - ac.x) ^ 2 + (cam.z - ac.z) ^ 2)
+            touchdown_closest = math.min(touchdown_closest, d)
+            if cam.y < 0.9 or cam.y > 2.0 then touchdown_cam_low = false end
+        end
+        if touched_at and T - touched_at < 0.05 then
+            check(SHt.impact > 0.15, "the touchdown registered for camera shake: " .. SHt.impact)
+        end
+    end
+    check(touched_at ~= nil, "simulated landing touched down")
+    check(touchdown_seen, "a touchdown shot cut in on short final")
+    check(touchdown_cam_low, "the touchdown camera stands by the runway")
+    check(touchdown_closest < 90, "and the aircraft passes close by it: " .. touchdown_closest)
+    command("toggle")
+
+    -- 10c. a takeoff gets a liftoff shot
+    command("toggle")
+    seconds(5)
+    local liftoff_seen, liftoff_cam_low = false, true
+    for _ = 1, 30 * 70 do
+        if ac.onground then
+            ac.vx = ac.vx + 2.5 / 30
+            if ac.vx >= 75 then ac.onground, ac.vy, ac.the = false, 5, 8 end
+        end
+        ac.agl = ac.y
+        frame(1 / 30)
+        if CVt.shot and CVt.shot.def.id == "liftoff" and lib.mock_camera_controlled() ~= 0 then
+            liftoff_seen = true
+            if cam.y > 1.6 then liftoff_cam_low = false end
+        end
+    end
+    check(liftoff_seen, "a liftoff shot cut in")
+    check(liftoff_cam_low, "the liftoff camera is low by the runway")
+    command("toggle")
+
+    -- 10d. low and level: spotter shots from the ground (picked at random, so fly until one comes up)
+    ac.y, ac.agl, ac.vy, ac.the, ac.onground = 200, 200, 0, 0, false
+    command("cycle_mode") -- outside only
+    command("toggle")
+    local spotter_low = true
+    for _ = 1, 30 * 900 do
+        frame(1 / 30)
+        if CVt.shot and CVt.shot.def.id == "spotter" and lib.mock_camera_controlled() ~= 0 and cam.y > 2.5 then
+            spotter_low = false
+        end
+        if per_shot.spotter and per_shot.spotter.n > 200 then break end
+    end
+    check(per_shot.spotter ~= nil, "spotter shots come up flying low")
+    check(spotter_low, "spotter cameras stand on the ground")
+    command("toggle")
+    command("cycle_mode") command("cycle_mode") -- back to mixed
+    -- back to parked on the ground for the tests that follow
+    ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, 0, 0, true
+    seconds(2)
+end
 
 -- 11. joystick input ends an AFK cinematic
 if lib then
