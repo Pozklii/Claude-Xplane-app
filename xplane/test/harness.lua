@@ -106,6 +106,7 @@ if mode == "ffi" then
         typedef struct { float x, y, z, pitch, heading, roll, zoom; } mock_cam_t;
         int mock_call_camera(mock_cam_t *pos, int losing); void mock_set_ground(float g);
         void mock_set_axis(int i, float v); void mock_set_button(int i, int v);
+        void mock_set_wall(float z0, float z1, float h); void mock_set_cloud(int i, float base, float tops, float cover);
         void *XPLMFindDataRef(const char *); int XPLMGetDatai(void *); void XPLMSetDatai(void *, int);
         float XPLMGetDataf(void *); void XPLMSetDataf(void *, float); double XPLMGetDatad(void *);
     ]]
@@ -190,6 +191,8 @@ set_f("sim/aircraft/weight/acf_m_max", 78000)
 if mode == "ffi" then
     set_f("mock/camera/focus_distance_m", 500)
     set_i("mock/camera/auto_focus", 1)
+    set_f("sim/graphics/scenery/sun_pitch_degrees", 45) -- midday, until the light tests
+    set_f("sim/graphics/scenery/sun_heading_degrees", 180)
 end
 set_f("sim/operation/misc/frame_rate_period", 1 / 30)
 set_i("sim/graphics/view/view_type", 1026)
@@ -199,7 +202,7 @@ push_aircraft()
 local ok, err = pcall(dofile, script)
 check(ok, "script loads: " .. tostring(err))
 check(commands["FlyWithLua/cinematic_view/toggle"] ~= nil, "toggle command created")
-for _, id in ipairs({ "toggle", "next_shot", "toggle_afk", "settings" }) do
+for _, id in ipairs({ "toggle", "next_shot", "hold", "toggle_afk", "settings" }) do
     check(commands["FlyWithLua/cinematic_view/" .. id] and command_ends["FlyWithLua/cinematic_view/" .. id] ~= "",
         id .. " command with press and release")
 end
@@ -424,6 +427,7 @@ else
     for _, c in ipairs(command_log) do if c == "sim/view/circle" or c == "sim/view/still_spot" or c == "sim/view/linear_spot" then builtin = builtin + 1 end end
     check(builtin > 0, "fallback used built-in views")
     -- in X-Plane's own views the wheel runs X-Plane's zoom, like + and -
+    set_mode("outside")
     local tries = 0
     while not (CVt.active and CVt.shot and CVt.shot.def.kind == "builtin") and tries < 600 do
         frame(1 / 30)
@@ -435,11 +439,11 @@ else
     check(RESUME_MOUSE_WHEEL == true and held_commands["sim/general/zoom_in"], "the wheel zooms X-Plane's own views")
     seconds(0.5)
     check(not held_commands["sim/general/zoom_in"] and CVt.active, "for a moment, without ending the cinematic")
+    set_mode("mixed")
 end
 check(stats.cockpit_frames > 300, "cockpit shots ran")
 check(head_moved, "head moved in cockpit shots")
 check(stats.below_ground == 0, "camera never below ground")
-check(n >= 3, "several kinds of shot (" .. n .. ")")
 local view_commands = {}
 for _, c in ipairs(command_log) do if c:find("^sim/view/") then view_commands[c] = (view_commands[c] or 0) + 1 end end
 check(not view_commands["sim/view/3d_cockpit_cmnd_look_forward"], "the cockpit view is set directly, not with its command")
@@ -619,6 +623,159 @@ if lib then
     check(ground_high == 0, "and stand on the ground")
     check(motion.trackside and motion.trackside.over == 0, "trackside cameras turn within the camera speed limit")
     command("toggle")
+
+    -- 10e. a ridge beside the flight path: terrain never hides the aircraft for long
+    ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 200, 200, 75, 0, 0, 0, 0, 90, false
+    lib.mock_set_wall(-185, -150, 500)
+    -- whether the line from a camera to a point crosses the ridge below its crest
+    local function ridge_hides(cx, cy, cz, tx, ty, tz)
+        if math.abs(tz - cz) < 1e-6 then return cz > -185 and cz < -150 and math.min(cy, ty) < 500 end
+        local ka, kb = (-185 - cz) / (tz - cz), (-150 - cz) / (tz - cz)
+        if ka > kb then ka, kb = kb, ka end
+        ka, kb = math.max(ka, 0), math.min(kb, 1)
+        if ka >= kb then return false end
+        return math.min(cy + (ty - cy) * ka, cy + (ty - cy) * kb) < 500
+    end
+    command("toggle")
+    local outside_frames, hidden_frames, hidden_run, hidden_worst, ridge_trackside = 0, 0, 0, 0, 0
+    for _ = 1, 30 * 360 do
+        frame(1 / 30)
+        if lib.mock_camera_controlled() ~= 0 and CVt.shot and CVt.shot.def.kind == "outside" then
+            outside_frames = outside_frames + 1
+            if ridge_hides(cam.x, cam.y, cam.z, ac.x, ac.y + 0.1 * CVt.size + 1, ac.z) then
+                hidden_frames = hidden_frames + 1
+                hidden_run = hidden_run + 1 / 30
+                hidden_worst = math.max(hidden_worst, hidden_run)
+            else
+                hidden_run = 0
+            end
+            if CVt.shot.def.id == "trackside" then ridge_trackside = ridge_trackside + 1 end
+        else
+            hidden_run = 0
+        end
+    end
+    command("toggle")
+    lib.mock_set_wall(0, 0, 0)
+    print(string.format("  ridge: aircraft hidden %d of %d outside frames, longest %.2f s; trackside frames %d",
+        hidden_frames, outside_frames, hidden_worst, ridge_trackside))
+    check(hidden_worst < 1.5, "terrain never hides the aircraft for long: " .. hidden_worst .. " s")
+    check(hidden_frames < 0.03 * outside_frames, "nor often: " .. hidden_frames .. " of " .. outside_frames .. " frames")
+    check(ridge_trackside > 0, "trackside cameras still find spots that see it")
+
+    -- 10f. golden hour: cameras line up with the low sun
+    set_f("sim/graphics/scenery/sun_pitch_degrees", 6)
+    set_f("sim/graphics/scenery/sun_heading_degrees", 250)
+    ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 3000, 3000, 120, 0, 0, 2, 0, 90, false
+    local sun_r, sun_e = math.rad(250), math.rad(6)
+    local sx, sy, sz = math.cos(sun_e) * math.sin(sun_r), math.sin(sun_e), -math.cos(sun_e) * math.cos(sun_r)
+    -- whether the sun is in the picture, inside the letterbox
+    local function sun_in_picture()
+        local h, p = math.rad(cam.heading), math.rad(cam.pitch)
+        local fx, fy, fz = math.cos(p) * math.sin(h), math.sin(p), -math.cos(p) * math.cos(h)
+        local rx, ry, rz = math.cos(h), 0, math.sin(h)
+        local ux, uy, uz = ry * fz - rz * fy, rz * fx - rx * fz, rx * fy - ry * fx
+        local f = sx * fx + sy * fy + sz * fz
+        if f <= 0 then return false end
+        local across, up = (sx * rx + sy * ry + sz * rz) / f, (sx * ux + sy * uy + sz * uz) / f
+        local t = math.tan(math.rad(30)) / cam.zoom
+        return math.abs(across) < t and math.abs(up) < t / 2.39
+    end
+    command("toggle")
+    local golden = { shots = 0, into = 0, lit = 0, into_frames = 0, sun_seen = 0, lit_frames = 0, lit_ok = 0 }
+    for _ = 1, 30 * 800 do
+        frame(1 / 30)
+        local sh = CVt.shot
+        if sh and sh.def.id == "orbiting" and sh.inited and not sh.golden then
+            sh.golden = true
+            golden.shots = golden.shots + 1
+            if sh.light == "into_sun" then golden.into = golden.into + 1 elseif sh.light == "lit" then golden.lit = golden.lit + 1 end
+        end
+        if sh and sh.light and lib.mock_camera_controlled() ~= 0 and T - sh.t0 > 0.1 then
+            if sh.light == "into_sun" then
+                golden.into_frames = golden.into_frames + 1
+                if sun_in_picture() then golden.sun_seen = golden.sun_seen + 1 end
+            else
+                golden.lit_frames = golden.lit_frames + 1
+                local b = math.deg(math.atan2(cam.x - ac.x, -(cam.z - ac.z)))
+                if math.abs(((b - 250 + 180) % 360) - 180) < 60 then golden.lit_ok = golden.lit_ok + 1 end
+            end
+        end
+    end
+    command("toggle")
+    print(string.format("  golden hour: %d orbiting shots, %d into the sun (sun in the picture %d of %d frames), %d lit by it",
+        golden.shots, golden.into, golden.sun_seen, golden.into_frames, golden.lit))
+    local lined = (golden.into + golden.lit) / math.max(golden.shots, 1)
+    check(golden.shots >= 20 and golden.into > 0 and golden.lit > 0, "golden hour: shots into the sun and lit by it")
+    check(lined > 0.35 and lined < 0.9, "most, not all, line up with the sun: " .. lined)
+    check(golden.sun_seen > 0.8 * golden.into_frames, "looking into the sun, it's in the picture")
+    check(golden.lit_ok > 0.9 * golden.lit_frames, "lit shots have the sun behind the camera")
+
+    -- 10g. night: close shots, few distant ones
+    local pick_outside = upvalue(upvalue(upvalue(upvalue(CinematicView_tick, "fn"), "next_shot"), "pick_shot"), "pick_outside")
+    local function outside_mix()
+        CVt.recent, CVt.prefer_close = {}, false
+        local n = { orbiting = 0, trackside = 0, mounted = 0 }
+        for _ = 1, 3000 do
+            local def = pick_outside({ phase = "cruise", gs = 120, agl = 3000, paused = false })
+            n[def.id] = n[def.id] + 1
+        end
+        return n.trackside / 3000, n.mounted / 3000
+    end
+    set_f("sim/graphics/scenery/sun_pitch_degrees", -20)
+    frame(1 / 30)
+    local night_track, night_mounted = outside_mix()
+    set_f("sim/graphics/scenery/sun_pitch_degrees", 45)
+    frame(1 / 30)
+    local day_track, day_mounted = outside_mix()
+    print(string.format("  trackside / mounted shots: by day %.2f / %.2f, at night %.2f / %.2f", day_track, day_mounted, night_track, night_mounted))
+    check(night_track < 0.07 and day_track > 0.11, "fewer distant trackside shots at night")
+    check(night_mounted > 0.35 and day_mounted < 0.25, "more close mounted ones")
+    set_f("sim/graphics/scenery/sun_pitch_degrees", -20)
+    command("toggle")
+    local night_orbits, night_wide = 0, 0
+    for _ = 1, 30 * 400 do
+        frame(1 / 30)
+        local sh = CVt.shot
+        if sh and sh.def.id == "orbiting" and sh.inited and not sh.night_seen then
+            sh.night_seen = true
+            night_orbits = night_orbits + 1
+            if sh.zoom > 1 or sh.f < 0.5 then night_wide = night_wide + 1 end
+        end
+    end
+    command("toggle")
+    check(night_orbits >= 5 and night_wide == 0, "orbiting shots at night are close, without long lenses (" .. night_orbits .. " shots)")
+    set_f("sim/graphics/scenery/sun_pitch_degrees", 45)
+
+    -- 10h. in cloud: the shots move into the cockpit until it's out
+    local found_cloud_log = false
+    for _, l in ipairs(logs) do if l:find("checks for cloud with sim/weather/aircraft/cloud_*", 1, true) then found_cloud_log = true end end
+    check(found_cloud_log, "the cloud datarefs it uses are logged")
+    lib.mock_set_cloud(1, 2500, 3600, 0.9)
+    command("toggle")
+    seconds(4)
+    check(CVt.in_cloud, "in cloud")
+    seconds(2)
+    check(CVt.shot and CVt.shot.def.kind == "cockpit", "into the cockpit, even showing outside shots only")
+    local outside_in_cloud = 0
+    for _ = 1, 30 * 60 do
+        frame(1 / 30)
+        if lib.mock_camera_controlled() ~= 0 then outside_in_cloud = outside_in_cloud + 1 end
+    end
+    check(outside_in_cloud == 0, "no outside shots in cloud: " .. outside_in_cloud .. " frames")
+    lib.mock_set_cloud(1, 2500, 3600, 0.3) -- thinned to scattered
+    seconds(5)
+    check(not CVt.in_cloud, "scattered cloud doesn't count")
+    local back_outside = false
+    for _ = 1, 30 * 30 do
+        frame(1 / 30)
+        if CVt.shot and CVt.shot.def.kind == "outside" then back_outside = true break end
+    end
+    check(back_outside, "and outside shots come back")
+    lib.mock_set_cloud(1, 2000, 2900, 0.9) -- the aircraft just above the tops
+    seconds(10)
+    check(not CVt.in_cloud and CVt.shot.def.kind == "outside", "above the tops, outside shots carry on")
+    command("toggle")
+    lib.mock_set_cloud(1, 0, 0, 0)
     set_mode("mixed")
     -- back to parked on the ground for the tests that follow
     ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, 0, 0, true
@@ -822,8 +979,8 @@ check(labels:find("Running", 1, true) == nil or not labels:find("Running %(.-%):
 for _, l in ipairs({ "Cycle shot types", "Zoom in", "Zoom out", "never starts", "while the sim is paused" }) do
     check(not labels:find(l, 1, true), "window no longer has " .. l)
 end
-for _, l in ipairs({ "Start / stop", "Next shot", "Auto-start on/off", "This window",
-    "Camera speed", "Panning speed", "Letterbox bars", "Fades" }) do
+for _, l in ipairs({ "Start / stop", "Next shot", "Hold shot", "Auto-start on/off", "This window",
+    "Camera speed", "Panning speed", "Letterbox bars", "Fades", "Window seat shots" }) do
     check(labels:find(l, 1, true), "window shows " .. l)
 end
 check(not labels:find("Caption"), "no captions option")
@@ -889,6 +1046,41 @@ check(#shot_log - shots_before == 1, "holding N cut to the next shot once: " .. 
 command("toggle")
 click("Clear##clear_next_shot")
 
+-- 13a. holding a shot
+command("toggle")
+seconds(2)
+local held = CVt.shot
+command("hold")
+check(CVt.hold, "Hold shot holds it")
+seconds(40)
+check(CVt.shot == held, "a held shot goes on past its length")
+widgets = {}
+build()
+local held_labels = table.concat(widgets, "|")
+check(held_labels:find("Holding##hold", 1, true) and held_labels:find("holding this shot", 1, true), "the window shows it's holding")
+command("hold")
+seconds(1)
+check(not CVt.hold and CVt.shot ~= held, "let go of, it moves on")
+click("Hold shot##hold")
+check(CVt.hold, "the window's Hold shot button holds it too")
+held = CVt.shot
+click("Next shot")
+seconds(1)
+check(not CVt.hold and CVt.shot ~= held, "Next shot lets go and cuts")
+click("Hold shot##hold")
+command("toggle")
+check(not CVt.hold, "stopping lets go")
+click("Set##set_hold")
+tap(0x48) -- H
+command("toggle")
+seconds(1)
+check(tap(0x48) == true and CVt.hold, "a key set for Hold shot holds it")
+seconds(0.5)
+tap(0x48)
+check(not CVt.hold, "and lets go")
+command("toggle")
+click("Clear##clear_hold")
+
 -- 14. camera speed
 imgui_clicks["##camera_pace"] = 2 build() imgui_clicks = {}
 command("toggle")
@@ -931,6 +1123,42 @@ click("Auto##size")
 check(math.abs(CVt.size - auto_size) < 1e-6, "Auto goes back to the worked-out size")
 seconds(2)
 check(not ini_text():find("size:Test A320.acf", 1, true), "and forgets the setting")
+
+-- 14c. window seat shots: from a passenger window, looking out at the wing
+set_mode("cockpit")
+local first_cockpit = #cockpit_shots
+command("toggle")
+seconds(600)
+check(CVt.active, "the cockpit run kept going")
+command("toggle")
+local window_shots, window_bad = 0, 0
+for i = first_cockpit + 1, #cockpit_shots do
+    local sh = cockpit_shots[i]
+    if sh.window then
+        window_shots = window_shots + 1
+        local e = CVt.eye
+        local x, z = e.x + sh.dx, e.z + sh.dz
+        local look = sh.psi0 + sh.dpsi / 2
+        if z <= 0 or math.abs(x) < 0.3 or (x > 0) ~= (look > 0) or math.abs(look) < 60 or math.abs(look) > 125 then
+            window_bad = window_bad + 1
+        end
+    end
+end
+check(window_shots >= 1 and window_shots <= 0.4 * (#cockpit_shots - first_cockpit) and window_bad == 0,
+    string.format("window seat shots: behind the wing's leading edge, out to one side, looking out (%d of %d cockpit shots, %d off)",
+        window_shots, #cockpit_shots - first_cockpit, window_bad))
+click("Window seat shots")
+first_cockpit = #cockpit_shots
+command("toggle")
+seconds(200)
+command("toggle")
+local windows_after = 0
+for i = first_cockpit + 1, #cockpit_shots do if cockpit_shots[i].window then windows_after = windows_after + 1 end end
+check(#cockpit_shots - first_cockpit > 5 and windows_after == 0, "none once they're turned off")
+seconds(2)
+check(ini_text():find("window_seat = false", 1, true), "and that's saved")
+click("Window seat shots")
+set_mode("mixed")
 command("settings")
 
 -- 15. settings window
@@ -991,6 +1219,9 @@ for id, ps in pairs(per_shot) do
         id, ps.n, ps.ang, ps.dmin, ps.dmax, ps.zmax, ps.rollmax))
     check(ps.ang < 40, id .. " keeps the aircraft in frame")
 end
+local kinds = 0
+for _ in pairs(shots_seen) do kinds = kinds + 1 end
+check(kinds >= 3, "several kinds of shot (" .. kinds .. ")")
 for _, l in ipairs(logs) do if l:find("error") then print("log: " .. l) check(false, "no errors logged") end end
 print(string.format("%s: %d checks, %d failed", mode, checks, fails))
 os.exit(fails == 0 and 0 or 1)

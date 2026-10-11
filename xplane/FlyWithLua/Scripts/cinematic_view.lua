@@ -8,7 +8,9 @@
     flight path, or fixed to the airframe, and the pilot's view in the
     cockpit, with letterbox bars and fades. Shots suit what the aircraft is
     doing (runway-level shots on takeoff and landing, air-to-air in cruise),
-    and liftoff and touchdown get shots of their own.
+    and liftoff and touchdown get shots of their own. At sunrise and sunset
+    cameras line up with the low sun; at night they stay close; terrain never
+    hides the aircraft for long; in cloud the shots move into the cockpit.
 
     It can be switched on and off by hand, and it starts by itself after a
     while with no keyboard, mouse or joystick input (any input ends it again).
@@ -27,6 +29,7 @@
     Joystick, search for "cinematic"):
         FlyWithLua/cinematic_view/toggle       start/stop
         FlyWithLua/cinematic_view/next_shot    cut to the next shot
+        FlyWithLua/cinematic_view/hold         hold the shot / let it go on
         FlyWithLua/cinematic_view/toggle_afk   auto-start when away on/off
         FlyWithLua/cinematic_view/settings     show/hide the window
 
@@ -37,7 +40,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.5"
+local VERSION = "2.6"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -54,11 +57,13 @@ local DEFAULTS = {
     pan_pace = 0.5,               -- panning speed: how fast cameras turn (0.1 to 2)
     letterbox = true,             -- cinema bars top and bottom
     fades = true,                 -- dip to black between some shots
+    window_seat = true,           -- cockpit shots include a passenger's window seat
     manual_exit_on_input = false, -- any input also ends a cinematic you started yourself
     joystick_deadband = 0.03,     -- how far an axis must move to count as input
     -- keys, as "<virtual key> <modifiers> <name>" (modifiers: 1 shift, 2 ctrl, 4 alt); empty for none
     bind_toggle = "",
     bind_next_shot = "",
+    bind_hold = "",
     bind_toggle_afk = "",
     bind_settings = "",
     -- learned, not set: X-Plane's number for its chase view, so views can be
@@ -286,6 +291,9 @@ do
         vy = "sim/flightmodel/position/local_vy",
         vz = "sim/flightmodel/position/local_vz",
         agl = "sim/flightmodel/position/y_agl",
+        elev = "sim/flightmodel/position/elevation",
+        sun_pitch = "sim/graphics/scenery/sun_pitch_degrees",
+        sun_heading = "sim/graphics/scenery/sun_heading_degrees",
         paused = "sim/time/paused",
         frame_period = "sim/operation/misc/frame_rate_period",
         view_type = "sim/graphics/view/view_type",
@@ -377,6 +385,11 @@ local CV = {
     wheel_cmd = false,      -- X-Plane's zoom command the wheel is holding down,
     wheel_until = 0,        -- until then
     xp_zoom = false,        -- X-Plane has the zoom commands + and - run
+    hold = false,           -- the shot is held: it goes on until let go of
+    light = "day",          -- "day", "golden" (the sun low) or "night"
+    sun_h = 0, sun_p = 45,  -- the sun's heading (degrees true) and height
+    in_cloud = false,       -- the aircraft is inside a cloud layer
+    prefer_close = false,   -- terrain hid the last outside shot: a close one next
 }
 
 local function now()
@@ -474,6 +487,144 @@ local function above_ground(x, y, z, margin)
     local g = terrain_y(x, y, z)
     if g and y < g + margin then return g + margin end
     return y
+end
+
+-- Whether terrain hides a point from a camera: the ground, sampled along the
+-- line between them, rising above it. It's sampled every few metres close to
+-- the camera, where a rise in the ground hides the most (a camera standing
+-- on a hillside, or set down on a ridge), then evenly. (Terrain only:
+-- X-Plane's probe doesn't see buildings.)
+local NEAR_SAMPLES = { 0.5, 1, 1.5, 2.5, 4, 6, 9, 13, 19, 27, 38 } -- metres from the camera
+
+local function terrain_blocks(cx, cy, cz, tx, ty, tz)
+    if not XP.probe then return false end
+    local len = sqrt((tx - cx) ^ 2 + (ty - cy) ^ 2 + (tz - cz) ^ 2)
+    if len < 1 then return false end
+    local function hidden_at(k)
+        local y = cy + (ty - cy) * k
+        local g = terrain_y(cx + (tx - cx) * k, y, cz + (tz - cz) * k)
+        return g ~= nil and g > y
+    end
+    for _, m in ipairs(NEAR_SAMPLES) do
+        if m < len * 0.5 and hidden_at(m / len) then return true end
+    end
+    for i = 1, 23 do
+        if hidden_at(i / 24) then return true end
+    end
+    return false
+end
+
+-- What a camera has to see of the aircraft: its top.
+local function aircraft_top(c) return c.y + 0.1 * c.size + 1 end
+
+------------------------------------------------------------------------------
+-- Light: where the sun is. When it's low (golden hour), outside cameras often
+-- line up with it: across the aircraft looking towards the sun, so it stands
+-- against the light, or with the sun behind them, lighting it. At night, when
+-- all there is to see is what the aircraft's own lights show, shots stay close.
+------------------------------------------------------------------------------
+
+local GOLDEN_LOW, GOLDEN_HIGH = -6, 14 -- sun heights (degrees) for golden hour; night below
+
+-- "golden", "night" or "day", with the sun's heading (degrees true) and height.
+local function light()
+    if not (R.sun_pitch and R.sun_heading) then return "day", 0, 45 end
+    local h, p = gf(R.sun_heading), gf(R.sun_pitch)
+    if p < GOLDEN_LOW then return "night", h, p end
+    if p <= GOLDEN_HIGH then return "golden", h, p end
+    return "day", h, p
+end
+
+-- In golden hour, for most outside shots: where the camera goes for the
+-- light, as its bearing from the aircraft, and whether it looks into the sun.
+local function light_plan()
+    if CV.light ~= "golden" or math.random() > 0.65 then return nil end
+    if math.random() < 0.55 then return { bearing = CV.sun_h + 180, into_sun = true } end
+    return { bearing = CV.sun_h, into_sun = false }
+end
+
+-- Which side of the flight path (1 right, -1 left) a camera standing by it takes.
+local function light_side(c)
+    local plan = light_plan()
+    local right = plan and sin(rad(plan.bearing - c.track)) or 0
+    if abs(right) < 0.2 then return M.sign() end
+    return right > 0 and 1 or -1
+end
+
+------------------------------------------------------------------------------
+-- Cloud: outside shots in cloud show nothing but grey, so while the aircraft
+-- is inside a layer covering most of the sky, the shots move into the
+-- cockpit. The layers come from X-Plane's weather datarefs, from whichever of
+-- these sets this version of X-Plane has.
+------------------------------------------------------------------------------
+
+local CLOUD_SETS = {
+    -- bases, tops, cover (metres above sea level), and what full cover reads
+    { "sim/weather/aircraft/cloud_base_msl_m", "sim/weather/aircraft/cloud_tops_msl_m",
+        "sim/weather/aircraft/cloud_coverage_percent", 1 },
+    { "sim/weather/region/cloud_base_msl_m", "sim/weather/region/cloud_tops_msl_m",
+        "sim/weather/region/cloud_coverage_percent", 1 },
+    { "sim/weather/cloud_base_msl_m", "sim/weather/cloud_tops_msl_m", "sim/weather/cloud_coverage", 6 },
+}
+local CLOUD = { check_t = -100 }
+
+local function find_cloud_layers()
+    for _, set in ipairs(CLOUD_SETS) do
+        local b, t, c = XP.find(set[1]), XP.find(set[2]), XP.find(set[3])
+        if b and t and c then
+            CLOUD.base, CLOUD.tops, CLOUD.cover, CLOUD.full = b, t, c, set[4]
+            log("checks for cloud with " .. set[1]:gsub("_base_msl_m$", "_*"))
+            return
+        end
+    end
+    log("found no cloud layers to check, so outside shots don't avoid cloud")
+end
+
+-- Up to n values of a float array dataref, from index 0.
+local float_buf
+local function read_floats(ref, n)
+    local out = {}
+    if XP.lib then
+        float_buf = float_buf or XP.ffi.new("float[8]")
+        local got = XP.lib.XPLMGetDatavf(ref, float_buf, 0, n)
+        for i = 0, got - 1 do out[i] = float_buf[i] end
+    elseif XPLMGetDatavf then
+        local t = XPLMGetDatavf(ref, 0, n)
+        if t then for i = 0, n - 1 do out[i] = t[i] end end
+    end
+    return out
+end
+
+-- Whether the aircraft is inside a cloud layer covering most of the sky
+-- (broken or more; it flies in and out of scattered cloud).
+local function in_cloud_now()
+    local base, tops, cover = read_floats(CLOUD.base, 3), read_floats(CLOUD.tops, 3), read_floats(CLOUD.cover, 3)
+    local alt = gd(R.elev)
+    for i = 0, 2 do
+        local b, t, c = base[i], tops[i], cover[i]
+        if b and t and c then
+            c = c / CLOUD.full
+            if c > 1.5 then c = c / 100 end -- (a percentage after all)
+            if c >= 0.55 and t - b > 50 and alt > b + 20 and alt < t - 20 then return true end
+        end
+    end
+    return false
+end
+
+-- Each frame: in cloud once it has been inside for 2 s, out after 3 s clear.
+local function watch_cloud(t)
+    if not CLOUD.base or t - CLOUD.check_t < 0.5 then return end
+    CLOUD.check_t = t
+    local inside = in_cloud_now()
+    if inside == CV.in_cloud then
+        CLOUD.since = nil
+    else
+        CLOUD.since = CLOUD.since or t
+        if t - CLOUD.since >= (inside and 2 or 3) then
+            CV.in_cloud = inside
+            CLOUD.since = nil
+        end
+    end
 end
 
 ------------------------------------------------------------------------------
@@ -594,23 +745,46 @@ local ORBITING = {
         local S = c.size
         local phase = CV.phase or "cruise"
         local el = ELEVATION[phase]
+        local plan = not s.def.reveal and light_plan()
         s.f = M.rand(0.32, 0.62) -- how much of the picture's width the aircraft fills
         s.zoom = math.random() < LONG_LENS[phase] and M.rand(2.5, 6) or 1
+        if CV.light == "night" then
+            s.f, s.zoom = M.rand(0.5, 0.72), 1 -- close, where its own lights show it
+        end
         s.d0 = math.max(framing_distance(S, s.f) * s.zoom, clearance(c) + 3)
         s.az0 = s.def.reveal and (180 + M.rand(-40, 40)) or fresh_azimuth()
         s.el0 = M.rand(el[1], el[2])
-        if (phase == "cruise" or phase == "parked") and not s.def.reveal and math.random() < 0.12 then
+        if (phase == "cruise" or phase == "parked") and not s.def.reveal and not plan and math.random() < 0.12 then
             s.el0 = M.rand(50, 72) -- now and then from high above
+        end
+        -- lined up with the low sun: looking into it, the camera's height puts
+        -- the sun a little above the aircraft, inside the letterbox; with the
+        -- sun behind it, not from high up
+        if plan and plan.into_sun then
+            local vt = deg(math.atan(fov_tan() / 2.39 / s.zoom)) -- half the picture's height
+            s.el0 = M.clamp(M.rand(0.1, 0.5) * vt - CV.sun_p, el[1], 30)
+        elseif plan then
+            s.el0 = M.clamp(s.el0, el[1], 25)
         end
         -- the movement this shot has, shared between going round, up or down,
         -- and in or out
         local B = MOTION_RATE * s.pace * s.duration / s.zoom
         local wa, we, wd = math.random(), math.random() * 0.6, math.random() * 0.5
         if s.def.reveal then wa, we, wd = 1, 0.15, 0.1 end
+        if plan then wa, we, wd = 0.25, 0.1, 1 end -- mostly in or out, so the light stays put
         local sum = wa + we + wd
         s.daz = M.sign() * B * wa / sum
         s.del = M.clamp(s.el0 + M.sign() * B * we / sum, math.min(el[1], s.el0), 75) - s.el0
         s.kd = math.exp(M.sign() * (B * wd / sum) / 50)
+        if plan then
+            -- round to the light, halfway through the shot: into the sun, it
+            -- sits beside the aircraft, within the picture
+            local ht = deg(math.atan(fov_tan() / s.zoom)) -- half the picture's width
+            local off = plan.into_sun and M.rand(0.15, 0.5) * ht or M.rand(10, 45)
+            s.az0 = M.wrap180(c.track + 180 - plan.bearing - M.sign() * off) - s.daz / 2
+            if plan.into_sun then s.del = 0 end
+            s.light = plan.into_sun and "into_sun" or "lit"
+        end
         s.tau = M.rand(0.4, 1.8) -- how much it lags the aircraft's turns
         s.behind = abs(M.wrap180(s.az0)) < 50 and s.zoom == 1
         s.bank = s.behind and M.rand(0, 0.25) or 0
@@ -643,6 +817,12 @@ local ORBITING = {
 -- The opening shot: from ahead, swinging round.
 local REVEAL = setmetatable({ reveal = true }, { __index = ORBITING })
 
+-- When no spot by the flight path can see past the terrain: an orbiting shot.
+local function orbit_instead(s, c)
+    s.def = ORBITING
+    ORBITING.init(s, c)
+end
+
 -- The fastest a camera at (px, py, pz) turns to follow the aircraft over the
 -- next t seconds, in degrees a second.
 local function peak_turn(c, px, py, pz, t)
@@ -657,26 +837,52 @@ local function peak_turn(c, px, py, pz, t)
     return peak
 end
 
+-- Whether a camera at the planned spot sees the aircraft over the terrain at
+-- the start, the middle and the end of the shot.
+local function trackside_sees(s, c)
+    local below = c.y - c.agl -- (the ground under the aircraft now)
+    for i = 0, 3 do
+        local t = s.duration * i / 3
+        -- where it will be, not underground: it flares rather than flying into the runway
+        local ax, az = c.x + c.vx * t, c.z + c.vz * t
+        local ay = math.max(c.y + c.vy * t, below + 0.3 * c.size) + 0.1 * c.size + 1
+        local g = terrain_y(s.px, c.y, s.pz) or below
+        local py = s.ground and g + s.height or math.max(s.py, g + 1)
+        if terrain_blocks(s.px, py, s.pz, ax, ay, az) then return false end
+    end
+    return true
+end
+
 -- Stands the camera beside where the aircraft will be in T seconds, lat
 -- metres to the right of its track (left if negative) and ahead metres along
 -- it, on the ground or at its height; then moves it further out until it
--- never has to turn faster than the pan limit.
+-- never has to turn faster than the pan limit. If terrain would hide the
+-- aircraft from there it tries the other side, then (a camera that was to
+-- stand on the ground) in the air; false if it can't see it from anywhere.
 local function plan_trackside(s, c, T, lat, ahead, ground)
     local tr = rad(c.track)
     local fx, fz, rx, rz = sin(tr), -cos(tr), cos(tr), sin(tr)
     local side = lat < 0 and -1 or 1
-    lat = M.clamp(abs(lat), clearance(c) + 10, 700)
-    s.ground = ground
+    local lat0 = M.clamp(abs(lat), clearance(c) + 10, 700)
     s.height = s.height or M.rand(1.2, 3.0)
     local rise = M.rand(-0.3, 0.6) * c.size
-    for _ = 1, 12 do
-        s.px = c.x + c.vx * T + rx * lat * side + fx * ahead
-        s.pz = c.z + c.vz * T + rz * lat * side + fz * ahead
-        s.py = not ground and (c.y + c.vy * T + rise) or nil
-        local py = s.py or (c.y - c.agl + s.height)
-        if lat >= 700 or peak_turn(c, s.px, py, s.pz, s.duration) <= s.pan_cap then break end
-        lat = math.min(700, lat * 1.3)
+    local tries = { { side, ground }, { -side, ground } }
+    if ground then tries[3], tries[4] = { side, false }, { -side, false } end
+    for _, try in ipairs(tries) do
+        local sd, gnd = try[1], try[2]
+        s.ground = gnd
+        lat = lat0
+        for _ = 1, 12 do
+            s.px = c.x + c.vx * T + rx * lat * sd + fx * ahead
+            s.pz = c.z + c.vz * T + rz * lat * sd + fz * ahead
+            s.py = not gnd and (c.y + c.vy * T + rise) or nil
+            local py = s.py or (c.y - c.agl + s.height)
+            if lat >= 700 or peak_turn(c, s.px, py, s.pz, s.duration) <= s.pan_cap then break end
+            lat = math.min(700, lat * 1.3)
+        end
+        if trackside_sees(s, c) then return true end
     end
+    return false
 end
 
 -- Trackside cameras follow the aircraft and zoom to keep it a similar size,
@@ -732,7 +938,7 @@ local TRACKSIDE = {
             lat = M.rand(0.5, 1.0) * v
             s.duration = M.rand(5, 8)
         end
-        plan_trackside(s, c, T, M.sign() * lat, 0, ground)
+        if not plan_trackside(s, c, T, light_side(c) * lat, 0, ground) then return orbit_instead(s, c) end
         s.dutch = maybe_dutch(0.35, 4)
     end,
     update = trackside_update,
@@ -790,8 +996,8 @@ local EVENT_SHOTS = {
             s.pan_cap = pan_cap(s)
             s.f = M.rand(0.3, 0.5)
             s.height = M.rand(1.0, 1.8)
-            plan_trackside(s, c, T, M.sign() * math.max(c.gs, 1) / rad(s.pan_cap),
-                0.3 * c.size + 15 + c.gs * 1.5, true)
+            if not plan_trackside(s, c, T, light_side(c) * math.max(c.gs, 1) / rad(s.pan_cap),
+                0.3 * c.size + 15 + c.gs * 1.5, true) then return orbit_instead(s, c) end
             s.dutch = maybe_dutch(0.5, 3)
         end,
         update = trackside_update,
@@ -804,7 +1010,9 @@ local EVENT_SHOTS = {
             s.pan_cap = pan_cap(s)
             s.f = M.rand(0.3, 0.5)
             s.height = M.rand(0.8, 1.5)
-            plan_trackside(s, c, 0.6, M.sign() * math.max(c.gs, 1) / rad(s.pan_cap), 0, true)
+            if not plan_trackside(s, c, 0.6, light_side(c) * math.max(c.gs, 1) / rad(s.pan_cap), 0, true) then
+                return orbit_instead(s, c)
+            end
             s.dutch = maybe_dutch(0.5, 3)
         end,
         update = trackside_update,
@@ -829,7 +1037,18 @@ local COCKPIT = {
         local side = e.seat ~= 0 and e.seat or M.sign() -- the pilot's side: -1 left
         s.dx, s.dy, s.dz = 0, 0, 0
         local r = math.random()
-        if r < 0.3 then
+        if settings.window_seat and math.random() < 0.18 then
+            -- a passenger's window seat a little behind the wing's leading
+            -- edge, looking out at the wing (where the cabin would be for an
+            -- aircraft this size: not every aircraft models one)
+            local S = CV.size
+            local out = M.sign()
+            s.dx = out * math.max(0.05 * S - 0.4, 0.3) - e.x
+            s.dy = -0.1
+            s.dz = 0.06 * S - e.z
+            s.psi0, s.the = out * M.rand(70, 115), M.rand(-14, -4)
+            s.window = true
+        elseif r < 0.3 then
             -- forward through the windscreen
             s.psi0, s.the = M.rand(-15, 15), M.rand(-8, -2)
         elseif r < 0.5 then
@@ -1022,6 +1241,17 @@ local function camera_func(pos, losing)
         s.inited = true
     end
     s.def.update(s, c, t_now - s.t0, cam_out)
+    -- terrain in the way: once it has hidden the aircraft for a moment, the
+    -- shot is cut short (in the tick)
+    if t_now - (s.view_t or -1) >= 0.2 then
+        s.view_t = t_now
+        if terrain_blocks(cam_out.x, cam_out.y, cam_out.z, c.x, aircraft_top(c), c.z) then
+            s.hidden_t = s.hidden_t or t_now
+            if t_now - s.hidden_t >= 0.6 then s.hidden = true end
+        else
+            s.hidden_t = nil
+        end
+    end
     pos.x, pos.y, pos.z = cam_out.x, cam_out.y, cam_out.z
     pos.heading, pos.pitch, pos.roll = cam_out.heading, cam_out.pitch, cam_out.roll
     update_zoom(c.dt)
@@ -1116,13 +1346,20 @@ local function pick_from(pool, cond)
     return candidates[#candidates]
 end
 
+-- At night: fewer distant trackside shots, more close mounted ones.
+local NIGHT_MIX = { 1, 0.3, 2.5 }
+
 -- Which kind of outside shot to generate next.
 local function pick_outside(cond)
     if not XP.camera_ok then return pick_from(BUILTIN_SHOTS, cond) end
+    if CV.prefer_close then
+        CV.prefer_close = false
+        return MOUNTED -- terrain hid the last one: a camera close to the aircraft
+    end
     local mix = OUTSIDE_MIX[cond.phase]
     local weights, total = {}, 0
     for i, def in ipairs(GENERATED) do
-        local w = mix[i]
+        local w = mix[i] * (CV.light == "night" and NIGHT_MIX[i] or 1)
         if def.min_gs and (cond.paused or cond.gs < def.min_gs) then w = 0 end
         if CV.recent[1] == def.id and CV.recent[2] == def.id then w = 0 end -- not three in a row
         weights[i] = w
@@ -1140,6 +1377,7 @@ end
 local function pick_shot()
     if not CV.eye then CV.eye = find_eye() end
     local cond = conditions()
+    if CV.in_cloud then return COCKPIT end -- nothing to see outside
     if CV.first_shot then
         CV.first_shot = false
         if XP.camera_ok and settings.mode ~= "cockpit" then return REVEAL end -- open with a reveal
@@ -1341,6 +1579,8 @@ local function start(reason)
     CV.shot = nil
     CV.first_shot = true
     CV.input_flag = false
+    CV.hold = false
+    CV.prefer_close = false
     zoom_end()
     CV.user_zoom, CV.zoom_target, CV.zoom_from = 1, 1, 1
     next_shot(true)
@@ -1354,6 +1594,7 @@ local function stop(reason)
     CV.shot = nil
     CV.settle = 0
     CV.expected_view = nil
+    CV.hold = false
     zoom_end()
     wheel_xp_end()
     release_camera()
@@ -1507,6 +1748,7 @@ end
 local function watch_flight(t)
     local cond = conditions()
     CV.phase = cond.phase
+    CV.light, CV.sun_h, CV.sun_p = light()
     if cond.onground then
         if CV.was_on_ground ~= true then CV.ground_since = t end
     elseif cond.agl > 150 then
@@ -1521,7 +1763,7 @@ local function watch_flight(t)
     CV.was_on_ground = cond.onground
     CV.last_vy = cond.vy
     if event and CV.active and XP.camera_ok and settings.mode ~= "cockpit" and not cond.paused
-        and not (CV.shot and CV.shot.def.event) then
+        and not CV.hold and not CV.in_cloud and not (CV.shot and CV.shot.def.event) then
         if event == EVENT_SHOTS.touchdown then CV.landing_shown = true end
         cut_to(event)
     end
@@ -1587,6 +1829,7 @@ local function tick()
         CV.afk_armed = true
     end
     local cond = watch_flight(t)
+    watch_cloud(t)
     check_taken_keys(t)
     if CV.wheel_cmd and (t >= CV.wheel_until or not CV.active or outside_shot()) then wheel_xp_end() end
 
@@ -1650,10 +1893,22 @@ local function tick()
             end
         end
 
+        -- the next shot: when this one is over, or sooner if terrain hides the
+        -- aircraft or it's flown into cloud; a held shot goes on regardless
         local s = CV.shot
         if s then
             if s.def.kind == "cockpit" then update_cockpit_shot(s, t - s.t0) end
-            if not CV.trans and t - s.t0 >= s.duration then next_shot(false) end
+            if not CV.trans and not CV.hold then
+                if s.hidden then
+                    CV.prefer_close = true
+                    local def = pick_shot()
+                    if def then cut_to(def) end -- (no fade: there's nothing to see)
+                elseif CV.in_cloud and s.def.kind ~= "cockpit" then
+                    next_shot(true)
+                elseif t - s.t0 >= s.duration then
+                    next_shot(false)
+                end
+            end
         end
     elseif settings.afk_enabled and CV.afk_armed and t - CV.last_input >= settings.afk_timeout then
         local paused = gi(R.paused, 0) ~= 0
@@ -1769,11 +2024,22 @@ local function toggle_afk()
         or "Cinematic view won't start by itself")
 end
 
+-- Next shot, asked for: lets go of a held shot too.
+local function user_next_shot()
+    if not CV.active then return end
+    CV.hold = false
+    next_shot(false)
+end
+
+local function hold_shot()
+    if CV.active then CV.hold = not CV.hold end
+end
+
 -- id: the X-Plane command (FlyWithLua/cinematic_view/<id>) and the ini key (bind_<id>)
 local ACTIONS = {
     { id = "toggle", label = "Start / stop", desc = "start/stop", press = toggle_cinematic },
-    { id = "next_shot", label = "Next shot", desc = "cut to the next shot",
-        press = function() if CV.active then next_shot(false) end end },
+    { id = "next_shot", label = "Next shot", desc = "cut to the next shot", press = user_next_shot },
+    { id = "hold", label = "Hold shot", desc = "hold the shot / let it go on", press = hold_shot },
     { id = "toggle_afk", label = "Auto-start on/off", desc = "auto-start when away on/off", press = toggle_afk },
     { id = "settings", label = "This window", desc = "show/hide the settings window", press = toggle_settings },
 }
@@ -2060,7 +2326,8 @@ end
 local function status_parts()
     if CV.disabled then return "Switched off after errors", "see X-Plane's Log.txt", UI.red, 0 end
     if CV.active then
-        return "Running", CV.reason == "afk" and "you were away" or "started by you", UI.red, 1
+        return "Running", CV.hold and "holding this shot" or (CV.reason == "afk" and "you were away" or "started by you"),
+            UI.red, 1
     end
     if not settings.afk_enabled then return "Ready", "auto-start is off", UI.muted, 0 end
     if vr_on() then return "Ready", "not available in VR", UI.muted, 0 end
@@ -2090,7 +2357,8 @@ local function header()
     imgui.Spacing()
 
     local avail = imgui.GetContentRegionAvail()
-    local big = math.floor((avail - 8) * 0.62)
+    local big = math.floor((avail - 16) * 0.46)
+    local small = math.floor((avail - 16 - big) / 2)
     n = CV.active and push_button(UI.red, UI.red_hi) or push_button(UI.amber, UI.amber_hi)
     if imgui.Button((CV.active and "Stop" or "Start cinematic") .. "##startstop", big, 34) then
         if CV.active then stop("manual") else start("manual") end
@@ -2098,7 +2366,11 @@ local function header()
     imgui.PopStyleColor(n)
     imgui.SameLine()
     imgui.BeginDisabled(not CV.active)
-    if imgui.Button("Next shot", avail - big - 8, 34) then next_shot(false) end
+    if imgui.Button("Next shot", small, 34) then user_next_shot() end
+    imgui.SameLine()
+    n = CV.hold and push_button(UI.amber, UI.amber_hi) or 0
+    if imgui.Button((CV.hold and "Holding" or "Hold shot") .. "##hold", avail - big - small - 16, 34) then hold_shot() end
+    imgui.PopStyleColor(n)
     imgui.EndDisabled()
 
     local w = (avail - 8) / 3
@@ -2108,6 +2380,7 @@ local function header()
         if imgui.Button(MODE_SHORT[mode] .. "##mode", w, 26) and settings.mode ~= mode then
             settings.mode = mode
             mark_dirty()
+            CV.hold = false
             if CV.active then next_shot(true) end
         end
         imgui.PopStyleColor(k)
@@ -2169,6 +2442,9 @@ local function tab_shots()
         mark_dirty()
     end
     note("Shots are quicker on takeoff and landing, and longer in cruise.")
+    imgui.Spacing()
+    checkbox("Window seat shots", "window_seat")
+    muted_text("From a passenger window, looking out at the wing. Turn them off for aircraft without a cabin.", true)
 end
 
 local function tab_auto()
@@ -2321,6 +2597,8 @@ math.random(); math.random()
 load_settings()
 pcall(joystick_setup)
 if not pcall(find_zoom_commands) then CV.xp_zoom = false end
+pcall(find_cloud_layers)
+if not (R.sun_pitch and R.sun_heading) then log("found no sun position, so shots don't follow the light") end
 if not pcall(find_focus_settings) then
     log("couldn't list X-Plane's datarefs to find its focus setting")
 end

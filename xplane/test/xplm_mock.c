@@ -14,6 +14,8 @@ static int cam_duration = 0;
 static float ground_y = 0;
 static float axes[500];
 static int buttons[3200];
+static float cloud_base[3], cloud_tops[3], cloud_cover[3];
+static float wall_z0, wall_z1, wall_h; // a ridge along x, between two z lines
 
 static DR *add(const char *name, int type) { DR *d = &drs[ndrs++]; memset(d, 0, sizeof *d); strncpy(d->name, name, 127); d->type = type; return d; }
 
@@ -26,7 +28,8 @@ static void init(void) {
         "sim/graphics/view/pilots_head_x","sim/graphics/view/pilots_head_y","sim/graphics/view/pilots_head_z",
         "sim/graphics/view/pilots_head_psi","sim/graphics/view/pilots_head_the","sim/graphics/view/pilots_head_phi",
         "sim/aircraft/view/acf_peX","sim/aircraft/view/acf_peY","sim/aircraft/view/acf_peZ",
-        "sim/aircraft/weight/acf_m_max","sim/flightmodel/forces/g_nrml",0};   // acf_size_x/z deliberately missing
+        "sim/aircraft/weight/acf_m_max","sim/flightmodel/forces/g_nrml",
+        "sim/graphics/scenery/sun_pitch_degrees","sim/graphics/scenery/sun_heading_degrees",0};   // acf_size_x/z deliberately missing
     const char *ints[] = {"sim/time/paused","sim/graphics/view/view_type","sim/graphics/VR/enabled",
         "sim/flightmodel/failures/onground_any",0};
     for (int i = 0; dbl[i]; i++) add(dbl[i], 4);
@@ -38,6 +41,10 @@ static void init(void) {
     add("mock/camera/dof_enabled", 1)->readonly = 1;
     DR *a = add("sim/joystick/joystick_axis_values", 8); a->vf = axes; a->n = 500;
     DR *b = add("sim/joystick/joystick_button_values", 16); b->vi = buttons; b->n = 3200;
+    // X-Plane 12's weather at the aircraft: three cloud layers
+    DR *cb = add("sim/weather/aircraft/cloud_base_msl_m", 8); cb->vf = cloud_base; cb->n = 3;
+    DR *ct = add("sim/weather/aircraft/cloud_tops_msl_m", 8); ct->vf = cloud_tops; ct->n = 3;
+    DR *cc = add("sim/weather/aircraft/cloud_coverage_percent", 8); cc->vf = cloud_cover; cc->n = 3;
 }
 
 static int cmd_dummy;
@@ -63,7 +70,7 @@ typedef struct { int structSize; float locationX, locationY, locationZ, normalX,
 static int probe_dummy;
 void *XPLMCreateProbe(int t) { return &probe_dummy; }
 void XPLMDestroyProbe(void *p) {}
-int XPLMProbeTerrainXYZ(void *p, float x, float y, float z, probe_t *out) { if (out->structSize != sizeof(probe_t)) return 1; out->locationX = x; out->locationY = ground_y; out->locationZ = z; return 0; }
+int XPLMProbeTerrainXYZ(void *p, float x, float y, float z, probe_t *out) { if (out->structSize != sizeof(probe_t)) return 1; out->locationX = x; out->locationY = ground_y + ((z > wall_z0 && z < wall_z1) ? wall_h : 0); out->locationZ = z; return 0; }
 
 // test helpers
 void mock_set_time(float t) { elapsed = t; }
@@ -72,5 +79,7 @@ int mock_camera_duration(void) { return cam_duration; }
 typedef struct { float x, y, z, pitch, heading, roll, zoom; } cam_t;
 int mock_call_camera(cam_t *pos, int losing) { if (!cam_cb) return -1; int r = cam_cb(pos, losing, cam_refcon); if (!r) { cam_cb = 0; } return r; }
 void mock_set_ground(float g) { ground_y = g; }
+void mock_set_wall(float z0, float z1, float h) { wall_z0 = z0; wall_z1 = z1; wall_h = h; }
+void mock_set_cloud(int i, float base, float tops, float cover) { cloud_base[i] = base; cloud_tops[i] = tops; cloud_cover[i] = cover; }
 void mock_set_axis(int i, float v) { axes[i] = v; }
 void mock_set_button(int i, int v) { buttons[i] = v; }
