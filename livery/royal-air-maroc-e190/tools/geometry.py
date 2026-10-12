@@ -50,11 +50,13 @@ B2 = [APEX, (960, 477.5), (1000, 490.5), (1040, 505.5), (1080, 520),
       (1320, 644), (1360, 665), (1420, 696)]
 # The light green reaches the crown until the thin white stripe takes over.
 B4 = [(1018, 462), (1030, 476), (1040, 482.5)]
-# B5: front/lower edge of the red, which runs flat back to the tail.
+# B5: front/lower edge of the red. Behind the rear door it runs flat back
+# over a white belly strip that tapers out under the tail cone at ~1735;
+# from there the red wraps the whole cone back to the APU (both photos).
 B5 = [(1062, 466), (1080, 485), (1160, 510), (1240, 532), (1280, 546),
       (1320, 568.5), (1360, 580), (1400, 591), (1440, 601), (1480, 609),
-      (1520, 614), (1560, 618), (1600, 620), (1640, 621), (1680, 620),
-      (1720, 617), (1760, 610), (1800, 601), (1840, 590), (1880, 580)]
+      (1520, 614), (1560, 618), (1600, 620), (1640, 621.5), (1680, 622.5),
+      (1710, 623.5), (1735, 626)]
 # White fin over the red: the curve from the fin root up to the trailing edge.
 FIN_RED = [(1410, 504), (1440, 509), (1480, 514), (1520, 521), (1560, 527),
            (1600, 533), (1640, 537), (1660, 533), (1680, 524), (1700, 515),
@@ -86,10 +88,11 @@ COCKPIT = [[(102, 463), (128, 447), (166, 435), (178, 435), (161, 458)],
 # Titles and marks: centre, width (photo px, unrotated), slope in degrees.
 TITLE_EN = dict(center=(555, 507), width=262, angle=4.2)
 TITLE_AR = dict(center=(597, 452), width=348, height=41, angle=3.8)
-REG = dict(center=(1547, 569), width=72, angle=4.0)
+REG = dict(center=(1547, 569), width=68, angle=4.0)
 # Tail logo canvas (4096 px) is centred here, at this many photo px across.
 LOGO = dict(center=(1727.5, 396.5), size=182.5)
-FLAG = (246, 431, 262, 442)
+# The flag's red field, about half the width of the L1 door behind it.
+FLAG = (252.5, 432.5, 276.5, 445.5)
 
 
 def catmull_rom(pts, samples=24):

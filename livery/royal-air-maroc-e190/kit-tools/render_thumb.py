@@ -25,7 +25,20 @@ mask4 = np.asarray(Image.open('layers/fus__paintmask.png')) > 127
 tex = np.asarray(Image.open(fus_png).convert('RGB').resize((4096, 4096), Image.BOX))
 V4 = np.arange(4096) + 0.5
 U4 = np.arange(4096) + 0.5
-vv, uu = np.nonzero(mask4 & np.isfinite(th))
+# On the tail cone the angle map is followed from mesh line to mesh line: it
+# steps where the lines' spacing changes and lies flat across the darts. For
+# the picture, ramp the steps (a short mask-normalised blur down each column)
+# and leave out the flat dart rows, so no gaps or smears show.
+from scipy import ndimage
+ok = mask4 & np.isfinite(th)
+cone = np.zeros_like(ok); cone[int(F.SPLIT_V):, 1890:] = True
+w8 = ok.astype(np.float32)
+th0 = np.where(ok, th, 0).astype(np.float32)
+ths = ndimage.uniform_filter1d(th0, 25, axis=0) / np.maximum(ndimage.uniform_filter1d(w8, 25, axis=0), 1e-6)
+flat = cone & ok & (ndimage.uniform_filter1d(np.abs(np.gradient(th0, axis=0)), 5, axis=0) < 4e-4)
+flat = ndimage.binary_dilation(flat, np.ones((7, 1), bool))
+th = np.where(cone & ok, ths, th)
+vv, uu = np.nonzero(ok & ~flat)
 aft = V4[vv] >= F.SPLIT_V
 x = np.where(aft, F.u_to_x(U4[uu], True), F.u_to_x(U4[uu], False))
 right = np.where(aft, V4[vv] > F.AX_A, V4[vv] > F.AX_F)
@@ -117,8 +130,9 @@ vis = two_sided | ((NR @ cam) > -0.02)
 P, C, d, px, py = P[vis], C[vis], d[vis], px[vis], py[vis]
 order = np.argsort(d)
 img = np.zeros((H, W * S, 4), np.uint8)
-for dx in (0, 1):
-    for dy in (0, 1):
+# 3x3 splats: on the tail cone some texel rows land ~2.7 px apart
+for dx in (-1, 0, 1):
+    for dy in (-1, 0, 1):
         iy, ix = np.clip(py[order] + dy, 0, H - 1), np.clip(px[order] + dx, 0, W * S - 1)
         img[iy, ix, :3] = C[order]
         img[iy, ix, 3] = 255

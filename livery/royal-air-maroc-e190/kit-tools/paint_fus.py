@@ -6,7 +6,7 @@ usage: paint_fus.py <livery tools dir> <fonts dir> <out dir>
 import math, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from scipy import ndimage
 from scipy.interpolate import splprep, splev
 
@@ -129,7 +129,7 @@ def edge_mixed(pts, key, after=None):
 E_B1 = edge_mixed(G.B1, 'B1', after=math.pi)
 E_B2 = edge_mixed(G.B2, 'B2', after=math.pi)
 E_B3 = edge_mixed(G.B3, 'B3', after=math.pi)
-E_B5 = edge_mixed(G.B5, 'B5')
+E_B5 = edge_mixed(G.B5, 'B5', after=math.pi)   # red wraps the tail cone to the APU
 # Belly line: the green stops above a white belly (first E190 photo; the same
 # scheme from under a 737). Traced off the photo like the other edges; the
 # dark green runs out to a point where it meets the pinstripe at ~1555.
@@ -313,14 +313,39 @@ def put(art, u_c, v_c, tw, th_, rot180):
     print('put', (x0, y0, a.width, a.height), 'rot' if rot180 else '')
 
 
-def stamp(art, cx, cy, w, ax_v, aspect=None, top=None, bottom=None, sides='LR'):
-    """Centred on photo (cx, cy) on the left side, keeping its proportions;
-    mirrored onto the right side rotated 180."""
+# The texture isn't square on the skin: per metre it holds a little fewer
+# texels round the fuselage than along it. Measured on the two doors, whose
+# outlines the kit bakes in at their true shape, against photo 1 (its camera
+# model puts both doors on their mesh angles; its length is foreshortened to
+# 0.935 of the height, from the E190's 36.24 m by 3.35 m):
+#   L1 door  45 x 103 px, 81 deg of girth -> 0.375 wide on the skin;
+#            187 x 450 texels -> 0.416: ratio 0.90
+#   aft door 42 x  99 px, 83 deg of girth -> 0.394; 160 x 400 texels -> 0.400:
+#            ratio 0.985
+# (the barrel from the jet's dimensions alone: 0.92). The marks are sized on
+# the skin with this ratio so they keep their real proportions.
+SKIN_X, SKIN_K = (304.5, 1477.0), (0.90, 0.985)
+
+
+def skin_ratio(cx, cy):
+    """Texels per metre round the fuselage over texels per metre along it,
+    at a left-side photo point."""
+    return float(np.interp(cx, SKIN_X, SKIN_K))
+
+
+def stamp(art, cx, cy, w, ax_v, aspect=None, top=None, bottom=None, sides='LR', skin=False):
+    """Centred on photo (cx, cy) on the left side, keeping its proportions
+    (on the skin with skin=True, else in texels); mirrored onto the right
+    side rotated 180."""
     u0, _ = to_tex(cx - w / 2, cy)
     u1, _ = to_tex(cx + w / 2, cy)
     uc, vc = to_tex(cx, cy)
     tw = u1 - u0
     th_ = tw / (aspect or art.width / art.height)
+    if skin:
+        k = skin_ratio(cx, cy)
+        th_ *= k
+        print(f'skin ratio at ({cx:.0f}, {cy:.0f}): {k:.3f}')
     if top is not None:
         vc = top + th_ / 2
     if bottom is not None:
@@ -329,12 +354,46 @@ def stamp(art, cx, cy, w, ax_v, aspect=None, top=None, bottom=None, sides='LR'):
         put(art, uc, vc, tw, th_, False)
     if 'R' in sides:
         put(art, uc, 2 * ax_v * 2 - vc, tw, th_, True)
+    return tw, th_
 
 
 en = E.words_layer(['Royal', 'Air', 'Maroc'], f'{FONTS}/outfit-latin-600-normal.woff', 600, G.RED)
 # the airline's own Arabic logotype, traced from the photo (kit-tools/trace_ar.py)
 ar_ = Image.open(f'{FONTS}/../artwork/ram_title_ar_logotype.png').convert('RGBA')
-reg = E.text_layer('CN-RGO', f'{FONTS}/outfit-latin-600-normal.woff', 300, REG_BLACK, pad=0)
+
+
+def reg_layer(text, font_path, px, fill, tracking=0.03, dash=0.40, ss=4):
+    """Registration as painted on the jet: a DIN-like face, slightly letter-
+    spaced, with a long thin dash about a letter wide. Cropped to the ink."""
+    font = ImageFont.truetype(font_path, px * ss)
+    probe = ImageDraw.Draw(Image.new('L', (1, 1)))
+    _, cap_top, _, base = probe.textbbox((0, 0), 'H', font=font)
+    bar = 0.12 * (base - cap_top)
+    W = int(sum(font.getlength(c) for c in text) + len(text) * (tracking + dash) * px * ss) + 4 * px
+    img = Image.new('L', (W, int(px * ss * 1.6)), 0)
+    d = ImageDraw.Draw(img)
+    x = px * ss * 0.2
+    for i, ch in enumerate(text):
+        if ch == '-':
+            mid = (cap_top + base) / 2
+            d.rectangle([x, mid - bar / 2, x + dash * px * ss, mid + bar / 2], fill=255)
+            x += dash * px * ss
+        else:
+            bb = probe.textbbox((0, 0), ch, font=font)
+            d.text((x - bb[0], 0), ch, font=font, fill=255)
+            x += bb[2] - bb[0]
+        if i < len(text) - 1:
+            x += tracking * px * ss
+    ys, xs = np.nonzero(np.asarray(img) > 8)
+    img = img.crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
+    img = img.resize((img.width // ss, img.height // ss), Image.LANCZOS)
+    out = Image.new('RGBA', img.size, tuple(fill) + (0,))
+    out.putalpha(img)
+    return out
+
+
+reg = reg_layer('CN-RGO', f'{FONTS}/barlow-latin-500-normal.woff', 300, REG_BLACK)
+print('registration natural aspect %.2f' % (reg.width / reg.height))
 emb = E.text_layer('EMBRAER 190', f'{FONTS}/outfit-latin-600-normal.woff', 200, (30, 30, 30), pad=0)
 
 # forward window row, 8K: left V 378 +/- 36, right V 1616 +/- 36 (crown side is +)
@@ -358,9 +417,9 @@ ar_h = ar_w * ar_.height / ar_.width
 put(ar_, ar_u0 + ar_u1, WR_BELLY8 - 65 - ar_h / 2, ar_w, ar_h, True)
 
 rx, ry = G.REG['center']
-stamp(reg, rx, ry, G.REG['width'], AX_A)
+stamp(reg, rx, ry, G.REG['width'], AX_A, aspect=4.9, skin=True)   # 4.9:1 on the jet
 ec = G.EMBRAER_190['center']
-stamp(emb, ec[0], ec[1], G.EMBRAER_190['width'], AX_F)
+stamp(emb, ec[0], ec[1], G.EMBRAER_190['width'], AX_F, skin=True)
 
 # Moroccan flag: red field, green interlaced star
 fw = 600
@@ -369,7 +428,12 @@ star = E.woven_star(flag.size, fw / 2, flag.height / 2 + 6, flag.height * 0.36,
                     flag.height * 0.36 * 0.14, flag.height * 0.36 * 0.04)
 flag.paste(Image.new('RGBA', flag.size, (0, 98, 51, 255)), mask=star)
 fx0, fy0, fx1, fy1 = G.FLAG
-stamp(flag, (fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, AX_F)
+fw8, fh8 = stamp(flag, (fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, AX_F, sides='L', skin=True)  # 3:2 on the jet
+# Right side: not a mirror of the left. There the flag sits just ahead of the
+# smaller service door (4K: U 803-959, top edge V 1709.5), level with its top
+# and a third of a door width in front of it (eye-level photo of that side).
+R1_FWD, R1_TOP, R1_W = 803.0, 1709.5, 156.0
+put(flag, 2 * (R1_FWD - 0.32 * R1_W) - fw8 / 2, 2 * R1_TOP - fh8 / 2, fw8, fh8, True)
 
 paint[~mask8] = 1.0
 np.save(f'{OUT}/fus_paint8.npy', paint.astype(np.float16))

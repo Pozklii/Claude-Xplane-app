@@ -43,4 +43,5 @@ fuselage comes from the model's own lengthwise mesh lines, followed through
 the kit's wireframe (`stringers.py`); each fin side uses a five-point
 piecewise-affine map. `dump.py` and `tree.py` inspect a PSD's layers.
 
-Fonts: Outfit and Aref Ruqaa, both SIL Open Font License (see `fonts/`).
+Fonts: Outfit, Barlow (the registration) and Aref Ruqaa, all SIL Open Font
+License (see `fonts/`).
