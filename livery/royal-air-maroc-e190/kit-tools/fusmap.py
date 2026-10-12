@@ -101,20 +101,10 @@ def build_theta(mask_path='layers/fus__paintmask.png'):
     th_r = np.clip(np.pi * (2 * AX_A - V4[ar] - CROWN_A) / (AX_A - CROWN_A), 0, np.pi)
     theta[np.ix_(al, lin_cols)] = th_l[:, None]
     theta[np.ix_(ar, lin_cols)] = th_r[:, None]
-    # ...then the model's own mesh: lengthwise mesh lines followed through the
-    # tail-cone darts give the angle directly (see stringers.py), so seams
-    # match on both sides and cut-outs or stray mask areas don't bend it.
-    import os, pickle
+    # ...then the tail cone, strip by strip between the model's seams (the
+    # dart edges, followed down the mask from each tip; see stringers.py).
     import stringers as S
-    here = os.path.dirname(os.path.abspath(__file__))
-    cache = 'layers/stringer_tracks.pkl'
-    if os.path.exists(cache):
-        tracks = pickle.load(open(cache, 'rb'))
-    else:
-        L, H = S.line_masks('layers/fus__WIREFRAME_E190.png')
-        tracks = S.track(H, mask4)
-        pickle.dump(tracks, open(cache, 'wb'))
-    phi = S.phi_map(tracks, N)
+    phi = S.strip_phi_map(mask4, N)
     th_mesh = np.where(phi <= np.pi, phi, 2 * np.pi - phi)
     aft_rows = al | ar
     cols = U4 >= S.U0

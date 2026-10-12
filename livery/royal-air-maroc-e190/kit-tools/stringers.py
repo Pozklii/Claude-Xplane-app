@@ -157,3 +157,88 @@ def phi_map(tracks, N=8192, U_from=U0, smooth=3.0):
     den = gaussian_filter1d(m.astype(np.float32), 2.0, axis=1)
     out[r0:r1, 2 * U_from:] = np.where(m, num / np.maximum(den, 1e-6), np.nan)
     return out
+
+
+# ---- strip map -----------------------------------------------------------
+# Many lengthwise lines can't be followed all the way back (they fade or run
+# into neighbours), and a line picked up by its neighbour's track carries the
+# wrong angle: inside one strip the traced map put 11 deg into 24 rows in one
+# place and 36 deg into 131 in another. The seams are reliable, though: each
+# dart's two edges are one mesh line at the angle of the line through its
+# tip, and the lines that could be followed show V running evenly in angle
+# between seams. So each column is mapped linearly, strip by strip, between
+# the dart edges (followed down the paint mask from each tip and smoothed
+# along U), the crown seam (V_TOP / V_BOT) and nothing else.
+
+def dart_edges(mask4, Ut, Vt, U_end=4095, tol=6, max_gap=400):
+    """Upper and lower edge (4K V) of a dart in each column from its tip on.
+    Each edge is followed on its own, from one column to the next, to the
+    nearest mask transition of its kind (strip -> gap for the upper edge,
+    gap -> strip for the lower), so islands and holes nearby are ignored."""
+    a, b = {}, {}
+    pa = pb = float(Vt)
+    sa = sb = 0.0
+    ga = gb = 0
+    for U in range(Ut, U_end + 1):
+        col = mask4[:, U]
+        d = np.diff(col.astype(np.int8))
+        down = np.nonzero(d == -1)[0] + 1.0      # first gap row
+        up = np.nonzero(d == 1)[0] + 1.0         # first strip row after a gap
+        for edge in ('a', 'b'):
+            cand = down if edge == 'a' else up
+            pred = (pa + sa) if edge == 'a' else (pb + sb)
+            k = np.abs(cand - pred)
+            if len(cand) and k.min() <= tol:
+                v = cand[np.argmin(k)]
+                if edge == 'a':
+                    sa = 0.9 * sa + 0.1 * (v - pa); pa, ga = v, 0
+                else:
+                    sb = 0.9 * sb + 0.1 * (v - pb); pb, gb = v, 0
+            else:
+                if edge == 'a':
+                    pa, ga = pred, ga + 1
+                else:
+                    pb, gb = pred, gb + 1
+        if ga > max_gap or gb > max_gap:
+            break
+        a[U], b[U] = pa, max(pb, pa)
+    return a, b
+
+
+def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950):
+    """phi for every 8K texel of the aft section from column U_from (4K) on,
+    linear in V within each strip between seams. The left darts are followed
+    on the mask; the layout is mirror-symmetric about the belly axis (checked
+    to a few texels), so the right ones are their mirror images, which keeps
+    small UV islands that sit inside the right-hand darts from pulling them.
+    Past U_hold the upper strips run out, so the seams are held there."""
+    from scipy.ndimage import gaussian_filter1d
+    Us = np.arange(U_from, N // 2)
+    edges = []
+    for Ut, Vt in DART_TIPS:
+        if Vt > AX:
+            continue
+        a, b = dart_edges(mask4, Ut, Vt)
+        ka = np.array(sorted(a))
+        va = np.array([a[k] for k in ka]); vb = np.array([b[k] for k in ka])
+        Uc = np.minimum(Us, U_hold)
+        full_a = np.where(Us < Ut, Vt, np.interp(Uc, ka, va))
+        full_b = np.where(Us < Ut, Vt, np.interp(Uc, ka, vb))
+        full_a = gaussian_filter1d(full_a, smooth, mode='nearest')
+        full_b = gaussian_filter1d(full_b, smooth, mode='nearest')
+        phi = phi_lin(Vt)
+        edges.append((phi, full_a, full_b))
+        edges.append((2 * np.pi - phi, 2 * AX - full_b, 2 * AX - full_a))
+    edges.sort(key=lambda e: e[0])
+    out = np.full((N, N), np.nan, np.float32)
+    r0 = int(2 * (V_TOP - 20))
+    v4 = (np.arange(r0, N) + 0.5) / 2
+    for j, U in enumerate(Us):
+        vs, ps = [V_TOP], [0.0]
+        for phi, fa, fb in edges:
+            vs += [fa[j], fb[j]]; ps += [phi, phi]
+        vs.append(V_BOT); ps.append(2 * np.pi)
+        col = np.interp(v4, vs, ps)
+        out[r0:, 2 * U] = col
+        out[r0:, 2 * U + 1] = col
+    return out

@@ -130,6 +130,18 @@ E_B1 = edge_mixed(G.B1, 'B1', after=math.pi)
 E_B2 = edge_mixed(G.B2, 'B2', after=math.pi)
 E_B3 = edge_mixed(G.B3, 'B3', after=math.pi)
 E_B5 = edge_mixed(G.B5, 'B5', after=math.pi)   # red wraps the tail cone to the APU
+# Behind the rear door the red's lower edge runs straight back in side view
+# and the belly sweeps up into it at ~1738 (both photos). Photo 1 is taken
+# from below the tail and sees more of the underside there than its
+# door-fitted camera allows for, which put the edge too high; at eye level
+# (photo 4, sections through the rear door and the APU nozzle) it sits
+# 5-12 deg lower. These angles take the middle of the two, nearer the
+# eye-level photo, joining the photo-1 edge at the door.
+B5_AFT = [(1490, 118.2), (1520, 125.0), (1549, 131.0), (1580, 136.0), (1614, 141.0),
+          (1650, 147.0), (1678, 154.0), (1711, 165.0), (1738, 180.0)]
+_sel = XG >= B5_AFT[0][0]
+E_B5[_sel] = np.interp(XG[_sel], [q[0] for q in B5_AFT], [q[1] * DEG for q in B5_AFT],
+                       right=math.pi)
 # Belly line: the green stops above a white belly (first E190 photo; the same
 # scheme from under a 737). Traced off the photo like the other edges; the
 # dark green runs out to a point where it meets the pinstripe at ~1555.
@@ -436,6 +448,27 @@ R1_FWD, R1_TOP, R1_W = 803.0, 1709.5, 156.0
 put(flag, 2 * (R1_FWD - 0.32 * R1_W) - fw8 / 2, 2 * R1_TOP - fh8 / 2, fw8, fh8, True)
 
 paint[~mask8] = 1.0
+# Seam padding: carry each painted strip's colour up to 12 (4K) texels out
+# into the gutter around it, so texture filtering and mipmaps in the sim
+# blend in the strip's own colour at its edges. The kit pads its islands with
+# 3 texels of opaque white and leaves the rest of the gutter transparent
+# white, which showed as pale lines along the tail-cone seams. Only texels
+# off the mesh (outside the wireframe's islands) that are transparent, or
+# white and within 4 texels, are filled: other parts packed into the gutters
+# and details inside the islands are left alone.
+_in4 = mask8[::2, ::2]
+_dist, (_iy, _ix) = ndimage.distance_transform_edt(~_in4, return_indices=True)
+_base4 = np.asarray(Image.open('layers/fus_base_e190.png'))
+_off = np.asarray(Image.open('layers/fus__WIREFRAME_E190.png'))[..., 3] == 0
+_white = _base4[..., :3].min(2) >= 240
+_gutter = (_base4[..., 3] < 8) | (_white & (_dist <= 4))
+_gv, _gu = np.nonzero(~_in4 & _off & _gutter & (_dist <= 12))
+_sv, _su = 2 * _iy[_gv, _gu], 2 * _ix[_gv, _gu]
+for _dy in (0, 1):
+    for _dx in (0, 1):
+        paint[2 * _gv + _dy, 2 * _gu + _dx] = paint[_sv + _dy, _su + _dx]
+print('seam padding:', len(_gv), '4K texels')
+del _dist, _iy, _ix, _base4
 np.save(f'{OUT}/fus_paint8.npy', paint.astype(np.float16))
 Image.fromarray((paint * 255 + 0.5).astype(np.uint8)).save(f'{OUT}/fus_paint8.png')
 print('done')

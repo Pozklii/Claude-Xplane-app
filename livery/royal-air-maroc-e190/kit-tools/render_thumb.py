@@ -25,20 +25,7 @@ mask4 = np.asarray(Image.open('layers/fus__paintmask.png')) > 127
 tex = np.asarray(Image.open(fus_png).convert('RGB').resize((4096, 4096), Image.BOX))
 V4 = np.arange(4096) + 0.5
 U4 = np.arange(4096) + 0.5
-# On the tail cone the angle map is followed from mesh line to mesh line: it
-# steps where the lines' spacing changes and lies flat across the darts. For
-# the picture, ramp the steps (a short mask-normalised blur down each column)
-# and leave out the flat dart rows, so no gaps or smears show.
-from scipy import ndimage
-ok = mask4 & np.isfinite(th)
-cone = np.zeros_like(ok); cone[int(F.SPLIT_V):, 1890:] = True
-w8 = ok.astype(np.float32)
-th0 = np.where(ok, th, 0).astype(np.float32)
-ths = ndimage.uniform_filter1d(th0, 25, axis=0) / np.maximum(ndimage.uniform_filter1d(w8, 25, axis=0), 1e-6)
-flat = cone & ok & (ndimage.uniform_filter1d(np.abs(np.gradient(th0, axis=0)), 5, axis=0) < 4e-4)
-flat = ndimage.binary_dilation(flat, np.ones((7, 1), bool))
-th = np.where(cone & ok, ths, th)
-vv, uu = np.nonzero(ok & ~flat)
+vv, uu = np.nonzero(mask4 & np.isfinite(th))
 aft = V4[vv] >= F.SPLIT_V
 x = np.where(aft, F.u_to_x(U4[uu], True), F.u_to_x(U4[uu], False))
 right = np.where(aft, V4[vv] > F.AX_A, V4[vv] > F.AX_F)
@@ -96,9 +83,22 @@ for side in (1, -1):
         half = 0.9 * (F.belly_p(xs_) - F.crown_p(xs_)) / 2
         yv = side * (half * 0.85 + span * s_)
         pts.append(np.stack([xs_, yv, np.full_like(xs_, zr + 14 * s_)], 1))
-        shade = 236 - 18 * ((xs_ - le) / c)
-        cols.append(np.stack([shade, shade, shade + 4], 1).astype(np.uint8))
+        # painted aircraft grey, as both photos show them
+        shade = 168 - 16 * ((xs_ - le) / c)
+        cols.append(np.stack([shade, shade + 2, shade + 7], 1).astype(np.uint8))
         nrm.append(np.tile([0.0, 0.0, 2.0], (len(xs_), 1)))
+
+# APU exhaust nozzle: bare metal from where the fuselage texture ends
+x_end = max(q[0] for q in G.SILHOUETTE)
+x_tex = float(F.u_to_x(np.array([4096.0]), True)[0])
+for xx in np.arange(x_tex, x_end, 0.25):
+    cc, bb = F.crown_p(xx), F.belly_p(xx)
+    rr, zz = (bb - cc) / 2, (bb + cc) / 2
+    t = np.linspace(0, 2 * np.pi, 400, endpoint=False)
+    pts.append(np.stack([np.full_like(t, xx), 0.9 * rr * np.sin(t), -(zz - rr * np.cos(t))], 1))
+    cols.append(np.tile(np.array([104, 104, 110], np.uint8), (len(t), 1)))
+    nv = np.stack([np.zeros_like(t), np.sin(t), 0.9 * np.cos(t)], 1)
+    nrm.append(nv / np.linalg.norm(nv, axis=1, keepdims=True))
 
 P = np.concatenate(pts).astype(np.float32)
 C = np.concatenate(cols).astype(np.float32)
@@ -130,7 +130,7 @@ vis = two_sided | ((NR @ cam) > -0.02)
 P, C, d, px, py = P[vis], C[vis], d[vis], px[vis], py[vis]
 order = np.argsort(d)
 img = np.zeros((H, W * S, 4), np.uint8)
-# 3x3 splats: on the tail cone some texel rows land ~2.7 px apart
+# 3x3 splats, so no texel spacing shows as gaps at any scale
 for dx in (-1, 0, 1):
     for dy in (-1, 0, 1):
         iy, ix = np.clip(py[order] + dy, 0, H - 1), np.clip(px[order] + dx, 0, W * S - 1)
