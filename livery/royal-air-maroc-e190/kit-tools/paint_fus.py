@@ -276,23 +276,47 @@ for r0 in range(0, N, 512):
     paint[rs][rr, cc] = col
     print('rows', r0, flush=True)
 
-# white fairing around the horizontal stabiliser roots, placed on the kit's
-# own root shadow (4K: U 3307-4068, V 2330-2585 left, mirrored right)
-pm = Image.new('L', (N, N), 0)
-pd = ImageDraw.Draw(pm)
-for side_v in (lambda v: v, lambda v: 2 * AX_A - v):
-    v_a, v_b = sorted((side_v(2322), side_v(2570)))
-    pd.rounded_rectangle([3382 * 2, v_a * 2, 4100 * 2, v_b * 2], radius=90, fill=255)
-    v_a, v_b = sorted((side_v(2348), side_v(2544)))
-    pd.rounded_rectangle([3223 * 2, v_a * 2, 3460 * 2, v_b * 2], radius=80, fill=255)
-pm = np.asarray(pm.filter(ImageFilter.GaussianBlur(1.0))).astype(np.float32) / 255
-# keep it on the side panel: off the crown strip and the belly strip
-side_run = np.zeros((N, N), bool)
-for vr0, vr1 in ((2325, 2594), (2 * AX_A - 2594, 2 * AX_A - 2325)):
-    side_run[int(vr0 * 2):int(vr1 * 2) + 1, 3200 * 2:] = True
-pm *= (mask8 & side_run)
-paint = paint * (1 - pm[..., None]) + C['W'] * pm[..., None]
-del pm, side_run
+# White fairing round each horizontal stabiliser root: a vase on its side,
+# neck forward. Traced off the first photo (left side; the eye-level photo
+# of the right side has the same neck length and proportions): a rounded
+# neck from station 1638 to 1671, 48 deg tall; shoulders stepping out above
+# and below to a body 90 deg tall; the body tapering back along the root to a
+# rounded end at 1775 under the stabiliser. Shifted 5.8 deg up so the
+# stabiliser's leading-edge root (84.3 deg through the photo's camera model)
+# sits on the kit's own root shadow (78.5 deg). Drawn in (station, angle)
+# so it lands the same way on both sides and across the strip seams.
+VASE = [(1638, 562), (1638.6, 559.6), (1641, 558.4), (1655, 558.5), (1668, 559.2),
+        (1671, 558.4), (1673.5, 555.8), (1676, 551.5), (1678.6, 549), (1681.5, 548),
+        (1690, 547.8), (1696, 548.5), (1701, 551), (1706, 554.5), (1712, 558),
+        (1725, 566), (1740, 574), (1755, 580), (1765, 584), (1771, 587),
+        (1774.6, 588.6), (1775.6, 592), (1773, 595.2), (1768, 596.4), (1760, 597.3),
+        (1750, 598.6), (1740, 600.3), (1730, 602.3), (1720, 604.8), (1710, 607.4),
+        (1700, 609.6), (1690, 610), (1681, 609.6), (1677.6, 608.8), (1675, 606.5),
+        (1673, 603), (1670, 600.5), (1660, 599.6), (1650, 598.6), (1641, 597.6),
+        (1638.6, 595.4), (1638, 592)]
+VASE_DTH = 5.8 * DEG
+_vx = np.array([q[0] for q in VASE], float)
+_vt = theta_of(_vx, np.array([q[1] for q in VASE], float)) - VASE_DTH
+# rasterise it in the (station, angle) plane: 20 samples per photo px and
+# per degree, smoothed through the points, edges softened to about a texel
+VX0, VS = 1620.0, 20.0
+_poly = G.catmull_rom(list(zip(_vx, _vt / DEG)) + [(_vx[0], _vt[0] / DEG)], 12)
+_ras = Image.new('L', (int(180 * VS), int(180 * VS)), 0)
+ImageDraw.Draw(_ras).polygon([((px_ - VX0) * VS, pt_ * VS) for px_, pt_ in _poly], fill=255)
+_ras = np.asarray(_ras.filter(ImageFilter.GaussianBlur(1.5))).astype(np.float32) / 255
+_c0, _c1 = int(x_to_u(VX0, True) * 2), int(x_to_u(VX0 + 180, True) * 2) + 1
+_rows = np.nonzero(aft_row)[0]
+_r0, _r1 = _rows.min(), _rows.max() + 1
+_th = theta[_r0:_r1, _c0:_c1]
+_xx = u_to_x(U8[_c0:_c1] / 2, True)[None, :].repeat(_r1 - _r0, 0)
+_ok = mask8[_r0:_r1, _c0:_c1] & np.isfinite(_th)
+_cov = np.zeros(_th.shape, np.float32)
+_cov[_ok] = ndimage.map_coordinates(
+    _ras, [np.degrees(_th[_ok]) * VS, (_xx[_ok] - VX0) * VS], order=1, mode='constant')
+_blk = paint[_r0:_r1, _c0:_c1]
+_blk[:] = _blk * (1 - _cov[..., None]) + C['W'] * _cov[..., None]
+print('stabiliser fairings:', int((_cov > 0.5).sum()), 'texels')
+del _ras, _th, _xx, _ok, _cov
 
 
 # ---- titles, registration, flag: placed undistorted in texture space ------
