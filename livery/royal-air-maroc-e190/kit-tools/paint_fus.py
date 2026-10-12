@@ -35,14 +35,38 @@ DARK_RED = (142, 10, 32)
 REG_BLACK = (22, 22, 24)
 
 
+# Photo 1 was taken from about 8.6 deg below the aircraft. Each station is
+# modelled as a circle seen from there: y = c - R cos(theta - 8.6 deg), with
+# c and R set by the bottom outline and the cabin windows (68 deg), and around
+# the rear door by the door itself (41 / 124 deg in the mesh). This lands the
+# windows, overwing exit and rear door on their mesh angles to within ~2 deg;
+# the earlier window-pinned stretch put the lower stripes up to 23 deg high.
+CAM_BELOW = 8.6
+_CW = math.cos(math.radians(68.2 - CAM_BELOW))
+_DOOR_C, _DOOR_R = 582.3, 78.6
+
+
+def _cR(x):
+    x = np.asarray(x, float)
+    b = belly_p(x)
+    R_w = (b - axis_p(x)) / (1 + _CW)
+    b14 = belly_p(1420.0); R14 = (b14 - axis_p(1420.0)) / (1 + _CW); c14 = b14 - R14
+    w1 = np.clip((x - 1420) / 56, 0, 1)
+    R_door = R14 + w1 * (_DOOR_R - R14)
+    c_door = c14 + w1 * (_DOOR_C - c14)
+    R_aft = (b - crown_p(x)) / 2
+    w2 = np.clip((x - 1476) / 84, 0, 1)
+    R_tail = _DOOR_R + w2 * (R_aft - _DOOR_R)
+    R = np.where(x <= 1420, R_w, np.where(x <= 1476, R_door, R_tail))
+    c = np.where(x <= 1420, b - R_w, np.where(x <= 1476, c_door, b - R_tail))
+    return c, R
+
+
 def theta_of(x, y):
     x = np.asarray(x, float); y = np.asarray(y, float)
-    c, b = crown_p(x), belly_p(x)
-    t = np.clip((y - c) / (b - c), 0, 1)
-    twm = (1 - math.cos(THETA_WIN)) / 2
-    twp = (axis_p(x) - c) / (b - c)
-    tm = np.where(t <= twp, t * twm / twp, twm + (t - twp) * (1 - twm) / (1 - twp))
-    return np.arccos(np.clip(1 - 2 * tm, -1, 1))
+    c, R = _cR(x)
+    th = np.arccos(np.clip((c - y) / R, -1, 1)) + CAM_BELOW * DEG
+    return np.clip(th, 0, math.pi)
 
 
 def edge(pts, crown_x=None, blend=50 * DEG, after=None):
@@ -106,12 +130,6 @@ E_B1 = edge_mixed(G.B1, 'B1', after=math.pi)
 E_B2 = edge_mixed(G.B2, 'B2', after=math.pi)
 E_B3 = edge_mixed(G.B3, 'B3', after=math.pi)
 E_B5 = edge_mixed(G.B5, 'B5')
-# Behind the rear door the red comes down the side to a pinstripe of constant
-# width just above the belly (both E190 photos; the same scheme from under a
-# 737). The traced edge put it higher there: from below, photo 1's lower
-# outline is past the belly, not on it. Below the stripe it is white.
-_w = np.clip((XG - 1450) / 60, 0, 1); _w = _w * _w * (3 - 2 * _w)
-E_B5 = E_B5 + _w * np.maximum(0, np.minimum(E_B3 - 14 * DEG, 150 * DEG) - E_B5)
 # Belly line: the green stops above a white belly (first E190 photo; the same
 # scheme from under a 737). Traced off the photo like the other edges; the
 # dark green runs out to a point where it meets the pinstripe at ~1555.
@@ -270,7 +288,10 @@ def to_tex(x, y):
     """Left-side photo point -> 8K texture (u, v)."""
     aft = x > 1028
     U = x_to_u(x, aft)
-    th = t_unwarp((y - G.crown(x)) / (G.belly(x) - G.crown(x)), x)
+    if x > 1100:
+        th = float(theta_of(x, y))
+    else:
+        th = t_unwarp((y - G.crown(x)) / (G.belly(x) - G.crown(x)), x)
     if aft and U >= 1890:
         col = int(U * 2)
         rows = np.nonzero(al)[0]
