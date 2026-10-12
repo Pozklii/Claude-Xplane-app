@@ -37,8 +37,10 @@ python3 kit-tools/combine.py layers/tail_base.png layers/tail_paint8.png TAIL.pn
 In the livery folder the fuselage goes in `objects/E190/`, while `TAIL.png` goes
 in `objects/` itself: the E-Jets share one tail texture across variants.
 
-The fuselage is mapped from the photo using the cabin windows as anchors and
-arc length around the fuselage; each fin side uses a five-point
+The fuselage is mapped from the photo using the cabin windows as anchors. On
+the tail cone, where the texture is cut into strips, the angle around the
+fuselage comes from the model's own lengthwise mesh lines, followed through
+the kit's wireframe (`stringers.py`); each fin side uses a five-point
 piecewise-affine map. `dump.py` and `tree.py` inspect a PSD's layers.
 
 Fonts: Outfit and Aref Ruqaa, both SIL Open Font License (see `fonts/`).

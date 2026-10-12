@@ -96,37 +96,30 @@ def build_theta(mask_path='layers/fus__paintmask.png'):
     # aft: linear before the darts...
     al = (V4 >= SPLIT_V) & (V4 < AX_A)
     ar = V4 >= AX_A
-    lin_cols = U4 < BLEND_U[0]
+    lin_cols = U4 < 10 ** 6         # linear everywhere first; mesh angles replace the tail cone below
     th_l = np.clip(np.pi * (V4[al] - CROWN_A) / (AX_A - CROWN_A), 0, np.pi)
     th_r = np.clip(np.pi * (2 * AX_A - V4[ar] - CROWN_A) / (AX_A - CROWN_A), 0, np.pi)
     theta[np.ix_(al, lin_cols)] = th_l[:, None]
     theta[np.ix_(ar, lin_cols)] = th_r[:, None]
-    # ...then arc length measured over the skin only, skipping the darts,
-    # blended in over BLEND_U so the edges don't jump where the methods meet
-    dart_cols = np.nonzero(U4 >= BLEND_U[0])[0]
-    w = np.clip((U4[dart_cols] - BLEND_U[0]) / (BLEND_U[1] - BLEND_U[0]), 0, 1)
-    w = (w * w * (3 - 2 * w))[None, :]
-    rows_l, rows_r = np.nonzero(al)[0], np.nonzero(ar)[0]
-    ml = mask8[np.ix_(rows_l, dart_cols)].astype(np.float32)
-    cl = np.cumsum(ml, 0)
-    arc_l = np.pi * cl / np.maximum(cl[-1:], 1)
-    theta[np.ix_(rows_l, dart_cols)] = (1 - w) * th_l[:, None] + w * arc_l
-    mr = mask8[np.ix_(rows_r, dart_cols)][::-1].astype(np.float32)
-    cr = np.cumsum(mr, 0)
-    arc_r = (np.pi * cr / np.maximum(cr[-1:], 1))[::-1]
-    theta[np.ix_(rows_r, dart_cols)] = (1 - w) * th_r[:, None] + w * arc_r
-
-    # The arc-length counts change by a pixel or two from one column to the
-    # next where a dart edge steps, which made edges ragged (up to ~0.45 deg
-    # column to column). Smooth along U with a mask-normalised Gaussian.
-    from scipy.ndimage import gaussian_filter1d
-    c0 = int(BLEND_U[0] * 2) - 64
-    for rows in (np.nonzero(al)[0], np.nonzero(ar)[0]):
-        blk = theta[rows, c0:]
-        m = mask8[rows, c0:] & np.isfinite(blk)
-        num = gaussian_filter1d(np.where(m, blk, 0).astype(np.float32), 14, axis=1)
-        den = gaussian_filter1d(m.astype(np.float32), 14, axis=1)
-        sm = num / np.maximum(den, 1e-6)
-        theta[rows, c0:] = np.where(m, sm, blk)
+    # ...then the model's own mesh: lengthwise mesh lines followed through the
+    # tail-cone darts give the angle directly (see stringers.py), so seams
+    # match on both sides and cut-outs or stray mask areas don't bend it.
+    import os, pickle
+    import stringers as S
+    here = os.path.dirname(os.path.abspath(__file__))
+    cache = 'layers/stringer_tracks.pkl'
+    if os.path.exists(cache):
+        tracks = pickle.load(open(cache, 'rb'))
+    else:
+        L, H = S.line_masks('layers/fus__WIREFRAME_E190.png')
+        tracks = S.track(H, mask4)
+        pickle.dump(tracks, open(cache, 'wb'))
+    phi = S.phi_map(tracks, N)
+    th_mesh = np.where(phi <= np.pi, phi, 2 * np.pi - phi)
+    aft_rows = al | ar
+    cols = U4 >= S.U0
+    blk = th_mesh[np.ix_(aft_rows, cols)]
+    old = theta[np.ix_(aft_rows, cols)]
+    theta[np.ix_(aft_rows, cols)] = np.where(np.isfinite(blk), blk, old)
 
     return theta, mask8, V4, U4, al, ar

@@ -110,7 +110,16 @@ E_B5 = edge_mixed(G.B5, 'B5')
 # width just above the belly (both E190 photos; the same scheme from under a
 # 737). The traced edge put it higher there: from below, photo 1's lower
 # outline is past the belly, not on it. Below the stripe it is white.
-E_B5 = np.where(XG >= 1480, np.maximum(E_B5, np.minimum(E_B3 - 14 * DEG, 150 * DEG)), E_B5)
+_w = np.clip((XG - 1450) / 60, 0, 1); _w = _w * _w * (3 - 2 * _w)
+E_B5 = E_B5 + _w * np.maximum(0, np.minimum(E_B3 - 14 * DEG, 150 * DEG) - E_B5)
+# Belly line: the green stops above a white belly (first E190 photo; the same
+# scheme from under a 737). Traced off the photo like the other edges; the
+# dark green runs out to a point where it meets the pinstripe at ~1555.
+BL_PTS = [(1340, 659), (1360, 663), (1380, 661), (1400, 661), (1420, 658), (1440, 655),
+          (1460, 653), (1480, 649), (1500, 645), (1520, 642), (1540, 638), (1556, 636)]
+_bx = np.array([q[0] for q in BL_PTS], float)
+_bt = theta_of(_bx, np.array([q[1] for q in BL_PTS], float))
+E_BL = np.interp(XG, _bx, _bt, left=_bt[0], right=0.0)
 # the dark green ends in a point below the crown: no dark green ahead of it
 APEX_X = 955.3
 E_B2[XG < APEX_X] = 0.0
@@ -182,14 +191,14 @@ def smooth_edge(E, rms_px=2.0, px_per_deg=1.5):
 
 
 _raw = dict(B1=E_B1, B2=E_B2, B3=E_B3, B5=E_B5, B43=E_B43, DUP=E_DUP, DLO=E_DLO,
-            LAT=E_LAT, LAB=E_LAB)
+            LAT=E_LAT, LAB=E_LAB, BL=E_BL)
 E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5, E_B43))
-E_DUP, E_DLO, E_LAT, E_LAB = (smooth_edge(e) for e in (E_DUP, E_DLO, E_LAT, E_LAB))
-for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB)):
+E_DUP, E_DLO, E_LAT, E_LAB, E_BL = (smooth_edge(e) for e in (E_DUP, E_DLO, E_LAT, E_LAB, E_BL))
+for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL)):
     print(f'smoothed {k}: max change {np.degrees(np.abs(e - _raw[k]).max()):.1f} deg', flush=True)
 
 
-EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB]
+EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL]
 # slopes for edge anti-aliasing; capped so the cut-offs where a shape ends
 # (a jump in the curve) stay sharp instead of leaving a faint line
 DEDGES = [np.clip(np.gradient(e, XG), -0.25, 0.25) for e in EDGES]
@@ -227,11 +236,11 @@ for r0 in range(0, N, 512):
     t_ = th[rr, cc]
     g_ = np.maximum(gv[rr, cc], math.pi / 4000)
     cov = [coverage(k, x, t_, g_, dudx) for k in range(len(EDGES))]
-    L, B2, B3, B5, B43, DUP, DLO, LAT, LAB = cov
+    L, B2, B3, B5, B43, DUP, DLO, LAT, LAB, BL = cov
     leaf_a = LAB * (1 - LAT)
     dark = B5 * DLO * (1 - DUP) * (1 - leaf_a)
     col = np.ones((len(rr), 3), np.float32) * C['W']
-    for c_, a_ in ((C['L'], L), (C['D'], np.clip(B2 - B3, 0, 1)), (C['W'], B43),
+    for c_, a_ in ((C['L'], L * BL), (C['D'], np.clip(B2 - B3, 0, 1) * BL), (C['W'], B43),
                    (C['R'], B5), (C['DR'], dark)):
         col = col * (1 - a_[:, None]) + c_ * a_[:, None]
     paint[rs][rr, cc] = col
@@ -262,7 +271,7 @@ def to_tex(x, y):
     aft = x > 1028
     U = x_to_u(x, aft)
     th = t_unwarp((y - G.crown(x)) / (G.belly(x) - G.crown(x)), x)
-    if aft and U >= BLEND_U[0]:
+    if aft and U >= 1890:
         col = int(U * 2)
         rows = np.nonzero(al)[0]
         v = np.interp(th, theta[rows, col], rows)
