@@ -76,11 +76,12 @@ for comp, (side, texp) in SIDES.items():
 # (the kit's root shadow: 72.7 deg from the crown at station 1666, falling
 # 0.1165 deg per px), leading-edge root at 1663 as in the first photo
 stab_x0, stab_c0, stab_c1, span, sweep = 1663.0, 135.0, 60.0, 290.0, 0.62
+DENS = max(1.0, W / 1800)          # sample the plates densely enough for the output size
 for side in (1, -1):
-    for s_ in np.linspace(0, 1, 700):
+    for s_ in np.linspace(0, 1, int(700 * DENS)):
         le = stab_x0 + sweep * span * s_
         c = stab_c0 + (stab_c1 - stab_c0) * s_
-        xs_ = np.linspace(le, le + c, int(c * 3))
+        xs_ = np.linspace(le, le + c, int(c * 3 * DENS))
         xr = np.clip(xs_ - sweep * span * s_, stab_x0, stab_x0 + stab_c0)   # root station
         tr = np.radians(72.7 + 0.1165 * (xr - 1666.0))
         cc, bb = F.crown_p(xr), F.belly_p(xr)
@@ -96,10 +97,10 @@ for side in (1, -1):
 # APU exhaust nozzle: bare metal from where the fuselage texture ends
 x_end = max(q[0] for q in G.SILHOUETTE)
 x_tex = float(F.u_to_x(np.array([4096.0]), True)[0])
-for xx in np.arange(x_tex, x_end, 0.25):
+for xx in np.arange(x_tex, x_end, 0.25 / DENS):
     cc, bb = F.crown_p(xx), F.belly_p(xx)
     rr, zz = (bb - cc) / 2, (bb + cc) / 2
-    t = np.linspace(0, 2 * np.pi, 400, endpoint=False)
+    t = np.linspace(0, 2 * np.pi, int(400 * DENS), endpoint=False)
     pts.append(np.stack([np.full_like(t, xx), 0.9 * rr * np.sin(t), -(zz - rr * np.cos(t))], 1))
     cols.append(np.tile(np.array([104, 104, 110], np.uint8), (len(t), 1)))
     nv = np.stack([np.zeros_like(t), np.sin(t), 0.9 * np.cos(t)], 1)
@@ -136,9 +137,11 @@ vis = two_sided | ((NR @ cam) > -0.02)
 P, C, d, px, py = P[vis], C[vis], d[vis], px[vis], py[vis]
 order = np.argsort(d)
 img = np.zeros((H, W * S, 4), np.uint8)
-# 3x3 splats, so no texel spacing shows as gaps at any scale
-for dx in (-1, 0, 1):
-    for dy in (-1, 0, 1):
+# splats wide enough that the texel spacing never shows as gaps: 3x3 up to
+# 1800 px wide, 5x5 for close-ups
+rad = 1 if W <= 2400 else 2
+for dx in range(-rad, rad + 1):
+    for dy in range(-rad, rad + 1):
         iy, ix = np.clip(py[order] + dy, 0, H - 1), np.clip(px[order] + dx, 0, W * S - 1)
         img[iy, ix, :3] = C[order]
         img[iy, ix, 3] = 255
