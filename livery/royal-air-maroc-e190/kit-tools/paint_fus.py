@@ -277,26 +277,35 @@ for r0 in range(0, N, 512):
     print('rows', r0, flush=True)
 
 # White fairing round each horizontal stabiliser root: a vase on its side,
-# neck forward. Traced off the first photo (left side; the eye-level photo
-# of the right side has the same neck length and proportions): a rounded
-# neck from station 1638 to 1671, 48 deg tall; shoulders stepping out above
-# and below to a body 90 deg tall; the body tapering back along the root to a
-# rounded end at 1775 under the stabiliser. Shifted 5.8 deg up so the
-# stabiliser's leading-edge root (84.3 deg through the photo's camera model)
-# sits on the kit's own root shadow (78.5 deg). Drawn in (station, angle)
-# so it lands the same way on both sides and across the strip seams.
-VASE = [(1638, 562), (1638.6, 559.6), (1641, 558.4), (1655, 558.5), (1668, 559.2),
-        (1671, 558.4), (1673.5, 555.8), (1676, 551.5), (1678.6, 549), (1681.5, 548),
-        (1690, 547.8), (1696, 548.5), (1701, 551), (1706, 554.5), (1712, 558),
-        (1725, 566), (1740, 574), (1755, 580), (1765, 584), (1771, 587),
-        (1774.6, 588.6), (1775.6, 592), (1773, 595.2), (1768, 596.4), (1760, 597.3),
-        (1750, 598.6), (1740, 600.3), (1730, 602.3), (1720, 604.8), (1710, 607.4),
-        (1700, 609.6), (1690, 610), (1681, 609.6), (1677.6, 608.8), (1675, 606.5),
-        (1673, 603), (1670, 600.5), (1660, 599.6), (1650, 598.6), (1641, 597.6),
-        (1638.6, 595.4), (1638, 592)]
-VASE_DTH = 5.8 * DEG
-_vx = np.array([q[0] for q in VASE], float)
-_vt = theta_of(_vx, np.array([q[1] for q in VASE], float)) - VASE_DTH
+# neck forward, wrapped round the root. Its outline is set against the
+# stabiliser's root line, so the tail runs along the root above and below
+# it. The root line is the centre of the kit's own root shadow (72.7 deg
+# from the crown at station 1666, falling to 86 deg at 1781). Distances from
+# it come from the first photo, measured from the root line as that photo
+# shows it (its camera model puts the root ~12 deg lower and falling faster,
+# which had dropped the tail under the stabiliser); the eye-level photo of
+# the other side gives the same proportions:
+# - neck, station 1638 to 1671: 20 deg above the root, 30 below;
+# - shoulders stepping out to a body 47 above and 43 below;
+# - the tail tapering along the root to a rounded tip at 1775, about 12 deg
+#   above it (the stabiliser's own thickness) and 25 to 17 deg below.
+def root_theta(x):
+    return (72.7 + 0.1165 * (np.asarray(x, float) - 1666.0)) * DEG
+
+
+VASE_REL = [  # (station, deg from the root line; + is below it)
+    (1638, -15.0), (1638.8, -18.4), (1641.5, -19.6), (1655, -19.6), (1668, -19.6),
+    (1671, -21.0), (1673.5, -27.0), (1676, -36.0), (1678.5, -43.0), (1681.5, -46.5),
+    (1690, -47.5), (1696, -47.0), (1701, -43.8), (1706, -38.4), (1712, -33.0),
+    (1718, -25.0), (1723, -18.0), (1730, -14.5), (1740, -13.0), (1750, -12.0),
+    (1760, -11.0), (1767, -10.0), (1771, -8.0), (1773.6, -4.0), (1775.2, 0.5),
+    (1775.6, 5.0), (1774.6, 10.0), (1772, 14.0), (1768, 16.6), (1760, 19.1),
+    (1750, 21.4), (1740, 24.7), (1730, 28.5), (1720, 33.0), (1710, 37.6),
+    (1700, 41.5), (1690, 43.0), (1681, 42.5), (1677.6, 41.0), (1675, 38.0),
+    (1673, 34.0), (1670, 30.5), (1660, 30.0), (1650, 29.6), (1641, 29.2),
+    (1638.8, 27.6), (1638, 24.0)]
+_vx = np.array([q[0] for q in VASE_REL], float)
+_vt = root_theta(_vx) + np.array([q[1] for q in VASE_REL]) * DEG
 # rasterise it in the (station, angle) plane: 20 samples per photo px and
 # per degree, smoothed through the points, edges softened to about a texel
 VX0, VS = 1620.0, 20.0

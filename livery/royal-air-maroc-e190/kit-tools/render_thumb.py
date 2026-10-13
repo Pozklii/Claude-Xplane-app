@@ -72,17 +72,22 @@ for comp, (side, texp) in SIDES.items():
     cols.append(ttex[yy[keep], xx[keep]])
     nrm.append(np.tile([0.0, side, 0.0], (keep.sum(), 1)))
 
-# horizontal stabilisers: swept plates from the white root fairing
-stab_x0, stab_c0, stab_c1, span, sweep = 1690.0, 150.0, 70.0, 290.0, 0.62
-zr = -(F.crown_p(1760.0) + F.belly_p(1760.0)) / 2 + 6
+# horizontal stabilisers: swept plates rooted on the stabiliser root line
+# (the kit's root shadow: 72.7 deg from the crown at station 1666, falling
+# 0.1165 deg per px), leading-edge root at 1663 as in the first photo
+stab_x0, stab_c0, stab_c1, span, sweep = 1663.0, 135.0, 60.0, 290.0, 0.62
 for side in (1, -1):
     for s_ in np.linspace(0, 1, 700):
         le = stab_x0 + sweep * span * s_
         c = stab_c0 + (stab_c1 - stab_c0) * s_
         xs_ = np.linspace(le, le + c, int(c * 3))
-        half = 0.9 * (F.belly_p(xs_) - F.crown_p(xs_)) / 2
-        yv = side * (half * 0.85 + span * s_)
-        pts.append(np.stack([xs_, yv, np.full_like(xs_, zr + 14 * s_)], 1))
+        xr = np.clip(xs_ - sweep * span * s_, stab_x0, stab_x0 + stab_c0)   # root station
+        tr = np.radians(72.7 + 0.1165 * (xr - 1666.0))
+        cc, bb = F.crown_p(xr), F.belly_p(xr)
+        rr, zz = (bb - cc) / 2, (bb + cc) / 2
+        yv = side * (0.9 * rr * np.sin(tr) + span * s_)
+        zv = -(zz - rr * np.cos(tr)) + 14 * s_
+        pts.append(np.stack([xs_, yv, zv], 1))
         # painted aircraft grey, as both photos show them
         shade = 168 - 16 * ((xs_ - le) / c)
         cols.append(np.stack([shade, shade + 2, shade + 7], 1).astype(np.uint8))
