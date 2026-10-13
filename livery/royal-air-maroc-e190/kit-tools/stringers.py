@@ -205,13 +205,66 @@ def dart_edges(mask4, Ut, Vt, U_end=4095, tol=6, max_gap=400):
     return a, b
 
 
-def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950):
+def wire_strokes(wire_png):
+    """the wireframe's drawn lines (dark, opaque) as a boolean image"""
+    w = np.asarray(Image.open(wire_png)).astype(np.int16)
+    return (w[..., 3] > 60) & (w[..., :3].mean(2) < 200)
+
+
+def snap_edges(strokes, a, b, Ut, Vt, reach=10, min_gap=8):
+    """Move followed dart edges from the paint mask onto the mesh.
+
+    The kit's mask is padded 3-5 texels past each strip, so edges followed on
+    it sit in the gutter, and each strip's angles were spread from there: at
+    the real seam the two sides then disagreed by 2-3 deg, which showed in
+    the sim as small steps wherever a colour edge crosses a dart. The
+    wireframe draws each strip's edge as a stroke centred on it; each
+    column's edge is moved to the centre of the nearest stroke inside the
+    mask (upper edge: above the gap; lower edge: below it). Where the dart is
+    too narrow to tell its two strokes apart, or no thin stroke is found (a
+    few columns have other drawing there), the offset is interpolated from
+    the neighbouring columns, falling to zero at the tip; a running median
+    along the dart keeps odd columns from pulling it."""
+    from scipy.ndimage import median_filter
+    out = []
+    for edge, sgn in ((a, -1), (b, +1)):
+        ks = np.array(sorted(edge))
+        offs = np.full(len(ks), np.nan)
+        for i, U in enumerate(ks):
+            v = edge[U]
+            if b[U] - a[U] < min_gap:
+                continue
+            v0 = int(round(v))
+            rows = np.arange(v0 - reach, v0 + 3) if sgn < 0 else np.arange(v0 - 2, v0 + reach)
+            hit = strokes[rows, U]
+            if not hit.any():
+                continue
+            r = rows[hit]
+            runs = [g for g in np.split(r, np.nonzero(np.diff(r) > 1)[0] + 1)
+                    if 2 <= len(g) <= 5 and g[0] > rows[0] and g[-1] < rows[-1]]
+            if not runs:
+                continue
+            run = runs[-1] if sgn < 0 else runs[0]          # the one nearest the gap
+            offs[i] = (run[0] + run[-1] + 1) / 2.0 - v
+        ok = np.isfinite(offs)
+        if ok.sum() >= 2:
+            good = median_filter(offs[ok], size=51, mode='nearest')
+            offs = np.interp(ks, np.r_[Ut, ks[ok]], np.r_[0.0, good])
+        else:
+            offs = np.zeros(len(ks))
+        out.append({U: edge[U] + o for U, o in zip(ks, offs)})
+    return out
+
+
+def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950, strokes=None):
     """phi for every 8K texel of the aft section from column U_from (4K) on,
     linear in V within each strip between seams. The left darts are followed
-    on the mask; the layout is mirror-symmetric about the belly axis (checked
-    to a few texels), so the right ones are their mirror images, which keeps
-    small UV islands that sit inside the right-hand darts from pulling them.
-    Past U_hold the upper strips run out, so the seams are held there."""
+    on the mask (and moved onto the mesh's own edges when the wireframe's
+    strokes are given); the layout is mirror-symmetric about the belly axis
+    (checked to a texel or two), so the right ones are their mirror images,
+    which keeps small UV islands that sit inside the right-hand darts from
+    pulling them. Past U_hold the upper strips run out, so the seams are
+    held there."""
     from scipy.ndimage import gaussian_filter1d
     Us = np.arange(U_from, N // 2)
     edges = []
@@ -219,6 +272,8 @@ def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950):
         if Vt > AX:
             continue
         a, b = dart_edges(mask4, Ut, Vt)
+        if strokes is not None:
+            a, b = snap_edges(strokes, a, b, Ut, Vt)
         ka = np.array(sorted(a))
         va = np.array([a[k] for k in ka]); vb = np.array([b[k] for k in ka])
         Uc = np.minimum(Us, U_hold)

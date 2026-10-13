@@ -1,7 +1,9 @@
 """Composite the fuselage kit for an E190 with a neutral (white) paint layer.
 
 Keeps: base texture, dirt, E190 emergency exits, door outlines, and from the
-template only the real-world markings (oneworld logo, nose-gear stripe).
+template only the nose-gear stripe. The template's oneworld logo is left out:
+it sits in the kit's high-res patch that the model shows beside the main door,
+so it doubled up with the livery's own emblem painted there.
 """
 import sys, warnings
 warnings.filterwarnings('ignore')
@@ -39,7 +41,7 @@ for l in tpl:
     if l.name == 'MAKE HORIZONTAL STABILIZER DEGREES WHITE':
         l.visible = False
 node('LIVERIES/TEMPLATE (PAINT HERE)/PAINT COLOR HERE (MULTIPLIED)').visible = False
-keep = {'1024px-Oneworld_logo.svg', 'NOSE GEAR RED STRIPE'}
+keep = {'NOSE GEAR RED STRIPE'}
 for l in node('LIVERIES/TEMPLATE (PAINT HERE)/TEXT AND DECALS'):
     l.visible = l.name in keep
 

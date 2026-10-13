@@ -361,7 +361,7 @@ del _ras, _th, _xx, _ok, _cov
 # ---- titles, registration, flag: placed undistorted in texture space ------
 def to_tex(x, y):
     """Left-side photo point -> 8K texture (u, v)."""
-    aft = x > 1028
+    aft = x > fusmap.X_JOIN
     U = x_to_u(x, aft)
     if x > 1100:
         th = float(theta_of(x, y))

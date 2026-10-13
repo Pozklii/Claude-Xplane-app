@@ -38,10 +38,13 @@ python3 kit-tools/combine.py layers/tail_base.png layers/tail_paint8.png TAIL.pn
 In the livery folder the fuselage goes in `objects/E190/`, while `TAIL.png` goes
 in `objects/` itself: the E-Jets share one tail texture across variants.
 
-The fuselage is mapped from the photo using the cabin windows as anchors. On
+The fuselage is mapped from the photo using the cabin windows as anchors, with
+the forward and aft sections pinned to the same station where they meet. On
 the tail cone, where the texture is cut into strips by darts, the angle
 around the fuselage runs evenly across each strip between its seams, whose
-angles are fixed by the dart tips (`stringers.py`); each fin side uses a
+angles are fixed by the dart tips and whose edges are taken from the kit's
+wireframe, not its padded paint mask (`stringers.py`). The ventral antenna,
+packed beside the lower strip, is painted in the belly's colour. Each fin side uses a
 smooth thin-plate-spline map through five points (`finmap.py`). The paint is carried a few texels past each
 strip into the empty gutter around it, so the sim's texture filtering doesn't
 blend white into the seams. `dump.py` and `tree.py` inspect a PSD's layers.

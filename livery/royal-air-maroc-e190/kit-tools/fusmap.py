@@ -15,11 +15,18 @@ AX_A, CROWN_A = 3096.9, 2100.0        # aft section
 SPLIT_V = 2020.0                      # rows above: forward; below: aft
 BLEND_U = (1850.0, 2250.0)            # ...blended in over this range (4K U)
 
-# texture U <-> photo x, from the cabin windows (and the L1 door, tail end)
+# texture U <-> photo x, from the cabin windows (and the L1 door, tail end).
+# The two sections meet on one ring of the mesh: the forward section ends at
+# U 3948, 105.5 texels behind its last window, and the aft one starts at
+# U 537.5, 77.5 ahead of its first. Between those windows (991 and 1030.5)
+# that ring is at 1013.8, where the aft section's map already puts it; the
+# forward map, run on at its last window spacing, had it at 1016.5, so the
+# colour edges stepped by ~2.7 px at the seam. It is pinned there.
 FWD = ([993, 1323, 1499.5, 1675.5, 1852.5, 2029.5, 2206, 2382.5, 2559, 2735,
-        2912.5, 3089, 3290.5, 3478, 3660.5, 3842.5],
+        2912.5, 3089, 3290.5, 3478, 3660.5, 3842.5, 3948],
        [316.5, 394.5, 436, 477.5, 519, 560, 602, 643.5, 684, 725, 766.5, 809,
-        858.5, 902, 947, 991])
+        858.5, 902, 947, 991, 1013.8])
+X_JOIN = 1013.8                       # photo station of the section seam
 AFT = ([615, 797.5, 1807.5, 1976, 2144, 2310.5, 4090],
        [1030.5, 1070, 1299, 1339, 1379.5, 1420, 1845])
 THETA_WIN = math.pi * 378 / 997        # window row angle from the crown
@@ -104,7 +111,7 @@ def build_theta(mask_path='layers/fus__paintmask.png'):
     # ...then the tail cone, strip by strip between the model's seams (the
     # dart edges, followed down the mask from each tip; see stringers.py).
     import stringers as S
-    phi = S.strip_phi_map(mask4, N)
+    phi = S.strip_phi_map(mask4, N, strokes=S.wire_strokes('layers/fus__WIREFRAME_E190.png'))
     th_mesh = np.where(phi <= np.pi, phi, 2 * np.pi - phi)
     aft_rows = al | ar
     cols = U4 >= S.U0
@@ -112,4 +119,24 @@ def build_theta(mask_path='layers/fus__paintmask.png'):
     old = theta[np.ix_(aft_rows, cols)]
     theta[np.ix_(aft_rows, cols)] = np.where(np.isfinite(blk), blk, old)
 
+    # The ventral antenna (a long blade under the aft belly, from a swept
+    # mast at ~1380 back to the tail) is a separate part packed into the
+    # gutter below the right-hand lower strip, inside the paint mask. Mapped
+    # by its V it took the angle of the strip beside it (143-168 deg), so it
+    # came out green at the mast and striped along its length. It hangs on
+    # the belly centreline, so it gets that colour: white, red under the tail
+    # (set a hair inside it: at exactly pi the edges that run to the belly
+    # would each cover it by half).
+    ant = antenna_island(mask4)
+    theta[np.repeat(np.repeat(ant, 2, 0), 2, 1)] = np.pi - 0.01
+
     return theta, mask8, V4, U4, al, ar
+
+
+def antenna_island(mask4, wire_path='layers/fus__WIREFRAME_E190.png', seed=(3320, 2700)):
+    """4K mask of the antenna's island: the piece of the paint mask that the
+    fuselage wireframe doesn't cover, around the seed (V, U)."""
+    from scipy import ndimage
+    off = mask4 & (np.asarray(Image.open(wire_path))[..., 3] == 0)
+    lab, _ = ndimage.label(off)
+    return lab == lab[seed]
