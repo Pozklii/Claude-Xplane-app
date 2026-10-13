@@ -93,5 +93,36 @@ for comp, tex in SIDES.items():
     reg[:] = reg * (1 - a) + arr[..., :3] * a
     print('side', comp, 'logo at', (x0, y0), 'size', size8, 'angle', round(ang, 1), 'scale', round(scale, 2))
 
+# Horizontal stabilisers and elevators: grey on the jet (both photos), where
+# the kit leaves them off-white. Their skins are the light blue-grey panels
+# across the top of the texture, plus one stabiliser skin and one elevator
+# skin turned on end (the tapered piece on the left, U 6-617; the strip with
+# the elevator's marks at bottom right, U 3583-3878). They are found by their
+# colour against the white gutters, keeping clear of the fin sides, the
+# beacon (U 1524-1775, V 97-348) and the two plain strips at the edges. In
+# the eye-level photo the lit top surface is ~0.7 as bright as the white fin;
+# with the kit's panels at ~(205, 207, 210) this gives ~(158, 160, 164).
+STAB_PAINT = np.array([0.77, 0.775, 0.78], np.float32)
+base4 = np.asarray(Image.open('layers/tail_base.png').convert('RGB')).astype(np.int16)
+panel = base4.max(2) < 238
+panel = ndimage.binary_closing(panel, np.ones((9, 9), bool))
+panel = ndimage.binary_fill_holes(panel)
+panel = ndimage.binary_opening(panel, np.ones((15, 15), bool))
+fin_near = ndimage.binary_dilation(np.isin(lab4, list(SIDES)), iterations=12)
+panel &= ~fin_near
+area = np.zeros_like(panel)
+area[:2440, :] = True                       # top band and the stabiliser skin on end
+area[2750:, 3583:3878] = True               # the elevator skin on end
+area[97:348, 1524:1775] = False             # beacon
+area[1990:, :170] = False                   # plain strip, left edge
+stab4 = panel & area
+plab, n = ndimage.label(stab4)
+sizes = ndimage.sum(stab4, plab, range(1, n + 1))
+stab4 = np.isin(plab, 1 + np.nonzero(sizes > 30000)[0])
+stab8 = np.repeat(np.repeat(stab4, 2, 0), 2, 1)
+stab8 = ndimage.gaussian_filter(stab8.astype(np.float32), 1.0)[..., None]
+paint = paint * (1 - stab8) + STAB_PAINT * stab8
+print('stabiliser and elevator panels:', int(stab4.sum()), '4K texels')
+
 Image.fromarray((paint * 255 + 0.5).astype(np.uint8)).save(f'{OUT}/tail_paint8.png')
 print('done')
