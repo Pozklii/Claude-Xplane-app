@@ -537,21 +537,13 @@ put(flag, 2 * (R1_FWD - 0.32 * R1_W) - fw8 / 2, 2 * R1_TOP - fh8 / 2, fw8, fh8, 
 # centred 0.35 of the way from the door's rear frame to the first window's
 # centre and 6 px above it, in the kit's own logo-by-the-door area; the
 # eye-level photo of the right side shows none there). Kit: door rear frame
-# U 1086, first window U 1323. On the jet the sphere is azure (hue 216,
-# first photo) where the kit's is a purple-blue (241), so its blue is
-# shifted to match, leaving the lettering and highlight.
+# U 1086, first window U 1323. Kept in the official colours (a purple-blue,
+# hue 241); the first photo shows it brighter and more azure (hue 216).
 OW_U8, OW_V8 = 2 * (1086 + 0.348 * (1323 - 1086)), 722.0
 OW_W8 = 2 * 65.0                   # 15.5 px at the door's 4.2 texels per px
 OW_H8 = OW_W8 * skin_ratio(360.4, 462.3)
 ow = Image.open(f'{KITART}/oneworld.png').convert('RGBA')
-_hsv = np.asarray(ow.convert('RGB').convert('HSV')).astype(np.float32)
-_w = np.clip(_hsv[..., 1] / 255 / 0.25, 0, 1)
-_hsv[..., 0] = (_hsv[..., 0] - _w * 25 / 360 * 255) % 255
-_hsv[..., 1] = np.clip(_hsv[..., 1] * (1 + _w * (0.82 / 0.47 - 1)), 0, 255)
-_hsv[..., 2] = np.clip(_hsv[..., 2] * (1 + _w * (0.72 / 0.66 - 1)), 0, 255)
-_ow = Image.fromarray(_hsv.astype(np.uint8), 'HSV').convert('RGB')
-_ow.putalpha(ow.getchannel('A'))
-put(_ow, OW_U8, OW_V8, OW_W8, OW_H8, False)
+put(ow, OW_U8, OW_V8, OW_W8, OW_H8, False)
 
 paint[~mask8] = 1.0
 # Seam padding: carry each painted strip's colour up to 12 (4K) texels out
