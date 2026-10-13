@@ -42,7 +42,7 @@ The fuselage is mapped from the photo using the cabin windows as anchors. On
 the tail cone, where the texture is cut into strips by darts, the angle
 around the fuselage runs evenly across each strip between its seams, whose
 angles are fixed by the dart tips (`stringers.py`); each fin side uses a
-five-point piecewise-affine map. The paint is carried a few texels past each
+smooth thin-plate-spline map through five points (`finmap.py`). The paint is carried a few texels past each
 strip into the empty gutter around it, so the sim's texture filtering doesn't
 blend white into the seams. `dump.py` and `tree.py` inspect a PSD's layers.
 
