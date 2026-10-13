@@ -46,5 +46,5 @@ five-point piecewise-affine map. The paint is carried a few texels past each
 strip into the empty gutter around it, so the sim's texture filtering doesn't
 blend white into the seams. `dump.py` and `tree.py` inspect a PSD's layers.
 
-Fonts: Outfit, Barlow (the registration) and Aref Ruqaa, all SIL Open Font
+Fonts: Outfit, Barlow (the registrations) and Aref Ruqaa, all SIL Open Font
 License (see `fonts/`).

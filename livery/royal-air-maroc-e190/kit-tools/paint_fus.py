@@ -516,6 +516,22 @@ emb.putalpha(emb_mask)
 put(emb, 2 * EMB_U4, 2 * EMB_V4, 2 * EMB_W4, 2 * EMB_H4, False)
 put(emb, 2 * EMB_U4, 4 * AX_F - 2 * EMB_V4, 2 * EMB_W4, 2 * EMB_H4, True)
 
+# Nose-gear doors: "GO", the end of CN-RGO, at the front of each door, as in
+# both photos (the red stripe at their rear edge is already in the kit's
+# base). The doors are U 635-840, V 900-997 on the left (hinged at 900, so
+# with the gear down they hang with that edge at the top) and 997-1093 on the
+# right. In the photos the letters start 0.035 of the door's length behind
+# its front edge, run 0.345 of it and stand 0.46 of its height, centred on
+# it; black, in the registration's face, a weight bolder.
+NG_U0, NG_U1, NG_HINGE, NG_W, NG_H = 635.0, 840.0, 900.0, 0.345, 0.46
+ng = reg_layer('GO', f'{FONTS}/barlow-latin-600-normal.woff', 300, REG_BLACK, tracking=0.0)
+ng_w4 = NG_W * (NG_U1 - NG_U0)
+ng_h4 = NG_H * (AX_F - NG_HINGE)
+ng_u4 = NG_U0 + 0.035 * (NG_U1 - NG_U0) + ng_w4 / 2
+ng_v4 = (NG_HINGE + AX_F) / 2
+put(ng, 2 * ng_u4, 2 * ng_v4, 2 * ng_w4, 2 * ng_h4, False)
+put(ng, 2 * ng_u4, 4 * AX_F - 2 * ng_v4, 2 * ng_w4, 2 * ng_h4, True)
+
 # Moroccan flag: red field, green interlaced star
 fw = 600
 flag = Image.new('RGBA', (fw, int(fw * 2 / 3)), (193, 39, 45, 255))
