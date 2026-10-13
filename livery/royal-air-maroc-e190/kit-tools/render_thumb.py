@@ -123,7 +123,8 @@ H = int((vmax - vmin) * sc + 2 * pad)
 px = ((u - umin) * sc + pad).astype(int)
 py = ((vmax - v) * sc + pad).astype(int)
 # light from above, ahead and to the left; soft fill so shadows stay readable
-Ld = np.array([-0.35, 0.45, 0.82]); Ld /= np.linalg.norm(Ld)
+# (on the camera's side, so mirrored views of the two sides light alike)
+Ld = np.array([-0.35, 0.45 * (1 if cam[1] >= 0 else -1), 0.82]); Ld /= np.linalg.norm(Ld)
 facing = np.sign(NR @ cam)[:, None]
 Nf = NR * np.where(facing == 0, 1, facing)
 diff = np.clip(Nf @ Ld, 0, 1)

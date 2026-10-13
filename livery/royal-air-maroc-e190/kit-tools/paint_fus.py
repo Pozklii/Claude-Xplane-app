@@ -165,10 +165,15 @@ E_B43 = np.where(XG <= 1046.8, b4, E_B3)
 # - front tip at the pinstripe just behind its crown junction;
 # - above it, bright leaf A along the crown, its tip dipping back into the dark;
 # - behind leaf A's tip the dark reaches the crown, until bright leaf B, whose
-#   lower edge sweeps down to the back tip over the rear door, at window level;
-# - its lower edge follows the pinstripe to the wing, then runs just below the
-#   windows with bright red between it and the pinstripe.
-DR_FRONT, DR_BACK = 1086.0, 1480.0
+#   lower edge leaves the crown gently and steepens towards the rear door,
+#   meeting the lower edge in a point inside the door;
+# - its lower edge follows the pinstripe to the wing, then runs straight just
+#   below the windows, with bright red between it and the pinstripe.
+# Behind the wing both edges are traced off the first photo through its
+# camera model, which is fitted to the left rear door (38.6-124.7 deg in the
+# mesh). The eye-level photo of the right side agrees to ~5 deg once it is
+# fitted to its own rear door, a service door whose top is 15 deg lower.
+DR_FRONT, DR_BACK = 1086.0, 1488.0
 LA_BOT = [(1086, 29.5), (1090, 29.2), (1111, 27.4), (1131, 27.2), (1151, 25.3), (1172, 25.4),
           (1192, 27.4), (1212, 27.5), (1233, 29.4), (1253, 31.2), (1274, 34.4), (1294, 36.0),
           (1306, 35.5)]
@@ -178,10 +183,27 @@ LA_BOT = [(1086, 29.5), (1090, 29.2), (1111, 27.4), (1131, 27.2), (1151, 25.3), 
 # from above), its sides becoming leaf A's top edge as measured further back.
 LA_TOP = [(1086, 0.0), (1159, 0.0), (1195, 9.0), (1233, 18.7), (1253, 23.6), (1274, 27.7),
           (1294, 31.3), (1306, 35.5)]
-LB_BOT = [(1306, 0.0), (1335, 0.0), (1344, 21.0), (1365, 29.5), (1385, 34.5), (1405, 40.5),
-          (1426, 46.5), (1446, 52.5), (1462, 58.5), (1480, 66.0)]
-DR_LOW = [(1290, 76.5), (1320, 76.4), (1360, 76.1), (1400, 74.6), (1430, 72.0), (1460, 69.6),
-          (1480, 66.0)]
+LB_BOT = [(1306, 0.0), (1335, 0.0), (1350, 7.0), (1370, 16.0), (1380, 21.5), (1390, 27.0),
+          (1400, 32.0), (1410, 36.5), (1420, 41.0), (1430, 47.0), (1440, 54.0), (1450, 61.0),
+          (1460, 68.0), (1470, 74.0), (1479, 79.0)]
+DR_LOW = [(1290, 76.5), (1320, 76.5), (1360, 76.3), (1400, 75.6), (1430, 76.0), (1445, 77.3),
+          (1460, 78.6), (1479, 79.0)]
+
+
+def _to_door(pts):
+    """Behind the last window the texture's station map (anchored on the
+    windows and the tail) puts the rear door ~10 px further back than the
+    photo shows it (frame at 1457-1497 at window height, against 1467-1505
+    in the map), so points there are moved with the door: the tip stays
+    halfway into it and the top edge meets its front frame a quarter down."""
+    out = []
+    for x, t in pts:
+        d = 9.7 * min(max((x - 1420) / 37, 0), 1) - 1.7 * min(max((x - 1457) / 40, 0), 1)
+        out.append((x + d, t))
+    return out
+
+
+LB_BOT, DR_LOW = _to_door(LB_BOT), _to_door(DR_LOW)
 
 
 def curve(pts, lo, hi, outside):
