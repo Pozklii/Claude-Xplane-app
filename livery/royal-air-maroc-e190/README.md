@@ -28,6 +28,7 @@ Run from a working folder next to the extracted kit PSDs (needs
 python3 kit-tools/extract.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" "E-JETS_PAINTKIT_TAIL 22-08-28.psd"
 python3 kit-tools/base_fus.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" layers/fus_base_e190.png
 python3 kit-tools/base_generic.py "E-JETS_PAINTKIT_TAIL 22-08-28.psd" layers/tail_base.png "BASE TEXTURE" "TOP LAYER"
+python3 kit-tools/kitart.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" kitart
 python3 kit-tools/paint_fus.py tools fonts layers
 python3 kit-tools/paint_tail.py tools layers
 python3 kit-tools/combine.py layers/fus_base_e190.png layers/fus_paint8.png fuselage.png

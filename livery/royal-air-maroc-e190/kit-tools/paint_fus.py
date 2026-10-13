@@ -15,6 +15,7 @@ import geometry as G
 import elements as E
 
 FONTS, OUT = sys.argv[2], sys.argv[3]
+KITART = 'kitart'                 # kit-tools/kitart.py output (kit artwork)
 N = 8192
 Image.MAX_IMAGE_PIXELS = None
 
@@ -469,7 +470,6 @@ def reg_layer(text, font_path, px, fill, tracking=0.03, dash=0.40, ss=4):
 
 reg = reg_layer('CN-RGO', f'{FONTS}/barlow-latin-500-normal.woff', 300, REG_BLACK)
 print('registration natural aspect %.2f' % (reg.width / reg.height))
-emb = E.text_layer('EMBRAER 190', f'{FONTS}/outfit-latin-600-normal.woff', 200, (30, 30, 30), pad=0)
 
 # forward window row, 8K: left V 378 +/- 36, right V 1616 +/- 36 (crown side is +)
 GAP8 = 30
@@ -493,18 +493,28 @@ put(ar_, ar_u0 + ar_u1, WR_BELLY8 - 65 - ar_h / 2, ar_w, ar_h, True)
 
 rx, ry = G.REG['center']
 stamp(reg, rx, ry, G.REG['width'], AX_A, aspect=4.9, skin=True)   # 4.9:1 on the jet
-# The small marks by the nose are sized against the forward doors, which the
-# kit draws at their true size: near the nose the photos' scale along the
-# fuselage doesn't match the window-anchored station map. Flag and text are
-# the same size on both sides, so the two photos are averaged:
-#   "EMBRAER 190": 0.94 of the L1 door's width (photo 1), 1.0 of the
-#     smaller R1 door's (eye-level photo) -> 175 / 156 -> 165 4K texels;
-#   flag: 0.50 of L1, 0.53 of R1 -> 94 / 83 -> 88 4K texels.
+# The flag is sized against the forward doors, which the kit draws at their
+# true size: near the nose the photos' scale along the fuselage doesn't match
+# the window-anchored station map. It is the same size on both sides, so the
+# two photos are averaged: 0.50 of L1's width, 0.53 of the smaller R1's.
 L1_W, R1_W = 187.0, 156.0          # 4K texels, frame outer
-EMB_W8 = 2 * (0.94 * L1_W + 1.00 * R1_W) / 2
 FLAG_W8 = 2 * (0.50 * L1_W + 0.53 * R1_W) / 2
-ec = G.EMBRAER_190['center']
-stamp(emb, ec[0], ec[1], G.EMBRAER_190['width'], AX_F, skin=True, tw8=EMB_W8)
+
+# "EMBRAER 190": the kit's own artwork of Embraer's italic lettering
+# (kit-tools/kitart.py), placed against the cockpit side window, which the
+# kit's mask cuts out at U 404-585, V 294-416 (4K; mirrored on the right).
+# The two photos agree to ~10%: the title runs from 0.12 to 1.12 window
+# widths aft of the window's front edge (175 texels, averaged with its width
+# against the forward doors), centred 51 rows below the window, and reads
+# about 12.4:1 on the jet; the texture holds ~0.96 as many texels round the
+# nose as along it, so its letters are 14 rows tall, a little flatter than
+# the kit's 10.3:1.
+EMB_U4, EMB_V4, EMB_W4, EMB_H4 = 516.5, 467.0, 175.0, 14.0
+emb_mask = Image.open(f'{KITART}/embraer_190.png').convert('L')
+emb = Image.new('RGBA', emb_mask.size, (40, 40, 44, 0))
+emb.putalpha(emb_mask)
+put(emb, 2 * EMB_U4, 2 * EMB_V4, 2 * EMB_W4, 2 * EMB_H4, False)
+put(emb, 2 * EMB_U4, 4 * AX_F - 2 * EMB_V4, 2 * EMB_W4, 2 * EMB_H4, True)
 
 # Moroccan flag: red field, green interlaced star
 fw = 600
@@ -521,34 +531,27 @@ fw8, fh8 = stamp(flag, (fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, AX_F, sides=
 R1_FWD, R1_TOP = 803.0, 1709.5
 put(flag, 2 * (R1_FWD - 0.32 * R1_W) - fw8 / 2, 2 * R1_TOP - fh8 / 2, fw8, fh8, True)
 
-# oneworld emblem, left side only: a blue disc with the white globe and
-# wordmark, between the L1 door and the first window (first photo: 15 px
-# across, centred 0.35 of the way from the door's rear frame to the first
-# window's centre and 6 px above it; the eye-level photo of the right side
-# shows none there). Kit: door rear frame U 1086, first window U 1323.
+# oneworld emblem, left side only: the official emblem from the kit (a
+# shaded sphere with the wordmark across it), between the L1 door and the
+# first window (first photo: 15.5 px across, about a third of the door's width,
+# centred 0.35 of the way from the door's rear frame to the first window's
+# centre and 6 px above it, in the kit's own logo-by-the-door area; the
+# eye-level photo of the right side shows none there). Kit: door rear frame
+# U 1086, first window U 1323. On the jet the sphere is azure (hue 216,
+# first photo) where the kit's is a purple-blue (241), so its blue is
+# shifted to match, leaving the lettering and highlight.
 OW_U8, OW_V8 = 2 * (1086 + 0.348 * (1323 - 1086)), 722.0
-OW_W8 = 2 * 64.0
+OW_W8 = 2 * 65.0                   # 15.5 px at the door's 4.2 texels per px
 OW_H8 = OW_W8 * skin_ratio(360.4, 462.3)
-ss = 8
-ow = Image.new('RGBA', (512 * ss // 4, 512 * ss // 4), (0, 0, 0, 0))
-od = ImageDraw.Draw(ow)
-R0 = ow.width / 2
-od.ellipse([0, 0, ow.width - 1, ow.height - 1], fill=(28, 88, 178, 255))
-ftxt = ImageFont.truetype(f'{FONTS}/outfit-latin-600-normal.woff', int(ow.width * 0.15))
-tb = od.textbbox((0, 0), 'oneworld', font=ftxt)
-gl = int(ow.width * 0.11)                          # globe diameter
-gap = int(ow.width * 0.025)
-tot = gl + gap + (tb[2] - tb[0])
-x0 = (ow.width - tot) / 2
-cy_ = R0
-lw = max(2, int(gl * 0.12))
-od.ellipse([x0, cy_ - gl / 2, x0 + gl, cy_ + gl / 2], outline=(255, 255, 255, 255), width=lw)
-od.arc([x0 - gl * 0.15, cy_ - gl * 0.28, x0 + gl * 1.15, cy_ + gl * 0.28], 200, 340,
-       fill=(255, 255, 255, 255), width=lw)
-od.text((x0 + gl + gap - tb[0], cy_ - (tb[1] + tb[3]) / 2), 'oneworld', font=ftxt,
-        fill=(255, 255, 255, 255))
-ow = ow.resize((512, 512), Image.LANCZOS)
-put(ow, OW_U8, OW_V8, OW_W8, OW_H8, False)
+ow = Image.open(f'{KITART}/oneworld.png').convert('RGBA')
+_hsv = np.asarray(ow.convert('RGB').convert('HSV')).astype(np.float32)
+_w = np.clip(_hsv[..., 1] / 255 / 0.25, 0, 1)
+_hsv[..., 0] = (_hsv[..., 0] - _w * 25 / 360 * 255) % 255
+_hsv[..., 1] = np.clip(_hsv[..., 1] * (1 + _w * (0.82 / 0.47 - 1)), 0, 255)
+_hsv[..., 2] = np.clip(_hsv[..., 2] * (1 + _w * (0.72 / 0.66 - 1)), 0, 255)
+_ow = Image.fromarray(_hsv.astype(np.uint8), 'HSV').convert('RGB')
+_ow.putalpha(ow.getchannel('A'))
+put(_ow, OW_U8, OW_V8, OW_W8, OW_H8, False)
 
 paint[~mask8] = 1.0
 # Seam padding: carry each painted strip's colour up to 12 (4K) texels out
