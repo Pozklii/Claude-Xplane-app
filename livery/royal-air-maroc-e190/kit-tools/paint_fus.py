@@ -407,14 +407,15 @@ def skin_ratio(cx, cy):
     return float(np.interp(cx, SKIN_X, SKIN_K))
 
 
-def stamp(art, cx, cy, w, ax_v, aspect=None, top=None, bottom=None, sides='LR', skin=False):
+def stamp(art, cx, cy, w, ax_v, aspect=None, top=None, bottom=None, sides='LR', skin=False,
+          tw8=None):
     """Centred on photo (cx, cy) on the left side, keeping its proportions
     (on the skin with skin=True, else in texels); mirrored onto the right
-    side rotated 180."""
+    side rotated 180. tw8 sets the width in 8K texels instead of w."""
     u0, _ = to_tex(cx - w / 2, cy)
     u1, _ = to_tex(cx + w / 2, cy)
     uc, vc = to_tex(cx, cy)
-    tw = u1 - u0
+    tw = tw8 if tw8 is not None else u1 - u0
     th_ = tw / (aspect or art.width / art.height)
     if skin:
         k = skin_ratio(cx, cy)
@@ -492,8 +493,18 @@ put(ar_, ar_u0 + ar_u1, WR_BELLY8 - 65 - ar_h / 2, ar_w, ar_h, True)
 
 rx, ry = G.REG['center']
 stamp(reg, rx, ry, G.REG['width'], AX_A, aspect=4.9, skin=True)   # 4.9:1 on the jet
+# The small marks by the nose are sized against the forward doors, which the
+# kit draws at their true size: near the nose the photos' scale along the
+# fuselage doesn't match the window-anchored station map. Flag and text are
+# the same size on both sides, so the two photos are averaged:
+#   "EMBRAER 190": 0.94 of the L1 door's width (photo 1), 1.0 of the
+#     smaller R1 door's (eye-level photo) -> 175 / 156 -> 165 4K texels;
+#   flag: 0.50 of L1, 0.53 of R1 -> 94 / 83 -> 88 4K texels.
+L1_W, R1_W = 187.0, 156.0          # 4K texels, frame outer
+EMB_W8 = 2 * (0.94 * L1_W + 1.00 * R1_W) / 2
+FLAG_W8 = 2 * (0.50 * L1_W + 0.53 * R1_W) / 2
 ec = G.EMBRAER_190['center']
-stamp(emb, ec[0], ec[1], G.EMBRAER_190['width'], AX_F, skin=True)
+stamp(emb, ec[0], ec[1], G.EMBRAER_190['width'], AX_F, skin=True, tw8=EMB_W8)
 
 # Moroccan flag: red field, green interlaced star
 fw = 600
@@ -502,12 +513,42 @@ star = E.woven_star(flag.size, fw / 2, flag.height / 2 + 6, flag.height * 0.36,
                     flag.height * 0.36 * 0.14, flag.height * 0.36 * 0.04)
 flag.paste(Image.new('RGBA', flag.size, (0, 98, 51, 255)), mask=star)
 fx0, fy0, fx1, fy1 = G.FLAG
-fw8, fh8 = stamp(flag, (fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, AX_F, sides='L', skin=True)  # 3:2 on the jet
+fw8, fh8 = stamp(flag, (fx0 + fx1) / 2, (fy0 + fy1) / 2, fx1 - fx0, AX_F, sides='L', skin=True,
+                 tw8=FLAG_W8)  # 3:2 on the jet
 # Right side: not a mirror of the left. There the flag sits just ahead of the
 # smaller service door (4K: U 803-959, top edge V 1709.5), level with its top
 # and a third of a door width in front of it (eye-level photo of that side).
-R1_FWD, R1_TOP, R1_W = 803.0, 1709.5, 156.0
+R1_FWD, R1_TOP = 803.0, 1709.5
 put(flag, 2 * (R1_FWD - 0.32 * R1_W) - fw8 / 2, 2 * R1_TOP - fh8 / 2, fw8, fh8, True)
+
+# oneworld emblem, left side only: a blue disc with the white globe and
+# wordmark, between the L1 door and the first window (first photo: 15 px
+# across, centred 0.35 of the way from the door's rear frame to the first
+# window's centre and 6 px above it; the eye-level photo of the right side
+# shows none there). Kit: door rear frame U 1086, first window U 1323.
+OW_U8, OW_V8 = 2 * (1086 + 0.348 * (1323 - 1086)), 722.0
+OW_W8 = 2 * 64.0
+OW_H8 = OW_W8 * skin_ratio(360.4, 462.3)
+ss = 8
+ow = Image.new('RGBA', (512 * ss // 4, 512 * ss // 4), (0, 0, 0, 0))
+od = ImageDraw.Draw(ow)
+R0 = ow.width / 2
+od.ellipse([0, 0, ow.width - 1, ow.height - 1], fill=(28, 88, 178, 255))
+ftxt = ImageFont.truetype(f'{FONTS}/outfit-latin-600-normal.woff', int(ow.width * 0.15))
+tb = od.textbbox((0, 0), 'oneworld', font=ftxt)
+gl = int(ow.width * 0.11)                          # globe diameter
+gap = int(ow.width * 0.025)
+tot = gl + gap + (tb[2] - tb[0])
+x0 = (ow.width - tot) / 2
+cy_ = R0
+lw = max(2, int(gl * 0.12))
+od.ellipse([x0, cy_ - gl / 2, x0 + gl, cy_ + gl / 2], outline=(255, 255, 255, 255), width=lw)
+od.arc([x0 - gl * 0.15, cy_ - gl * 0.28, x0 + gl * 1.15, cy_ + gl * 0.28], 200, 340,
+       fill=(255, 255, 255, 255), width=lw)
+od.text((x0 + gl + gap - tb[0], cy_ - (tb[1] + tb[3]) / 2), 'oneworld', font=ftxt,
+        fill=(255, 255, 255, 255))
+ow = ow.resize((512, 512), Image.LANCZOS)
+put(ow, OW_U8, OW_V8, OW_W8, OW_H8, False)
 
 paint[~mask8] = 1.0
 # Seam padding: carry each painted strip's colour up to 12 (4K) texels out
