@@ -8,6 +8,10 @@ crosses from one triangle into the next (the crescent bent where it crossed
 the trailing-edge-root to leading-edge-tip line). Neither one affine nor one
 perspective map fits all five (they miss by up to 125 and 370 texels), so the
 map is a thin-plate spline: exact at the five points and smooth everywhere.
+Points a third and two thirds along the trailing and leading edges are matched
+too (both edges are straight on the photo and in the texture), so the edges
+map straight: left free, the spline bowed them ~5.5 photo px, which carried
+the red base past the trailing edge and up it, above the star's top point.
 """
 import numpy as np
 
@@ -48,13 +52,24 @@ class _TPS:
         return out * _S
 
 
+EDGES = (('rootTE', 'tipTE'), ('tipLE', 'kink'))
+
+
+def _points(d):
+    """the five points plus a third and two thirds along each straight edge"""
+    pts = [d[k] for k in PHOTO]
+    for a, b in EDGES:
+        for t in (1 / 3, 2 / 3):
+            pts.append(tuple(np.array(d[a], float) * (1 - t) + np.array(d[b], float) * t))
+    return pts
+
+
 class FinMap:
     """tex_to_photo and photo_to_tex for one fin side (4K texture units)."""
 
     def __init__(self, side):
-        keys = list(PHOTO)
-        tex = [SIDES[side][k] for k in keys]
-        ph = [PHOTO[k] for k in keys]
+        tex = _points(SIDES[side])
+        ph = _points(PHOTO)
         self.t2p = _TPS(tex, ph)
         self._p2t = _TPS(ph, tex)
 

@@ -61,7 +61,11 @@ B5 = [(1062, 466), (1080, 485), (1160, 510), (1240, 532), (1280, 546),
 FIN_RED = [(1410, 504), (1440, 509), (1480, 514), (1520, 521), (1560, 527),
            (1600, 533), (1640, 537), (1660, 533), (1680, 524), (1700, 515),
            (1720, 503), (1740, 489), (1760, 471), (1780, 449), (1800, 422),
-           (1815, 395), (1830, 362), (1850, 300), (1870, 240)]
+           # runs straight on into the trailing edge, meeting it in a sharp
+           # point just below the star's top point (0.12 of the star's height
+           # below it in the eye-level photo, 0.24 in photo 1), and only turns
+           # out once past the edge, so the red can't run on up it
+           (1806, 413), (1812, 404), (1818, 395), (1824, 386), (1838, 381), (1870, 379)]
 TAIL_CAP_X = 1840            # metallic APU exhaust behind this
 
 # Cabin windows: centres along the window line, ~14 x 16 px.
