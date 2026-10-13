@@ -12,7 +12,7 @@ in the private `Pozklii/190` repo (branch `royal-air-maroc-livery`), not here.
 - `tools/geometry.py`: band boundaries, outline, windows, doors and title positions traced from the reference photo
 - `tools/elements.py`, `tools/profile.py`: render the elements and the profile
 
-Regenerate (needs Pillow and NumPy):
+Regenerate (needs Pillow, NumPy and SciPy):
 
 ```sh
 python3 tools/elements.py artwork fonts

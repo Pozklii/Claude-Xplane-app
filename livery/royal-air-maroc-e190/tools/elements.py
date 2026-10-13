@@ -16,59 +16,82 @@ from geometry import RED, REG_RED, STAR_GREEN, catmull_rom
 SS = 4
 
 
-# Crescent centreline (x, y, stroke width) in tail-crop pixels.
-CRESCENT = [(509, 324, 0), (511, 292, 20), (520, 262, 26), (536, 236, 31),
-            (565, 195, 36), (600, 167, 33), (640, 156, 27), (672, 166, 24),
-            (690, 197, 22), (694, 240, 21), (688, 290, 20), (675, 330, 18),
-            (655, 366, 15), (630, 399, 12), (605, 423, 8), (577, 441, 0)]
-STAR_C, STAR_R = (487, 370), 85
-STAR_W, STAR_GAP = 0.16 * 85, 0.04 * 85
+# Crescent, traced edge to edge off the first photo (tail-crop pixels, 2x the
+# photo): a centreline whose curvature varies smoothly (fitted to the traced
+# one to within 0.35 px of the photo, kept clear of the photo's ripples, which
+# the inner edge would magnify), a smooth stroke width along it, and a
+# straight cut where it meets the star. The points are kept to 0.001 px:
+# 12 px apart, rounding to 0.1 px would ripple the gentle curvature of the
+# right-hand side. The stroke is ~36 wide over the upper left and the top,
+# narrows round the top right to ~21, then tapers evenly down the
+# right-hand side to a point; at the star it ends full width, cut along the
+# star's arm with a gap (crescent_cut).
+CRESCENT = [(516.800, 272.000), (523.088, 261.691), (529.769, 251.634), (536.882, 241.876),
+            (544.379, 232.411), (552.180, 223.194), (560.214, 214.179), (568.452, 205.351),
+            (576.919, 196.741), (585.696, 188.450), (594.924, 180.665), (604.780, 173.698),
+            (615.413, 167.996), (626.830, 164.116), (638.789, 162.629), (650.759, 163.966),
+            (662.013, 168.254), (671.822, 175.241), (679.658, 184.393), (685.284, 195.053),
+            (688.750, 206.603), (690.309, 218.567), (690.322, 230.636), (689.166, 242.653),
+            (687.173, 254.561), (684.587, 266.355), (681.535, 278.038), (678.043, 289.597),
+            (674.077, 301.001), (669.582, 312.208), (664.525, 323.172), (658.925, 333.869),
+            (652.848, 344.303), (646.381, 354.500), (639.615, 364.502), (632.625, 374.348),
+            (625.453, 384.063), (618.106, 393.646), (610.554, 403.069), (602.734, 412.269),
+            (594.838, 421.177), (586.719, 429.889), (578.600, 438.600)]
+# stroke width against the fraction of the way along, from the first point
+CRESCENT_WIDTH = [(0.00, 36.17), (0.05, 35.44), (0.10, 35.41), (0.15, 35.61), (0.20, 35.55), (0.25, 34.75),
+                  (0.30, 32.73), (0.35, 29.30), (0.40, 25.41), (0.45, 22.14), (0.50, 20.00), (0.55, 18.39),
+                  (0.60, 16.32), (0.65, 14.05), (0.70, 12.00), (0.75, 10.10), (0.80, 8.13), (0.85, 5.94),
+                  (0.90, 3.71), (0.95, 1.65), (1.00, 0.00)]
+# Star, fitted to the first photo as a regular interlaced pentagram: centre,
+# radius to the bands' centrelines, band width and tilt (clockwise, as the
+# crescent is traced, so the two keep their places on the jet).
+STAR_C, STAR_R, STAR_ROT = (489.0, 367.4), 69.7, 3.1
+STAR_W, STAR_GAP = 0.15 * STAR_R, 0.04 * STAR_R
 
 
-def _resample(pts, n):
-    d = [0.0]
-    for a, b in zip(pts, pts[1:]):
-        d.append(d[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
-    out, j = [], 0
-    for i in range(n):
-        t = d[-1] * i / (n - 1)
-        while j < len(d) - 2 and d[j + 1] < t:
-            j += 1
-        f = (t - d[j]) / ((d[j + 1] - d[j]) or 1)
-        out.append((pts[j][0] + f * (pts[j + 1][0] - pts[j][0]),
-                    pts[j][1] + f * (pts[j + 1][1] - pts[j][1])))
-    return out
-
-
-def crescent_width(u):
-    """Thin pointed start at the star, fattest over the upper left, then a
-    long taper down the right-hand side to a point."""
-    peak, wmax = 0.16, 37.0
-    if u < peak:
-        return wmax * math.sin(math.pi / 2 * u / peak) ** 0.6
-    return wmax * max(0.0, 1 - (u - peak) / (1 - peak)) ** 0.85
-
-
-def crescent_polygon(k, ox, oy, n=1200):
-    pts = _resample(catmull_rom([(x, y) for x, y, _ in CRESCENT], 30), n)
-    win = 130
-    sm = []
-    for i in range(n):
-        a, b = max(0, i - win), min(n, i + win + 1)
-        # shrink the window at the ends so the endpoints stay put
-        h = min(i - a, b - 1 - i)
-        seg = pts[i - h:i + h + 1]
-        sm.append((sum(p[0] for p in seg) / len(seg), sum(p[1] for p in seg) / len(seg)))
-    left, right = [], []
-    for i, (x, y) in enumerate(sm):
-        p, q = sm[max(i - 2, 0)], sm[min(i + 2, n - 1)]
-        dx, dy = q[0] - p[0], q[1] - p[1]
-        L = math.hypot(dx, dy) or 1
-        nx, ny = -dy / L, dx / L
-        hw = crescent_width(i / (n - 1)) / 2
-        left.append(((x + nx * hw) * k + ox, (y + ny * hw) * k + oy))
-        right.append(((x - nx * hw) * k + ox, (y - ny * hw) * k + oy))
+def crescent_polygon(k, ox, oy, n=1500, ext=70.0):
+    """Outline of the stroke, run on past its star end so that the cut
+    (crescent_cut) ends it there."""
+    import numpy as np
+    from scipy.interpolate import make_interp_spline, splev, splprep
+    c = np.array(CRESCENT, float)
+    t0 = c[0] - c[1]
+    t0 /= np.linalg.norm(t0)
+    c = np.vstack([c[0] + t0 * ext, c])
+    s = np.r_[0, np.cumsum(np.hypot(*np.diff(c, axis=0).T))]
+    tck, _ = splprep(c.T, u=s / s[-1], s=0, k=3)
+    u = np.linspace(0, 1, n)
+    x, y = splev(u, tck)
+    dx, dy = splev(u, tck, der=1)
+    L = np.hypot(dx, dy)
+    nx, ny = -dy / L, dx / L
+    s0 = ext / s[-1]
+    f = np.clip((u - s0) / (1 - s0), 0, 1)
+    hw = make_interp_spline(*zip(*CRESCENT_WIDTH), k=3)(f) / 2
+    left = [((a + b * h) * k + ox, (c_ + d * h) * k + oy) for a, b, c_, d, h in zip(x, nx, y, ny, hw)]
+    right = [((a - b * h) * k + ox, (c_ - d * h) * k + oy) for a, b, c_, d, h in zip(x, nx, y, ny, hw)]
     return left + right[::-1]
+
+
+def crescent_cut(k, ox, oy, big=2000.0):
+    """Half-plane on the stroke's side of the cut at the star: parallel to the
+    star's arm from its top point, clear of it by the weave's gap (the photo
+    shows the same ~1.5 px of white there)."""
+    sx, sy = STAR_C
+    V = [(sx + STAR_R * math.sin(math.radians(72 * i + STAR_ROT)),
+          sy - STAR_R * math.cos(math.radians(72 * i + STAR_ROT))) for i in (0, 2)]
+    dx, dy = V[1][0] - V[0][0], V[1][1] - V[0][1]
+    L = math.hypot(dx, dy)
+    dx, dy = dx / L, dy / L
+    nx, ny = -dy, dx
+    bx, by = CRESCENT[2]
+    if (bx - V[0][0]) * nx + (by - V[0][1]) * ny < 0:
+        nx, ny = -nx, -ny
+    off = STAR_W / 2 + STAR_GAP
+    cx, cy = V[0][0] + nx * off, V[0][1] + ny * off
+    p1, p2 = (cx - dx * big, cy - dy * big), (cx + dx * big, cy + dy * big)
+    quad = [p1, p2, (p2[0] + nx * big, p2[1] + ny * big), (p1[0] + nx * big, p1[1] + ny * big)]
+    return [(x * k + ox, y * k + oy) for x, y in quad]
 
 
 def line_intersect(p1, p2, p3, p4):
@@ -94,9 +117,10 @@ def mask_poly(size, poly):
     return m
 
 
-def woven_star(size, cx, cy, R, w, gap):
-    """Interlaced pentagram mask: sharp mitred tips, alternating over/under."""
-    V = [(cx + R * math.sin(math.radians(72 * i)), cy - R * math.cos(math.radians(72 * i)))
+def woven_star(size, cx, cy, R, w, gap, rot=0.0):
+    """Interlaced pentagram mask: sharp mitred tips, alternating over/under;
+    rot turns it clockwise, in degrees."""
+    V = [(cx + R * math.sin(math.radians(72 * i + rot)), cy - R * math.cos(math.radians(72 * i + rot)))
          for i in range(5)]
     path = [0, 2, 4, 1, 3]
     lines = [(V[path[i]], V[path[(i + 1) % 5]]) for i in range(5)]
@@ -106,9 +130,9 @@ def woven_star(size, cx, cy, R, w, gap):
     r_in = R * math.sin(math.radians(18)) / math.sin(math.radians(54))
     outline = []
     for i in range(5):
-        a = math.radians(72 * i)
+        a = math.radians(72 * i + rot)
         outline.append((cx + R * s * math.sin(a), cy - R * s * math.cos(a)))
-        a2 = math.radians(72 * i + 36)
+        a2 = math.radians(72 * i + 36 + rot)
         outline.append((cx + r_in * s * math.sin(a2), cy - r_in * s * math.cos(a2)))
     clip = mask_poly(size, outline)
 
@@ -153,9 +177,10 @@ def tail_logo(size=4096):
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     red = Image.new("RGBA", (S, S), RED + (255,))
     green = Image.new("RGBA", (S, S), STAR_GREEN + (255,))
-    img.paste(red, mask=mask_poly((S, S), crescent_polygon(k, ox, oy)))
+    img.paste(red, mask=ImageChops.multiply(mask_poly((S, S), crescent_polygon(k, ox, oy)),
+                                            mask_poly((S, S), crescent_cut(k, ox, oy))))
     star = woven_star((S, S), STAR_C[0] * k + ox, STAR_C[1] * k + oy, STAR_R * k,
-                      STAR_W * k, STAR_GAP * k)
+                      STAR_W * k, STAR_GAP * k, STAR_ROT)
     img.paste(green, mask=star)
     return img.resize((size, size), Image.LANCZOS)
 
