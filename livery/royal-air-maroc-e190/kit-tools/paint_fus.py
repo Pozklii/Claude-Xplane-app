@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from scipy import ndimage
-from scipy.interpolate import splprep, splev
+from scipy.interpolate import PchipInterpolator, splprep, splev
 
 sys.path.insert(0, sys.argv[1])
 import geometry as G
@@ -254,6 +254,23 @@ E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5
 # as hard as the photo traces would iron out the turn into the tip
 E_DUP, E_DLO = (smooth_edge(e, rms_px=0.5) for e in (E_DUP, E_DLO))
 E_LAT, E_LAB, E_BL = (smooth_edge(e) for e in (E_LAT, E_LAB, E_BL))
+# Up to where it leaves for the line below the windows (~1295, behind the
+# wing), the dark red's lower edge is the pinstripe's upper edge: both photos
+# show the dark red sitting right on the white. Built from the raw pinstripe
+# curve and smoothed on its own, it had drifted up to 2 deg above the
+# smoothed one, leaving a thin bright-red line along the white. So it is
+# rebuilt from the smoothed pinstripe edge and the line below the windows (a
+# smooth curve through its traced points, so the rise into the tip is kept),
+# joined by a smooth minimum over the last 1.5 deg where it leaves.
+def _smin(a, b, k):
+    h = np.clip(k - np.abs(a - b), 0, k) / k
+    return np.minimum(a, b) - h * h * k / 4
+
+
+_dlx = [q[0] for q in DR_LOW]
+_low_s = np.where(XG < _dlx[0], math.pi,
+                  PchipInterpolator(_dlx, [q[1] * DEG for q in DR_LOW])(np.clip(XG, _dlx[0], _dlx[-1])))
+E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), _smin(E_B5, _low_s, 1.5 * DEG), 0.0)
 for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL)):
     print(f'smoothed {k}: max change {np.degrees(np.abs(e - _raw[k]).max()):.1f} deg', flush=True)
 
@@ -298,7 +315,9 @@ for r0 in range(0, N, 512):
     cov = [coverage(k, x, t_, g_, dudx) for k in range(len(EDGES))]
     L, B2, B3, B5, B43, DUP, DLO, LAT, LAB, BL = cov
     leaf_a = LAB * (1 - LAT)
-    dark = B5 * DLO * (1 - DUP) * (1 - leaf_a)
+    # min, not product: where the two edges coincide a product of their
+    # coverages would leave a faint bright line at the edge texels
+    dark = np.minimum(B5, DLO) * (1 - DUP) * (1 - leaf_a)
     col = np.ones((len(rr), 3), np.float32) * C['W']
     for c_, a_ in ((C['L'], L * BL), (C['D'], np.clip(B2 - B3, 0, 1) * BL), (C['W'], B43),
                    (C['R'], B5), (C['DR'], dark)):
