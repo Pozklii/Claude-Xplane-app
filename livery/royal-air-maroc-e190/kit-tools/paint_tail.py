@@ -22,13 +22,16 @@ Image.MAX_IMAGE_PIXELS = None
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from finmap import FinMap, SIDES
 
-# fin design in photo space: white, red below the fin curve
-K, X0, Y0, XW, YH = 10, 1380, 200, 520, 420
+# fin design in photo space: white, red below the fin curve. The fin holds
+# about 20 texels (8K) per photo px, so the design is drawn at 20 px per photo
+# px with a one-pixel blur for anti-aliasing: drawn at 10 with a 1.2 px blur,
+# its red edge had only half the texture's sharpness.
+K, X0, Y0, XW, YH = 20, 1380, 200, 520, 420
 img = Image.new('RGB', (XW * K, YH * K), G.WHITE)
 fin = G.catmull_rom(G.FIN_RED)
 ImageDraw.Draw(img).polygon([((x - X0) * K, (y - Y0) * K) for x, y in
                              fin + [(1950, 700), (fin[0][0], 700)]], fill=G.RED)
-img = img.filter(ImageFilter.GaussianBlur(1.2))
+img = img.filter(ImageFilter.GaussianBlur(1.0))
 design = np.asarray(img).astype(np.float32) / 255
 
 lab4 = np.load('layers/tail_fill_lab.npy')
