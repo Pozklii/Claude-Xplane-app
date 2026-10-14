@@ -25,26 +25,30 @@ Run from a working folder next to the extracted kit PSDs (needs
 `psd-tools[composite]`, SciPy):
 
 ```sh
-python3 kit-tools/extract.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" "E-JETS_PAINTKIT_TAIL 22-08-28.psd"
+python3 kit-tools/extract.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" "E-JETS_PAINTKIT_TAIL 22-08-28.psd" "E-JETS_PAINTKIT_BELLY_E19X 22-08-28.psd"
 python3 kit-tools/base_fus.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" layers/fus_base_e190.png
 python3 kit-tools/base_generic.py "E-JETS_PAINTKIT_TAIL 22-08-28.psd" layers/tail_base.png "BASE TEXTURE" "TOP LAYER"
+python3 kit-tools/base_generic.py "E-JETS_PAINTKIT_BELLY_E19X 22-08-28.psd" layers/belly_base.png "BASE TEXTURE" "TOP LAYER"
 python3 kit-tools/kitart.py "E-JETS_PAINTKIT_FUSELAGE 25-02-05.psd" kitart
 python3 kit-tools/paint_fus.py tools fonts layers
 python3 kit-tools/paint_tail.py tools layers
 python3 kit-tools/combine.py layers/fus_base_e190.png layers/fus_paint8.png fuselage.png
 python3 kit-tools/combine.py layers/tail_base.png layers/tail_paint8.png TAIL.png
+python3 kit-tools/paint_belly.py tools layers/belly_base.png belly.png
 ```
 
-In the livery folder the fuselage goes in `objects/E190/`, while `TAIL.png` goes
+In the livery folder the fuselage and belly go in `objects/E190/`, while `TAIL.png` goes
 in `objects/` itself: the E-Jets share one tail texture across variants.
 
-The fuselage is mapped from the photo using the cabin windows as anchors, with
-the forward and aft sections pinned to the same station where they meet. On
+The fuselage is mapped from the photo using the cabin windows as anchors: both
+sections share one smooth station curve through them, meeting at the same
+station where the sections join. On
 the tail cone, where the texture is cut into strips by darts, the angle
 around the fuselage runs evenly across each strip between its seams, whose
 angles are fixed by the dart tips and whose edges are taken from the kit's
 wireframe, not its padded paint mask (`stringers.py`). The ventral antenna,
-packed beside the lower strip, is painted in the belly's colour. Each fin side uses a
+packed beside the lower strip, is painted in the belly's colour, and the
+belly fairing takes the same white as the fuselage. Each fin side uses a
 smooth thin-plate-spline map through five points (`finmap.py`). The paint is carried a few texels past each
 strip into the empty gutter around it, so the sim's texture filtering doesn't
 blend white into the seams. `dump.py` and `tree.py` inspect a PSD's layers.

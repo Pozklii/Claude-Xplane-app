@@ -15,40 +15,62 @@ AX_A, CROWN_A = 3096.9, 2100.0        # aft section
 SPLIT_V = 2020.0                      # rows above: forward; below: aft
 BLEND_U = (1850.0, 2250.0)            # ...blended in over this range (4K U)
 
-# texture U <-> photo x, from the cabin windows (and the L1 door, tail end).
-# The two sections meet on one ring of the mesh: the forward section ends at
-# U 3948, 105.5 texels behind its last window, and the aft one starts at
-# U 537.5, 77.5 ahead of its first. Between those windows (991 and 1030.5)
-# that ring is at 1013.8, where the aft section's map already puts it; the
-# forward map, run on at its last window spacing, had it at 1016.5, so the
-# colour edges stepped by ~2.7 px at the seam. It is pinned there.
+# texture U <-> photo x, anchored on the cabin windows (and the L1 door, tail
+# end): (U, photo station) per section.
 FWD = ([993, 1323, 1499.5, 1675.5, 1852.5, 2029.5, 2206, 2382.5, 2559, 2735,
-        2912.5, 3089, 3290.5, 3478, 3660.5, 3842.5, 3948],
+        2912.5, 3089, 3290.5, 3478, 3660.5, 3842.5],
        [316.5, 394.5, 436, 477.5, 519, 560, 602, 643.5, 684, 725, 766.5, 809,
-        858.5, 902, 947, 991, 1013.8])
-X_JOIN = 1013.8                       # photo station of the section seam
+        858.5, 902, 947, 991])
 AFT = ([615, 797.5, 1807.5, 1976, 2144, 2310.5, 4090],
        [1030.5, 1070, 1299, 1339, 1379.5, 1420, 1845])
 THETA_WIN = math.pi * 378 / 997        # window row angle from the crown
 
+# The two sections meet on one ring of the mesh: the forward one ends at
+# U 3948, 105.5 texels behind its last window, the aft one starts at U 537.5,
+# 77.5 ahead of its first (one window pitch apart, as along the cabin). Laid
+# end to end on one axis, both sections share one map: a smoothing spline
+# through all the anchors, within 0.9 px of each (rms 0.3, about how well a
+# window centre can be read off the photo). Joined straight from anchor to
+# anchor instead, the map's slope jumped at every window by up to 6% (and the
+# two sections disagreed by 2.7 px at the seam), which put a slight corner
+# into every colour edge crossing those columns.
+JOIN_F, JOIN_A = 3948.0, 537.5
+_S = np.r_[FWD[0], np.asarray(AFT[0], float) + (JOIN_F - JOIN_A)]
+_X = np.r_[FWD[1], AFT[1]]
 
-def interp_ex(x, xp, fp):
-    """np.interp with linear extrapolation at both ends."""
-    xp, fp = np.asarray(xp, float), np.asarray(fp, float)
-    y = np.interp(x, xp, fp)
-    lo, hi = x < xp[0], x > xp[-1]
-    y = np.where(lo, fp[0] + (x - xp[0]) * (fp[1] - fp[0]) / (xp[1] - xp[0]), y)
-    y = np.where(hi, fp[-1] + (x - xp[-1]) * (fp[-1] - fp[-2]) / (xp[-1] - xp[-2]), y)
-    return y
+
+def _fit():
+    from scipy.interpolate import make_smoothing_spline
+    return make_smoothing_spline(_S, _X, lam=1e6)
+
+
+_SPL = _fit()
+_DSPL = _SPL.derivative()
+
+
+def _x_of_s(s):
+    """photo station along the joined axis; straight on past the end anchors"""
+    s = np.asarray(s, float)
+    lo, hi = _S[0], _S[-1]
+    y = _SPL(np.clip(s, lo, hi))
+    y = np.where(s < lo, _SPL(lo) + (s - lo) * _DSPL(lo), y)
+    return np.where(s > hi, _SPL(hi) + (s - hi) * _DSPL(hi), y)
+
+
+_SG = np.arange(-4000.0, 12001.0, 0.5)      # dense table for the inverse
+_XG = _x_of_s(_SG)
+assert np.all(np.diff(_XG) > 0)
+X_JOIN = float(_x_of_s(JOIN_F))              # photo station of the section seam
 
 
 def u_to_x(U, aft):
-    return interp_ex(U, *(AFT if aft else FWD))
+    U = np.asarray(U, float)
+    return _x_of_s(U + (JOIN_F - JOIN_A) if aft else U)
 
 
 def x_to_u(x, aft):
-    t, p = AFT if aft else FWD
-    return float(interp_ex(np.array([x]), p, t)[0])
+    s = float(np.interp(x, _XG, _SG))
+    return s - (JOIN_F - JOIN_A) if aft else s
 
 
 _cx, _cy = zip(*G.CROWN)

@@ -1,9 +1,10 @@
 """Pull the masks the painters need out of the X-Crafts E-Jets paint kit.
 
-Writes into ./layers: the fuselage paintable-skin mask and the labelled fin
-islands of the tail wireframe.
+Writes into ./layers: the fuselage paintable-skin mask, the labelled fin
+islands of the tail wireframe and, given the belly PSD, the belly fairing's
+paintable-skin mask.
 
-usage: extract.py <FUSELAGE psd> <TAIL psd>
+usage: extract.py <FUSELAGE psd> <TAIL psd> [BELLY psd]
 """
 import os, sys, warnings
 warnings.filterwarnings('ignore')
@@ -39,3 +40,10 @@ lab, n = ndimage.label(filled)
 np.save('layers/tail_fill_lab.npy', lab.astype(np.int32))
 sizes = ndimage.sum(filled, lab, range(1, n + 1))
 print('fin islands (largest two):', [int(i) + 1 for i in np.argsort(sizes)[::-1][:2]])
+
+if len(sys.argv) > 3:
+    belly = PSDImage.open(sys.argv[3])
+    m = node(belly, ['LIVERIES', 'PAINT HERE LINEAGE']).mask
+    full = Image.new('L', belly.size, m.background_color)
+    full.paste(m.topil(), m.bbox[:2])
+    full.save('layers/belly__paintmask.png')
