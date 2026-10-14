@@ -254,6 +254,18 @@ E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5
 # as hard as the photo traces would iron out the turn into the tip
 E_DUP, E_DLO = (smooth_edge(e, rms_px=0.5) for e in (E_DUP, E_DLO))
 E_LAT, E_LAB, E_BL = (smooth_edge(e) for e in (E_LAT, E_LAB, E_BL))
+# Behind the dark green's tip (1046.8) the pinstripe's lower edge is the dark
+# green's upper edge (the photos show the dark green right against the
+# white), and ahead of it the light-green sliver over the tip closes to a
+# point there. Smoothed separately, the two had drifted apart by up to 1.8
+# deg, leaving a light-green line 1-2.5 px wide between the white and the dark
+# green back to ~1200 (and ~1 px lower down, 1365-1500). So that edge is
+# rebuilt from the smoothed dark-green edge, less the sliver's traced width,
+# eased in from 1000.
+_gap = np.where((XG >= APEX_X) & (XG <= 1046.8), np.maximum(_raw['B3'] - b4, 0.0), 0.0)
+_w = np.clip((XG - 1000.0) / 46.8, 0, 1)
+_w = _w * _w * (3 - 2 * _w)
+E_B43 = np.where(XG < 1000.0, E_B43, (1 - _w) * E_B43 + _w * (E_B3 - _gap))
 # Up to where it leaves for the line below the windows (~1295, behind the
 # wing), the dark red's lower edge is the pinstripe's upper edge: both photos
 # show the dark red sitting right on the white. Built from the raw pinstripe
@@ -275,7 +287,17 @@ for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB
     print(f'smoothed {k}: max change {np.degrees(np.abs(e - _raw[k]).max()):.1f} deg', flush=True)
 
 
-EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL]
+# Where two shapes share an edge, blending each over the last by its own
+# edge coverage leaves a quarter of the colour underneath in the shared edge
+# texel (a faint line of it). So the shape below runs a hair (0.2 deg, about
+# two texels) on under the one drawn over it: the dark green under the white
+# behind its tip, and the dark red down to the pinstripe within the red, red
+# and dark red being drawn as one layer.
+_HAIR = 0.2 * DEG
+E_B3D = np.where(XG > 1046.8, E_B3 - _HAIR, E_B3)
+_in_dr = (XG >= DR_FRONT) & (XG <= DR_BACK)
+E_DLOP = E_DLO + _HAIR * _in_dr * np.clip(1 - (E_B5 - E_DLO) / (0.5 * DEG), 0, 1)
+EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL, E_B3D, E_DLOP]
 # slopes for edge anti-aliasing; capped so the cut-offs where a shape ends
 # (a jump in the curve) stay sharp instead of leaving a faint line
 DEDGES = [np.clip(np.gradient(e, XG), -0.25, 0.25) for e in EDGES]
@@ -313,14 +335,13 @@ for r0 in range(0, N, 512):
     t_ = th[rr, cc]
     g_ = np.maximum(gv[rr, cc], math.pi / 4000)
     cov = [coverage(k, x, t_, g_, dudx) for k in range(len(EDGES))]
-    L, B2, B3, B5, B43, DUP, DLO, LAT, LAB, BL = cov
+    L, B2, B3, B5, B43, DUP, DLO, LAT, LAB, BL, B3D, DLOP = cov
     leaf_a = LAB * (1 - LAT)
-    # min, not product: where the two edges coincide a product of their
-    # coverages would leave a faint bright line at the edge texels
-    dark = np.minimum(B5, DLO) * (1 - DUP) * (1 - leaf_a)
+    dark = DLOP * (1 - DUP) * (1 - leaf_a)          # share of the red that is dark
+    reds = C['R'] * (1 - dark[:, None]) + C['DR'] * dark[:, None]
     col = np.ones((len(rr), 3), np.float32) * C['W']
-    for c_, a_ in ((C['L'], L * BL), (C['D'], np.clip(B2 - B3, 0, 1) * BL), (C['W'], B43),
-                   (C['R'], B5), (C['DR'], dark)):
+    for c_, a_ in ((C['L'], L * BL), (C['D'], np.clip(B2 - B3D, 0, 1) * BL), (C['W'], B43),
+                   (reds, B5)):
         col = col * (1 - a_[:, None]) + c_ * a_[:, None]
     paint[rs][rr, cc] = col
     print('rows', r0, flush=True)

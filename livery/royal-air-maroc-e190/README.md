@@ -51,7 +51,10 @@ packed beside the lower strip, is painted in the belly's colour, and the
 belly fairing takes the same white as the fuselage. Each fin side uses a
 smooth thin-plate-spline map through five points (`finmap.py`). The paint is carried a few texels past each
 strip into the empty gutter around it, so the sim's texture filtering doesn't
-blend white into the seams. `dump.py` and `tree.py` inspect a PSD's layers.
+blend white into the seams. `check_slivers.py` (same arguments as `paint_fus.py`
+minus the output) lists every colour band under 2.5 px wide in the design: the
+pointed tips are meant to be there, anything else is two shapes that should
+share an edge but don't. `dump.py` and `tree.py` inspect a PSD's layers.
 
 Fonts: Outfit, Barlow (the registrations) and Aref Ruqaa, all SIL Open Font
 License (see `fonts/`).
