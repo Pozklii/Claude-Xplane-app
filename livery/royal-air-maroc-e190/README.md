@@ -35,9 +35,12 @@ python3 kit-tools/paint_tail.py tools layers
 python3 kit-tools/combine.py layers/fus_base_e190.png layers/fus_paint8.png fuselage.png
 python3 kit-tools/combine.py layers/tail_base.png layers/tail_paint8.png TAIL.png
 python3 kit-tools/paint_belly.py tools layers/belly_base.png belly.png
+python3 kit-tools/paint_registration.py "E-JETS_PAINTKIT_REGISTRATION 23-11-02.psd" fonts REGISTRATION.png
 ```
 
-In the livery folder the fuselage and belly go in `objects/E190/`, while `TAIL.png` goes
+`REGISTRATION.png` (the cockpit placard and the registration under the left
+wing) goes in `objects/E190/`, with a copy in `objects/`. In the livery folder
+the fuselage and belly go in `objects/E190/`, while `TAIL.png` goes
 in `objects/` itself: the E-Jets share one tail texture across variants.
 
 The fuselage is mapped from the photo using the cabin windows as anchors: both
