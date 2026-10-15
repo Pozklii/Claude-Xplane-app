@@ -470,6 +470,22 @@ _y0 = float(_side_y(_x0, np.interp(_x0, XG, _low_s)))
 _y1 = float(_side_y(_x1, DR_LOW[-1][1] * DEG))
 _st = (XG >= _x0) & (XG <= _x1)
 _low_s[_st] = _side_th(XG[_st], _y0 + (_y1 - _y0) * (XG[_st] - _x0) / (_x1 - _x0))
+# The two darker shades read as one shading line running under the white
+# stripe: the dark red's top edge carries on the line of the dark green's.
+# Where the stripe closes over the dark green its top edge is level, ~34 deg
+# from the crown; carried straight on, that line leaves the stripe's upper
+# edge at ~1085, where the dark red now begins, in a point on the stripe, its
+# top edge running on along the line until it meets leaf A's lower edge as
+# measured (~1250) and following that into leaf A's tip. Taken from the
+# eye-level photo alone, the dark red's top edge sat up to ~7 deg above the
+# line (26-30 deg at 1080-1200): from the side that reads as one line, but
+# seen from above the dark red stood clearly above the dark green. The
+# sliver it had run forward along the stripe from 1046 was mostly the
+# photo's dark sharpening rim along the white.
+_lvl = float(E_B3[np.searchsorted(XG, X_C) - 1])       # the dark green's top at the closure
+DR_FRONT = float(XG[np.argmax((XG > X_C) & (E_B5 >= _lvl))])
+E_LAB = np.where((XG < DR_FRONT) | (XG > LA_TIP), 0.0,
+                 -_smin(-np.full_like(XG, _lvl), -E_LAB, 3.0 * DEG))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), _smin(E_B5, _low_s, 1.5 * DEG), 0.0)
 for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL)):
     print(f'smoothed {k}: max change {np.degrees(np.abs(e - _raw[k]).max()):.1f} deg', flush=True)
