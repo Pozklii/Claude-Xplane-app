@@ -342,18 +342,39 @@ _pb, _ = curve_fit(_b2, _fx, _fy, p0=[0.26 * DEG, 3.0 * DEG], sigma=_sig)
 _w = np.clip((XG - 1100.0) / 100.0, 0, 1)
 _w = _w * _w * (3 - 2 * _w)
 E_B2 = np.where(XG < _bx0, E_B2, (1 - _w) * _b2(XG, *_pb) + _w * E_B2)
+# Behind ~1040 the traced edge ran ~2 deg high and then steepened late
+# towards the belly, so from the side it bent up behind the wing where both
+# photos show it running on almost straight. There it is a gentle curve
+# fitted to both photos column by column (the eye-level one to 1150, the one
+# from below where it sees under the wing from 1180), carrying on from the
+# edge at 1040 with its slope (0.26 deg per px) and steepening steadily to
+# 0.30 by 1300 (the belly end, from 1295, carries on from it).
+B2_AFT = [(1040, 56.8), (1050, 59.6), (1060, 62.3), (1080, 68.5), (1090, 70.9), (1100, 73.6),
+          (1110, 76.8), (1120, 79.0), (1130, 82.1), (1140, 85.3), (1150, 87.8), (1180, 94.6),
+          (1190, 97.3), (1200, 100.7), (1210, 102.8), (1220, 106.2), (1230, 109.0),
+          (1240, 111.9), (1250, 114.8), (1260, 117.8), (1270, 121.5), (1280, 124.7),
+          (1290, 128.0), (1300, 131.4)]
+_x0 = 1040.0
+_i0 = np.searchsorted(XG, _x0)
+_y0, _m0 = E_B2[_i0], (E_B2[_i0 + 4] - E_B2[_i0 - 4]) / (XG[_i0 + 4] - XG[_i0 - 4])
+_t = np.array([q[0] for q in B2_AFT]) - _x0
+_ca = np.linalg.lstsq(np.stack([_t ** 2, _t ** 3], 1),
+                      np.array([q[1] * DEG for q in B2_AFT]) - _y0 - _m0 * _t, rcond=None)[0]
+_t = XG - _x0
+E_B2 = np.where((XG > _x0) & (XG <= 1300.0),
+                _y0 + _m0 * _t + _ca[0] * _t ** 2 + _ca[1] * _t ** 3, E_B2)
 # The light green under the dark green is a line of steady width, running
 # parallel to the dark green's lower edge down to the belly: 16.3 deg from the
-# dark green's tip to ~1000 in both photos, then narrowing smoothly to ~11
-# deg behind the wing in the first (14.5-15 at 1045, 13.2-14 at 1085, 12 at
-# 1200, 11 at 1300). Traced on its own, its lower edge had drifted from the dark
-# green's: up to 4 deg too wide by the tip and, behind the wing, dipping
-# towards the belly so the line widened to 16 deg before the belly cut it.
-# So behind 1000 it is rebuilt from the dark-green edge plus that width, and
+# dark green's tip to ~1040 in both photos, then narrowing smoothly to ~11.5
+# deg behind the wing (16-17 at 1040-1060 and 15 at 1080-1090 at eye level,
+# 11.5 at 1200-1230 from below). Traced on its own, its lower edge had drifted
+# from the dark green's: up to 4 deg too wide by the tip and, behind the wing,
+# dipping towards the belly so the line widened to 16 deg before the belly cut
+# it. So behind 1000 it is rebuilt from the dark-green edge plus that width, and
 # ahead of it the traced edge over the crown is eased onto it from 850 (the
 # eye-level photo has it ~2 deg higher there too), which leaves it running
 # straight, at the photos' 0.24-0.25 deg per px, past the dark green's tip.
-_lw = np.where(XG <= 975.0, 16.3, 10.6 + 5.7 / (1 + ((XG - 975.0) / 101.0) ** 2)) * DEG
+_lw = np.where(XG <= 1040.0, 16.3, 11.0 + 5.3 / (1 + ((XG - 1040.0) / 75.0) ** 2)) * DEG
 _off = np.clip(E_B2 + _lw, 0.0, math.pi) - E_B1
 _x0, _x1 = 850.0, 1000.0
 _i1 = np.searchsorted(XG, _x1)
