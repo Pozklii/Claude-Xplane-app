@@ -112,8 +112,12 @@ def edge(pts, crown_x=None, blend=50 * DEG, after=None):
 # the steep edges the short stations had cancelled that, on the near-level
 # ones (the dark green's and dark red's tops) they had not.
 CROWN = {
-    'B1': ([(752.0, 0), (805.8, 14.0), (831.5, 19.8), (857.2, 28.2), (882.1, 33.2), (907.1, 38.9),
-            (932.4, 45.3)], 45),
+    # The light green's front edge comes over the crown in a point at ~761,
+    # its sides curving slightly as they leave it (0.35 deg per px there,
+    # 0.22 by 905: from above, a pointed tip with gently bulging sides).
+    'B1': ([(760.7, 0), (780.0, 6.5), (790.0, 9.8), (805.0, 14.1), (815.0, 17.8), (825.0, 20.7),
+            (835.0, 23.4), (845.0, 25.7), (855.0, 28.8), (865.0, 31.1), (875.0, 33.7),
+            (885.0, 36.1), (895.0, 38.9), (905.0, 40.6)], 45),
     # The dark green ends in a point at ~937 (eye level; the first photo's
     # trace starts at 938), its top edge running on nearly level from there
     # (29.5 deg at the point, 34 where the white stripe closes over it at
@@ -236,12 +240,18 @@ LA_BOT = [(1046, 20.3), (1055, 23.0), (1064, 25.8), (1072, 28.2), (1080, 29.8), 
           (1150, 26.6), (1160, 26.9), (1170, 27.2), (1180, 27.9), (1190, 28.6), (1200, 29.2),
           (1210, 30.3), (1220, 31.3), (1230, 32.4), (1240, 33.6), (1250, 34.3), (1260, 35.4),
           (1270, 36.6), (1280, 37.9), (1290, 38.8), (1298, 39.6), (1304, 40.0), (LA_TIP, 40.1)]
-# Leaf A's top: up to the crown at the front. From station ~1155 the dark red
-# from both sides meets along the crown in one forward-pointing V (the 737
-# shows it from above), its sides becoming leaf A's top edge further back.
-LA_TOP = [(1046, 0.0), (1155, 0.0), (1175, 9.0), (1190, 14.5), (1200, 17.3), (1210, 19.3),
-          (1220, 21.6), (1230, 22.9), (1240, 25.0), (1250, 26.9), (1260, 28.4), (1270, 30.8),
-          (1280, 32.9), (1290, 35.0), (1298, 37.0), (1304, 38.8), (LA_TIP, 40.1)]
+# Leaf A's top: the dark red on top is one slender V centred on the crown,
+# coming to a fine point just behind the red's own point and widening evenly
+# down both sides (as the 737 shows from above), its sides becoming leaf A's
+# top edge. One smooth curve from the point at 1045 through the edge the
+# eye-level photo shows clearly from ~1200 back (17.5 deg there, within
+# ~0.8 of each column to 1300) into leaf A's tip; ahead of 1200 it is under
+# ~10 deg, which at eye level is the top px or two of the outline.
+LA_V = 1045.0
+_tv1, _tv2 = 1200.0 - LA_V, LA_TIP - LA_V
+_av, _bv = np.linalg.solve([[_tv1, _tv1 ** 2], [_tv2, _tv2 ** 2]], [17.5, 40.1])
+LA_TOP = [(x, _av * (x - LA_V) + _bv * (x - LA_V) ** 2) for x in np.arange(LA_V, LA_TIP, 5.0)]
+LA_TOP.append((LA_TIP, 40.1))
 LB_BOT = [(LA_TIP, 0.0), (1316, 0.0), (1322, 6.5), (1328, 13.0), (1334, 19.0), (1340, 24.0),
           (1347.6, 29.1), (1357.4, 31.8), (1367.6, 34.3), (1377.4, 37.6), (1387.5, 40.3),
           (1397.4, 42.8), (1407.5, 45.9), (1417.5, 48.9), (1427.5, 51.9), (1437.5, 54.2),
@@ -276,7 +286,7 @@ def curve(pts, lo, hi, outside):
 
 
 E_LAB = curve(LA_BOT, DR_FRONT, LA_TIP, 0.0)
-E_LAT = curve(LA_TOP, DR_FRONT, LA_TIP, 0.0)
+E_LAT = curve(LA_TOP, LA_V, LA_TIP, 0.0)
 E_DUP = np.where(XG < LA_TIP, 0.0, curve(LB_BOT, LA_TIP, DR_BACK, math.pi))
 low = np.where(XG < DR_LOW[0][0], math.pi,
                np.interp(XG, [q[0] for q in DR_LOW], [q[1] * DEG for q in DR_LOW]))
@@ -495,16 +505,19 @@ _low_s[_st] = _side_th(XG[_st], _y0 + (_y1 - _y0) * (XG[_st] - _x0) / (_x1 - _x0
 # stripe: the dark red's top edge carries on the line of the dark green's.
 # Where the stripe closes over the dark green its top edge is level, ~34 deg
 # from the crown; carried straight on, that line leaves the stripe's upper
-# edge at ~1085, where the dark red now begins, in a point on the stripe, its
-# top edge running on along the line until it meets leaf A's lower edge as
-# measured (~1250) and following that into leaf A's tip. Taken from the
-# eye-level photo alone, the dark red's top edge sat up to ~7 deg above the
-# line (26-30 deg at 1080-1200): from the side that reads as one line, but
-# seen from above the dark red stood clearly above the dark green. The
-# sliver it had run forward along the stripe from 1046 was mostly the
-# photo's dark sharpening rim along the white.
+# edge at ~1085, where the dark red on the side begins, in a point on the
+# stripe, its top edge running on along the line until it meets leaf A's
+# lower edge as measured (~1250) and following that into leaf A's tip. Taken
+# from the eye-level photo alone, the dark red's top edge sat up to ~7 deg
+# above the line (26-30 deg at 1080-1200): from the side that reads as one
+# line, but seen from above the dark red stood clearly above the dark green.
+# The sliver it had run forward along the stripe from 1046 was mostly the
+# photo's dark sharpening rim along the white. Ahead of ~1085 leaf A reaches
+# down to the stripe, so the only dark red there is the V on the crown,
+# which begins at LA_V.
 _lvl = float(E_B3[np.searchsorted(XG, X_C) - 1])       # the dark green's top at the closure
-DR_FRONT = float(XG[np.argmax((XG > X_C) & (E_B5 >= _lvl))])
+DR_SIDE = float(XG[np.argmax((XG > X_C) & (E_B5 >= _lvl))])   # where the side wedge begins
+DR_FRONT = LA_V
 E_LAB = np.where((XG < DR_FRONT) | (XG > LA_TIP), 0.0,
                  -_smin(-np.full_like(XG, _lvl), -E_LAB, 3.0 * DEG))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), _smin(E_B5, _low_s, 1.5 * DEG), 0.0)
