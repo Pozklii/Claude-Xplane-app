@@ -107,10 +107,13 @@ CROWN = {
     # The dark green runs on forward as a thinning sliver to ~924 (eye-level
     # photo: still 2-3 px deep at 930-943, gone by 917; the first photo's
     # trace starts at 938), its top edge rising a little towards the crown
-    # so the light green over it is no wider than the photo shows.
-    'B2': ([(924.0, 22.0), (930.0, 25.0), (943.0, 29.0), (956.0, 31.9), (970.6, 35.3),
+    # so the light green over it is no wider than the photo shows. From the
+    # tip back both edges sit 1-2 deg lower than first traced (both photos,
+    # column by column: the lower edge runs parallel to the light green's,
+    # the light green under it 16.3 deg wide in each).
+    'B2': ([(924.0, 23.0), (930.0, 26.0), (943.0, 30.4), (956.0, 33.0), (970.6, 36.0),
             (983.3, 39.6)], 40),
-    'B3': ([(924.0, 22.0), (930.0, 22.6), (943.0, 24.7), (956.0, 25.6), (970.6, 27.4),
+    'B3': ([(924.0, 23.0), (930.0, 23.6), (943.0, 25.6), (956.0, 26.4), (970.6, 27.8),
             (983.3, 28.6), (996.1, 29.8), (1008.8, 30.8), (1021.6, 31.6), (1046.8, 32.4),
             (1059.3, 36.1), (1072.0, 39.6), (1085.0, 42.8), (1098.0, 45.9)], 45),
     'B5': ([(1002.0, 0), (1046.8, 15.6), (1059.3, 21.0), (1072.0, 25.3), (1085.0, 30.8),
@@ -266,6 +269,49 @@ E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5
 # as hard as the photo traces would iron out the turn into the tip
 E_DUP, E_DLO = (smooth_edge(e, rms_px=0.5) for e in (E_DUP, E_DLO))
 E_LAT, E_LAB, E_BL = (smooth_edge(e) for e in (E_LAT, E_LAB, E_BL))
+# By the dark green's tip the smoothing spline, pinned at the tip, cut the
+# corner: both its edges came out up to 2 deg higher than traced (and than
+# both photos show them). Up to 1000 each is one cubic instead: from the tip,
+# fitted to the traced points (within ~1 deg) and meeting the smoothed edge
+# at 1000 with the same slope.
+def _tip(E, key, x_join=1000.0):
+    pts, sw = CROWN[key]
+    x_sw = XG[np.argmax(_raw[key] >= sw * DEG - 1e-9)]   # past this, photo 1's trace
+    (x0, y0), L = pts[0], x_join - pts[0][0]
+    P = [p for p in pts[1:] if p[0] < min(x_sw, x_join) - 10]
+    t = np.array([(p[0] - x0) / L for p in P])
+    A = t[:, None] ** np.arange(4)
+    j = np.searchsorted(XG, x_join)
+    # least squares through the points, subject to: tip value, value and slope at the join
+    C = np.array([[1.0, 0, 0, 0], [1, 1, 1, 1], [0, 1, 2, 3]])
+    d = np.array([y0 * DEG, E[j], np.gradient(E, XG)[j] * L])
+    K = np.block([[2 * A.T @ A, C.T], [C, np.zeros((3, 3))]])
+    a = np.linalg.solve(K, np.r_[2 * A.T @ np.array([p[1] * DEG for p in P]), d])[:4]
+    tt = np.clip((XG - x0) / L, 0, 1)
+    return np.where((XG >= x0) & (XG < x_join), (tt[:, None] ** np.arange(4)) @ a, E)
+
+
+E_B2, E_B3 = _tip(E_B2, 'B2'), _tip(E_B3, 'B3')
+# The light green under the dark green is a line of steady width, running
+# parallel to the dark green's lower edge down to the belly: 16.3 deg from the
+# dark green's tip to ~1000 in both photos, easing to 11 deg behind the wing
+# in the first. Traced on its own, its lower edge had drifted from the dark
+# green's: up to 4 deg too wide by the tip and, behind the wing, dipping
+# towards the belly so the line widened to 16 deg before the belly cut it.
+# So behind 960 it is rebuilt from the smoothed dark-green edge plus that
+# width, and ahead of it the traced edge over the crown is eased onto it
+# from 850 (the eye-level photo has it ~2 deg higher there too).
+LG_W = [(900, 16.4), (1000, 16.2), (1045, 14.9), (1085, 13.6), (1200, 12.0), (1250, 11.3),
+        (1300, 11.0), (1400, 11.0)]
+_lw = PchipInterpolator([q[0] for q in LG_W], [q[1] * DEG for q in LG_W])(
+    np.clip(XG, LG_W[0][0], LG_W[-1][0]))
+_off = np.clip(E_B2 + _lw, 0.0, math.pi) - E_B1
+_x0, _x1 = 850.0, 960.0
+_i1 = np.searchsorted(XG, _x1)
+_d1, _m1 = _off[_i1], np.gradient(_off, XG)[_i1] * (_x1 - _x0)
+_t = np.clip((XG - _x0) / (_x1 - _x0), 0, 1)
+_ease = (3 * _t ** 2 - 2 * _t ** 3) * _d1 + (_t ** 3 - _t ** 2) * _m1   # Hermite: 0 -> offset, matching its slope
+E_B1 = np.clip(E_B1 + np.where(XG >= _x1, _off, _ease), 0.0, math.pi)
 # Behind the dark green's tip (1046.8) the pinstripe's lower edge is the dark
 # green's upper edge (the photos show the dark green right against the
 # white), and ahead of it the light-green sliver over the tip closes to a
