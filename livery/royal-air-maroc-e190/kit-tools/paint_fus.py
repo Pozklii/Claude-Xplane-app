@@ -47,11 +47,18 @@ _CW = math.cos(math.radians(68.2 - CAM_BELOW))
 _DOOR_C, _DOOR_R = 582.3, 78.6
 
 
+# The bottom outline is traced as a polyline (a point every 100 px); a
+# corner in it (1300, where the belly fairing's bulge ends) became a corner
+# in every edge converted through it. So it is followed through a smooth
+# monotone cubic through the same points.
+_belly_s = PchipInterpolator(*zip(*G.BELLY))
+
+
 def _cR(x):
     x = np.asarray(x, float)
-    b = belly_p(x)
+    b = _belly_s(x)
     R_w = (b - axis_p(x)) / (1 + _CW)
-    b14 = belly_p(1420.0); R14 = (b14 - axis_p(1420.0)) / (1 + _CW); c14 = b14 - R14
+    b14 = float(_belly_s(1420.0)); R14 = (b14 - axis_p(1420.0)) / (1 + _CW); c14 = b14 - R14
     w1 = np.clip((x - 1420) / 56, 0, 1)
     R_door = R14 + w1 * (_DOOR_R - R14)
     c_door = c14 + w1 * (_DOOR_C - c14)
@@ -292,6 +299,25 @@ def _tip(E, key, x_join=1000.0):
 
 
 E_B2, E_B3 = _tip(E_B2, 'B2'), _tip(E_B3, 'B3')
+# Behind the wing the dark green's lower edge is a straight line in the first
+# photo (measured column by column, 1196-1315 run at 0.52 px per px to within
+# half a pixel) down to where the belly cuts it. Smoothed in angle, where it
+# swings fast towards the belly, the curve had sagged ~2 deg high over
+# 1180-1260 and then bent down into the belly up to 4 deg low: a kink in it,
+# and in the light green along it. So from 1180 it is that straight line,
+# taken through the visible trace points, joined from 1060 (the wing hides
+# it in that photo ahead of 1190) by a cubic matching both curves' angle
+# and slope at its ends.
+_B2L = [(1200, 582.5), (1240, 603.5), (1280, 623.5), (1320, 644.0)]
+_m, _q = np.polyfit([p[0] for p in _B2L], [p[1] for p in _B2L], 1)
+_line = theta_of(XG, _m * XG + _q)
+_xa, _xb = 1060.0, 1180.0
+_ia, _ib = np.searchsorted(XG, _xa), np.searchsorted(XG, _xb)
+_t = np.clip((XG - _xa) / (_xb - _xa), 0, 1)
+_h = ((2 * _t ** 3 - 3 * _t ** 2 + 1) * E_B2[_ia] + (-2 * _t ** 3 + 3 * _t ** 2) * _line[_ib]
+      + (_t ** 3 - 2 * _t ** 2 + _t) * (_xb - _xa) * np.gradient(E_B2, XG)[_ia]
+      + (_t ** 3 - _t ** 2) * (_xb - _xa) * np.gradient(_line, XG)[_ib])
+E_B2 = np.where(XG < _xa, E_B2, np.where(XG < _xb, _h, _line))
 # The light green under the dark green is a line of steady width, running
 # parallel to the dark green's lower edge down to the belly: 16.3 deg from the
 # dark green's tip to ~1000 in both photos, easing to 11 deg behind the wing
