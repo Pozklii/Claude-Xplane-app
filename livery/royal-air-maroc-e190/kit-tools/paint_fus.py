@@ -97,29 +97,53 @@ def edge(pts, crown_x=None, blend=50 * DEG, after=None):
 
 # Near the crown the first photo (taken from below) can't be trusted, so each
 # edge's top part comes from the eye-level photo of the right side: points are
-# (station in photo-1 px, degrees from the crown), matched through the windows.
+# (station in photo-1 px, degrees from the crown).
 # Below `switch` degrees the eye-level points are used, above it photo 1.
 # The first point of each is the tip on the crown: the top ~15 deg sit within a
 # pixel of the outline at eye level, so it is the straight-line continuation of
 # the reliable points, giving the pointed V's the design shows from above.
+# Eye-level photo, re-measured: its stations now come from its own window row
+# (station = 1998.57 - 1.2690 x, within ~1 px of every window centre; the
+# earlier straight scale ran 13-25 px short ahead of the wing), and its
+# angles from a level camera fitted to the windows (68.25 deg in the mesh)
+# and the fuselage depth, h = A (1 - cos(theta - 0.65 deg)) below the top
+# outline with A from the window row. The earlier camera, 5 deg above, put
+# the windows at 61 deg and every edge near the crown 4-8 deg too high; on
+# the steep edges the short stations had cancelled that, on the near-level
+# ones (the dark green's and dark red's tops) they had not.
 CROWN = {
     'B1': ([(752.0, 0), (805.8, 14.0), (831.5, 19.8), (857.2, 28.2), (882.1, 33.2), (907.1, 38.9),
             (932.4, 45.3)], 45),
-    # The dark green runs on forward as a thinning sliver to ~924 (eye-level
-    # photo: still 2-3 px deep at 930-943, gone by 917; the first photo's
-    # trace starts at 938), its top edge rising a little towards the crown
-    # so the light green over it is no wider than the photo shows. From the
-    # tip back both edges sit 1-2 deg lower than first traced (both photos,
-    # column by column: the lower edge runs parallel to the light green's,
-    # the light green under it 16.3 deg wide in each).
-    'B2': ([(924.0, 23.0), (930.0, 26.0), (943.0, 30.4), (956.0, 33.0), (970.6, 36.0),
-            (983.3, 39.6)], 40),
-    'B3': ([(924.0, 23.0), (930.0, 23.6), (943.0, 25.6), (956.0, 26.4), (970.6, 27.8),
-            (983.3, 28.6), (996.1, 29.8), (1008.8, 30.8), (1021.6, 31.6), (1046.8, 32.4),
-            (1059.3, 36.1), (1072.0, 39.6), (1085.0, 42.8), (1098.0, 45.9)], 45),
+    # The dark green ends in a point at ~937 (eye level; the first photo's
+    # trace starts at 938), its top edge running on nearly level from there
+    # (29.5 deg at the point, 34 where the white stripe closes over it at
+    # ~1040), its lower edge curling up into the point.
+    'B2': ([(937.0, 29.5), (942.8, 32.1), (947.5, 33.0), (952.6, 34.4), (957.5, 35.7),
+            (962.4, 36.8), (967.5, 38.3), (972.6, 39.7), (977.5, 40.7), (982.4, 41.7)], 40),
+    'B3': ([(937.0, 29.5), (943.0, 30.1), (953.0, 30.6), (963.0, 31.3), (973.0, 31.6),
+            (983.0, 32.6), (993.0, 32.9), (1003.0, 33.3), (1013.0, 33.5), (1023.0, 33.6),
+            (1033.0, 33.8)], 45),
     'B5': ([(1002.0, 0), (1046.8, 15.6), (1059.3, 21.0), (1072.0, 25.3), (1085.0, 30.8),
             (1098.0, 33.9), (1111.0, 38.3)], 38),
 }
+# The white stripe's edges at eye level, behind the dark green's point: the
+# lower edge (over the dark green) to where the windows meet it, the upper
+# (under the red) to the wing tip, which hides 1250-1345 at the crown. The
+# first photo can't see either between ~1140 and ~1300 (the wing is in
+# front), where they had been carried across 3-8 deg too high; where it can
+# see them again (its own camera, column by column) it agrees with the
+# eye-level photo to ~1.5 deg.
+STRIPE_LO = [(1042.5, 34.1), (1052.5, 36.7), (1062.5, 39.3), (1072.5, 42.1), (1082.5, 44.8),
+             (1092.5, 47.2), (1102.5, 49.6), (1112.5, 52.2), (1122.5, 55.2), (1132.5, 57.6),
+             (1142.5, 59.9), (1152.5, 62.1), (1162.6, 64.7), (1172.5, 66.7), (1197.5, 72.5),
+             (1207.5, 74.5), (1218.9, 77.2), (1227.3, 78.9)]
+STRIPE_HI = [(1032.5, 14.1), (1042.5, 19.1), (1052.5, 22.4), (1062.5, 26.1), (1072.5, 29.6),
+             (1082.5, 32.8), (1092.5, 35.9), (1102.5, 39.0), (1112.5, 42.3), (1122.5, 45.0),
+             (1132.5, 47.6), (1142.5, 50.5), (1152.5, 53.3), (1162.6, 55.9), (1172.5, 58.5),
+             (1182.6, 61.1), (1192.4, 63.5), (1202.6, 65.7), (1228.4, 71.5), (1237.5, 73.5),
+             (1242.6, 74.5), (1300.0, 84.1)]
+STRIPE_HI_P1 = [(1310, 84.0), (1320, 85.7), (1330, 87.3), (1340, 88.6), (1350, 89.9), (1360, 91.6),
+                (1370, 93.3), (1390, 96.1), (1400, 97.9), (1410, 99.5)]
 
 
 def edge_mixed(pts, key, after=None):
@@ -162,14 +186,16 @@ _bx = np.array([q[0] for q in BL_PTS], float)
 _bt = theta_of(_bx, np.array([q[1] for q in BL_PTS], float))
 E_BL = np.interp(XG, _bx, _bt, left=_bt[0], right=0.0)
 # the dark green ends in a point below the crown: no dark green ahead of it
-APEX_X = 924.0
+APEX_X = CROWN['B2'][0][0][0]
 E_B2[XG < APEX_X] = 0.0
 E_B3[XG < APEX_X] = 0.0
 # thin light-green sliver over the dark green's tip, white above it (eye level)
-B4_PTS = [(916.0, 0), (957.8, 9.9), (970.6, 14.0), (983.3, 17.1), (996.1, 19.8),
-          (1008.8, 22.2), (1021.6, 26.3), (1034.3, 29.9), (1046.8, 32.4)]
+B4_PTS = [(919.0, 0), (954.2, 10.2), (962.4, 14.0), (967.5, 15.0), (972.6, 15.9), (977.5, 16.7),
+          (982.4, 17.9), (987.5, 19.7), (992.6, 21.3), (997.5, 22.3), (1002.4, 23.3),
+          (1007.5, 24.7), (1012.6, 26.1), (1017.5, 27.5), (1022.4, 29.1), (1027.5, 30.1),
+          (1032.5, 31.7), (1035.6, 32.6)]
 b4 = np.interp(XG, [p[0] for p in B4_PTS], [p[1] * DEG for p in B4_PTS], left=0.0, right=0.0)
-E_B43 = np.where(XG <= 1046.8, b4, E_B3)
+E_B43 = np.where(XG <= B4_PTS[-1][0], b4, E_B3)
 # Darker red: one feather, matched between the eye-level photo of the right
 # side, the first photo (from below) and the same design on a 737. Points are
 # (station in photo-1 px, degrees from the crown).
@@ -187,28 +213,45 @@ E_B43 = np.where(XG <= 1046.8, b4, E_B3)
 # angles are weighted by how sharply it resolves them there (its px per deg,
 # squared): near the crown the photo from below sees almost nothing, while
 # towards the door the two agree to a few degrees.
-# Re-measured on the eye-level photo row by row (bright leaf A against the
-# dark below it, offset to this map by the green's edges there): the feather
-# begins as a sliver on the pinstripe at ~1043, not with a blunt end at 1086,
-# and leaf A's lower edge sits ~5 deg higher all along, dipping at ~1145.
-DR_FRONT, DR_BACK = 1042.0, 1490.0
-LA_BOT = [(1042, 16.6), (1052, 17.4), (1062, 20.0), (1072, 22.4), (1083, 23.0), (1093, 23.0),
-          (1103, 22.8), (1114, 21.6), (1124, 20.6), (1134, 19.8), (1145, 19.4), (1155, 19.6),
-          (1165, 20.4), (1175, 21.0), (1186, 21.6), (1196, 22.4), (1206, 23.0), (1217, 23.6),
-          (1227, 24.4), (1237, 25.3), (1248, 26.4), (1258, 27.8), (1268, 29.3), (1279, 30.7),
-          (1294, 33.2), (1306, 35.5)]
-# Leaf A's top: up to the crown at the front. From station 1159 the dark red
-# from both sides meets along the crown in one slender forward-pointing V
-# (the eye-level E190 photo's top edge darkens from here; the 737 shows the V
-# from above), its sides becoming leaf A's top edge as measured further back.
-LA_TOP = [(1042, 0.0), (1159, 0.0), (1180, 5.5), (1200, 10.5), (1217, 14.2), (1237, 17.4),
-          (1258, 22.4), (1279, 26.5), (1294, 29.6), (1306, 35.5)]
-LB_BOT = [(1306, 0.0), (1322, 0.0), (1332, 8.0), (1343, 15.5), (1356, 21.5), (1370, 27.5),
-          (1380, 31.5), (1390, 34.8), (1400, 38.2), (1410, 41.2), (1420, 44.0), (1430, 48.6),
-          (1440, 54.0), (1450, 59.0), (1456, 62.8), (1462, 67.0), (1467, 70.0), (1472, 72.4),
-          (1477, 74.3), (1481, 75.5)]
-DR_LOW = [(1290, 76.5), (1320, 76.5), (1360, 76.3), (1400, 75.8), (1430, 76.2), (1450, 77.0),
-          (1462, 77.8), (1470, 77.6), (1476, 76.8), (1481, 75.5)]
+# Re-measured on the eye-level photo through its window-fitted camera (see
+# CROWN), directly against the crown line, column by column:
+# - the feather begins as a sliver on top of the white stripe at ~1046 and
+#   opens from ~1075, where leaf A's lower edge leaves the stripe at ~30 deg;
+# - leaf A's lower edge then runs nearly level, 26.5-30 deg (highest at
+#   ~1145), on the line of the dark green's top edge ahead of the stripe
+#   (29.5-34 deg): the two dark shades' upper edges line up across the white;
+# - from ~1190 the dark V on the crown is clearly deeper than the photo's
+#   1-2 px sharpening rim along the outline (the same rim lines every white
+#   edge), its lower edge leaf A's top, meeting the lower edge in leaf A's
+#   tip at ~1308, 40 deg;
+# - the wing tip hides 1250-1345 at the crown; behind it leaf B's lower edge
+#   is already 29 deg down at 1348 and runs ~6 deg below the earlier trace,
+#   meeting it again by ~1450.
+# These stations are the texture's own (from the eye-level window row), so
+# unlike the first photo's points they need no shift to the rear door.
+DR_FRONT, DR_BACK = 1046.0, 1490.0
+LA_TIP = 1308.0
+LA_BOT = [(1046, 20.3), (1055, 23.0), (1064, 25.8), (1072, 28.2), (1080, 29.8), (1088, 30.4),
+          (1094, 30.0), (1100, 29.2), (1110, 28.4), (1120, 27.6), (1130, 27.2), (1140, 26.6),
+          (1150, 26.6), (1160, 26.9), (1170, 27.2), (1180, 27.9), (1190, 28.6), (1200, 29.2),
+          (1210, 30.3), (1220, 31.3), (1230, 32.4), (1240, 33.6), (1250, 34.3), (1260, 35.4),
+          (1270, 36.6), (1280, 37.9), (1290, 38.8), (1298, 39.6), (1304, 40.0), (LA_TIP, 40.1)]
+# Leaf A's top: up to the crown at the front. From station ~1155 the dark red
+# from both sides meets along the crown in one forward-pointing V (the 737
+# shows it from above), its sides becoming leaf A's top edge further back.
+LA_TOP = [(1046, 0.0), (1155, 0.0), (1175, 9.0), (1190, 14.5), (1200, 17.3), (1210, 19.3),
+          (1220, 21.6), (1230, 22.9), (1240, 25.0), (1250, 26.9), (1260, 28.4), (1270, 30.8),
+          (1280, 32.9), (1290, 35.0), (1298, 37.0), (1304, 38.8), (LA_TIP, 40.1)]
+LB_BOT = [(LA_TIP, 0.0), (1316, 0.0), (1322, 6.5), (1328, 13.0), (1334, 19.0), (1340, 24.0),
+          (1347.6, 29.1), (1357.4, 31.8), (1367.6, 34.3), (1377.4, 37.6), (1387.5, 40.3),
+          (1397.4, 42.8), (1407.5, 45.9), (1417.5, 48.9), (1427.5, 51.9), (1437.5, 54.2),
+          (1442.4, 55.8)]
+LB_DOOR = [(1450, 59.0), (1456, 62.8), (1462, 67.0), (1467, 70.0), (1472, 72.4), (1477, 74.3),
+           (1481, 75.5)]                     # first photo, into the rear door
+# the line below the windows, carried forward to where the (lower) stripe
+# reaches it
+DR_LOW = [(1200, 76.5), (1290, 76.5), (1320, 76.5), (1360, 76.3), (1400, 75.8), (1430, 76.2),
+          (1450, 77.0), (1462, 77.8), (1470, 77.6), (1476, 76.8), (1481, 75.5)]
 
 
 def _to_door(pts):
@@ -224,7 +267,7 @@ def _to_door(pts):
     return out
 
 
-LB_BOT, DR_LOW = _to_door(LB_BOT), _to_door(DR_LOW)
+LB_BOT, DR_LOW = LB_BOT + _to_door(LB_DOOR), _to_door(DR_LOW)
 
 
 def curve(pts, lo, hi, outside):
@@ -232,10 +275,11 @@ def curve(pts, lo, hi, outside):
     return np.where((XG >= lo) & (XG <= hi), v, outside)
 
 
-E_LAB = curve(LA_BOT, DR_FRONT, 1306, 0.0)
-E_LAT = curve(LA_TOP, DR_FRONT, 1306, 0.0)
-E_DUP = np.where(XG < 1306, 0.0, curve(LB_BOT, 1306, DR_BACK, math.pi))
-low = np.where(XG < 1290, math.pi, np.interp(XG, [q[0] for q in DR_LOW], [q[1] * DEG for q in DR_LOW]))
+E_LAB = curve(LA_BOT, DR_FRONT, LA_TIP, 0.0)
+E_LAT = curve(LA_TOP, DR_FRONT, LA_TIP, 0.0)
+E_DUP = np.where(XG < LA_TIP, 0.0, curve(LB_BOT, LA_TIP, DR_BACK, math.pi))
+low = np.where(XG < DR_LOW[0][0], math.pi,
+               np.interp(XG, [q[0] for q in DR_LOW], [q[1] * DEG for q in DR_LOW]))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), np.minimum(E_B5, low), 0.0)
 def smooth_edge(E, rms_px=2.0, px_per_deg=1.5):
     """Turn one colour edge theta(x) into a single smooth curve. Wherever it
@@ -276,12 +320,12 @@ E_LAT, E_LAB, E_BL = (smooth_edge(e) for e in (E_LAT, E_LAB, E_BL))
 # Built from the traced points it wavered, its slope dipping and rising
 # again by 1000, which showed as a kink in the light green beside it. So up
 # to 1100 it is one curve of that shape: a line plus a curl over ~12 px,
-# which gives the point the depth the eye-level photo shows (~2.5 deg at
-# 933, ~4.5 at 943). It is fitted to both photos' column-by-column
-# measurements and to the smoothed edge behind, sits between the two photos
-# (within ~1 deg of the first, ~2 of the eye-level one) and eases into the
-# smoothed edge over 1100-1200.
-B2_P4 = [(933, 27.8), (943, 30.7), (954, 32.1), (964, 34.7), (974, 37.1), (985, 39.5), (995, 41.8)]
+# which gives the point the depth the eye-level photo shows (~2 deg at 943,
+# ~4 at 953). It is fitted to both photos' column-by-column measurements
+# and to the smoothed edge behind, sits within ~1 deg of each photo and
+# eases into the smoothed edge over 1100-1200.
+B2_P4 = [(942.8, 32.1), (947.5, 33.0), (952.6, 34.4), (957.5, 35.7), (962.4, 36.8), (967.5, 38.3),
+         (972.6, 39.7), (977.5, 40.7), (982.4, 41.7), (987.5, 43.2), (992.6, 44.3), (997.5, 45.9)]
 B2_P1 = [(950, 33.2), (960, 36.2), (970, 38.9), (980, 41.4), (990, 43.7), (1000, 46.9),
          (1010, 48.9), (1020, 51.7), (1030, 54.3), (1040, 56.8)]
 _bx0, _by0 = CROWN['B2'][0][0]           # the tip
@@ -317,28 +361,58 @@ _d1, _m1 = _off[_i1], np.gradient(_off, XG)[_i1] * (_x1 - _x0)
 _t = np.clip((XG - _x0) / (_x1 - _x0), 0, 1)
 _ease = (3 * _t ** 2 - 2 * _t ** 3) * _d1 + (_t ** 3 - _t ** 2) * _m1   # Hermite: 0 -> offset, matching its slope
 E_B1 = np.clip(E_B1 + np.where(XG >= _x1, _off, _ease), 0.0, math.pi)
+# Behind the wing both greens run down to the belly line, where the dark
+# green carries on along it to its point. In the first photo the light green
+# doesn't meet the belly line at an angle: from ~1295 its lower edge bends
+# round to run along it and the band tapers out to a point at ~1362, where
+# the dark green's lower edge, still running down almost straight, meets the
+# belly line too; the dark green then follows the belly line to its own point.
+# Cut off by the belly line instead, the two had ended in a blunt slanted
+# step. So from 1295, where both still match the photo, each is eased onto
+# the belly line: the light green's lower edge arriving along it, the dark
+# green's crossing it just steeply enough to close the taper.
+XB0, XB1 = 1295.0, 1362.0
+
+
+def _ease_to(E, x0, x1, y1, m1):
+    """E up to x0, then a Hermite curve keeping its slope there and
+    arriving at y1 with slope m1 at x1"""
+    i0 = np.searchsorted(XG, x0)
+    y0, m0, L_ = E[i0], np.gradient(E, XG)[i0], x1 - x0
+    t = np.clip((XG - x0) / L_, 0, 1)
+    h = ((2 * t ** 3 - 3 * t ** 2 + 1) * y0 + (t ** 3 - 2 * t ** 2 + t) * L_ * m0
+         + (3 * t ** 2 - 2 * t ** 3) * y1 + (t ** 3 - t ** 2) * L_ * m1)
+    return np.where(XG <= x0, E, h)
+
+
+_ie = np.searchsorted(XG, XB1)
+_ble, _bms = E_BL[_ie], np.gradient(E_BL, XG)[_ie]
+E_B1 = np.where(XG <= XB1, _ease_to(E_B1, XB0, XB1, _ble, _bms), E_BL)
+E_B2 = np.where(XG <= XB1, _ease_to(E_B2, XB0, XB1, _ble, _bms + 0.15 * DEG),
+                np.minimum(E_BL + 0.15 * DEG * (XG - XB1), math.pi))
 # The white stripe's lower edge, over the light-green sliver ahead of the
 # dark green's top and along the dark green behind it, is one smooth line in
-# both photos (in the eye-level one, column by column, within ~1 deg of this
-# from the crown at 916 back past 1100). Built from the sliver's traced points
-# and the dark green's smoothed edge, it had bulged down by up to 4 deg where
-# the two met (~1030-1050: the smoothing had rounded the corner where the dark
-# green's flat top runs into it), which showed as a bend in the line just
-# where the light green meets the dark green. So it is one smoothing spline
-# through the traced points (within ~1 deg of each), easing into the dark
-# green's smoothed edge over 1150-1220; and the dark green's top ahead of it
-# runs on nearly flat, as both photos show (a cubic through the eye-level
-# points from the tip), until it meets the line in a clean point at ~1045.
-_sp = list(B4_PTS) + [q for q in CROWN['B3'][0] if q[0] > 1050]
-_xe = np.arange(1130.0, 1201.0, 10.0)
+# both photos. Built from the sliver's traced points and the dark green's
+# smoothed edge, it had bulged down by up to 4 deg where the two met (the
+# smoothing had rounded the corner where the dark green's flat top runs into
+# it), which showed as a bend in the line just where the light green meets
+# the dark green. So it is one smoothing spline through the eye-level points
+# (within ~1 deg of each) from the crown at 919 to where the windows meet it
+# (~1230), easing into the first photo's edge, which it sees again behind the
+# wing, over 1290-1340; and the dark green's top ahead of it runs on nearly
+# flat, as both photos show (a cubic through the eye-level points from the
+# tip), until it meets the line in a clean point at ~1040.
+_sp = list(B4_PTS) + STRIPE_LO
+_xe = np.arange(1285.0, 1346.0, 10.0)
+_x4a = B4_PTS[0][0]
 _line = UnivariateSpline(np.r_[[q[0] for q in _sp], _xe],
                          np.r_[[q[1] * DEG for q in _sp], np.interp(_xe, XG, E_B3)],
                          w=np.r_[np.ones(len(_sp)), np.full(len(_xe), 3.0)], k=3,
-                         s=(len(_sp) + len(_xe)) * (0.5 * DEG) ** 2)(np.clip(XG, 916.0, 1220.0))
-_w = np.clip((XG - 1150.0) / 70.0, 0, 1)
+                         s=(len(_sp) + len(_xe)) * (0.5 * DEG) ** 2)(np.clip(XG, _x4a, 1350.0))
+_w = np.clip((XG - 1290.0) / 50.0, 0, 1)
 _w = _w * _w * (3 - 2 * _w)
-_line = np.where(XG < 916.0, 0.0, (1 - _w) * _line + _w * E_B3)
-_cb = [q for q in CROWN['B3'][0] if q[0] <= 1046.8]
+_line = np.where(XG < _x4a, 0.0, np.clip((1 - _w) * _line + _w * E_B3, 0.0, math.pi))
+_cb = list(CROWN['B3'][0])
 _cx0, _cy0 = _cb[0]                                   # the tip
 _ct = np.array([q[0] - _cx0 for q in _cb[1:]])
 _ca = np.linalg.lstsq(np.stack([_ct, _ct ** 2, _ct ** 3], 1),
@@ -348,7 +422,21 @@ _flat = _cy0 * DEG + _ca[0] * _tt + _ca[1] * _tt ** 2 + _ca[2] * _tt ** 3
 X_C = float(XG[np.argmax((XG > _cx0) & (_flat <= _line))])     # where the sliver closes
 E_B3 = np.where(XG < APEX_X, 0.0, np.where(XG < X_C, _flat, _line))
 E_B43 = _line
-# Up to where it leaves for the line below the windows (~1295, behind the
+# The white stripe's upper edge (the red's lower edge) likewise: one
+# smoothing spline from its crown crossing through the eye-level points to
+# the wing tip and the first photo's points behind it, easing into the
+# smoothed edge over 1430-1460, where the two photos meet it.
+_hp = [(CROWN['B5'][0][0][0], 0.0)] + STRIPE_HI + STRIPE_HI_P1
+_xe = np.arange(1440.0, 1471.0, 10.0)
+_x5a = _hp[0][0]
+_hi = UnivariateSpline(np.r_[[q[0] for q in _hp], _xe],
+                       np.r_[[q[1] * DEG for q in _hp], np.interp(_xe, XG, E_B5)],
+                       w=np.r_[10.0, np.ones(len(_hp) - 1), np.full(len(_xe), 3.0)], k=3,
+                       s=(len(_hp) + len(_xe)) * (0.5 * DEG) ** 2)(np.clip(XG, _x5a, 1475.0))
+_w = np.clip((XG - 1430.0) / 30.0, 0, 1)
+_w = _w * _w * (3 - 2 * _w)
+E_B5 = np.where(XG < _x5a, 0.0, np.clip((1 - _w) * _hi + _w * E_B5, 0.0, math.pi))
+# Up to where it leaves for the line below the windows (~1255, behind the
 # wing), the dark red's lower edge is the pinstripe's upper edge: both photos
 # show the dark red sitting right on the white. Built from the raw pinstripe
 # curve and smoothed on its own, it had drifted up to 2 deg above the
