@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from scipy import ndimage
-from scipy.interpolate import PchipInterpolator, splprep, splev
+from scipy.interpolate import PchipInterpolator, UnivariateSpline, splprep, splev
 from scipy.optimize import curve_fit
 
 sys.path.insert(0, sys.argv[1])
@@ -270,29 +270,6 @@ E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5
 # as hard as the photo traces would iron out the turn into the tip
 E_DUP, E_DLO = (smooth_edge(e, rms_px=0.5) for e in (E_DUP, E_DLO))
 E_LAT, E_LAB, E_BL = (smooth_edge(e) for e in (E_LAT, E_LAB, E_BL))
-# By the dark green's tip the smoothing spline, pinned at the tip, cut the
-# corner: both its edges came out up to 2 deg higher than traced (and than
-# both photos show them). Up to 1000 each is one cubic instead: from the tip,
-# fitted to the traced points (within ~1 deg) and meeting the smoothed edge
-# at 1000 with the same slope.
-def _tip(E, key, x_join=1000.0):
-    pts, sw = CROWN[key]
-    x_sw = XG[np.argmax(_raw[key] >= sw * DEG - 1e-9)]   # past this, photo 1's trace
-    (x0, y0), L = pts[0], x_join - pts[0][0]
-    P = [p for p in pts[1:] if p[0] < min(x_sw, x_join) - 10]
-    t = np.array([(p[0] - x0) / L for p in P])
-    A = t[:, None] ** np.arange(4)
-    j = np.searchsorted(XG, x_join)
-    # least squares through the points, subject to: tip value, value and slope at the join
-    C = np.array([[1.0, 0, 0, 0], [1, 1, 1, 1], [0, 1, 2, 3]])
-    d = np.array([y0 * DEG, E[j], np.gradient(E, XG)[j] * L])
-    K = np.block([[2 * A.T @ A, C.T], [C, np.zeros((3, 3))]])
-    a = np.linalg.solve(K, np.r_[2 * A.T @ np.array([p[1] * DEG for p in P]), d])[:4]
-    tt = np.clip((XG - x0) / L, 0, 1)
-    return np.where((XG >= x0) & (XG < x_join), (tt[:, None] ** np.arange(4)) @ a, E)
-
-
-E_B3 = _tip(E_B3, 'B3')
 # The dark green's lower edge, which the light green runs along, is in both
 # photos a straight line in angle from just behind its tip back past the
 # wing (~0.26 deg per px), curling up into the tip over its last few px.
@@ -340,18 +317,37 @@ _d1, _m1 = _off[_i1], np.gradient(_off, XG)[_i1] * (_x1 - _x0)
 _t = np.clip((XG - _x0) / (_x1 - _x0), 0, 1)
 _ease = (3 * _t ** 2 - 2 * _t ** 3) * _d1 + (_t ** 3 - _t ** 2) * _m1   # Hermite: 0 -> offset, matching its slope
 E_B1 = np.clip(E_B1 + np.where(XG >= _x1, _off, _ease), 0.0, math.pi)
-# Behind the dark green's tip (1046.8) the pinstripe's lower edge is the dark
-# green's upper edge (the photos show the dark green right against the
-# white), and ahead of it the light-green sliver over the tip closes to a
-# point there. Smoothed separately, the two had drifted apart by up to 1.8
-# deg, leaving a light-green line 1-2.5 px wide between the white and the dark
-# green back to ~1200 (and ~1 px lower down, 1365-1500). So that edge is
-# rebuilt from the smoothed dark-green edge, less the sliver's traced width,
-# eased in from 1000.
-_gap = np.where((XG >= APEX_X) & (XG <= 1046.8), np.maximum(_raw['B3'] - b4, 0.0), 0.0)
-_w = np.clip((XG - 1000.0) / 46.8, 0, 1)
+# The white stripe's lower edge, over the light-green sliver ahead of the
+# dark green's top and along the dark green behind it, is one smooth line in
+# both photos (in the eye-level one, column by column, within ~1 deg of this
+# from the crown at 916 back past 1100). Built from the sliver's traced points
+# and the dark green's smoothed edge, it had bulged down by up to 4 deg where
+# the two met (~1030-1050: the smoothing had rounded the corner where the dark
+# green's flat top runs into it), which showed as a bend in the line just
+# where the light green meets the dark green. So it is one smoothing spline
+# through the traced points (within ~1 deg of each), easing into the dark
+# green's smoothed edge over 1150-1220; and the dark green's top ahead of it
+# runs on nearly flat, as both photos show (a cubic through the eye-level
+# points from the tip), until it meets the line in a clean point at ~1045.
+_sp = list(B4_PTS) + [q for q in CROWN['B3'][0] if q[0] > 1050]
+_xe = np.arange(1130.0, 1201.0, 10.0)
+_line = UnivariateSpline(np.r_[[q[0] for q in _sp], _xe],
+                         np.r_[[q[1] * DEG for q in _sp], np.interp(_xe, XG, E_B3)],
+                         w=np.r_[np.ones(len(_sp)), np.full(len(_xe), 3.0)], k=3,
+                         s=(len(_sp) + len(_xe)) * (0.5 * DEG) ** 2)(np.clip(XG, 916.0, 1220.0))
+_w = np.clip((XG - 1150.0) / 70.0, 0, 1)
 _w = _w * _w * (3 - 2 * _w)
-E_B43 = np.where(XG < 1000.0, E_B43, (1 - _w) * E_B43 + _w * (E_B3 - _gap))
+_line = np.where(XG < 916.0, 0.0, (1 - _w) * _line + _w * E_B3)
+_cb = [q for q in CROWN['B3'][0] if q[0] <= 1046.8]
+_cx0, _cy0 = _cb[0]                                   # the tip
+_ct = np.array([q[0] - _cx0 for q in _cb[1:]])
+_ca = np.linalg.lstsq(np.stack([_ct, _ct ** 2, _ct ** 3], 1),
+                      np.array([(q[1] - _cy0) * DEG for q in _cb[1:]]), rcond=None)[0]
+_tt = XG - _cx0
+_flat = _cy0 * DEG + _ca[0] * _tt + _ca[1] * _tt ** 2 + _ca[2] * _tt ** 3
+X_C = float(XG[np.argmax((XG > _cx0) & (_flat <= _line))])     # where the sliver closes
+E_B3 = np.where(XG < APEX_X, 0.0, np.where(XG < X_C, _flat, _line))
+E_B43 = _line
 # Up to where it leaves for the line below the windows (~1295, behind the
 # wing), the dark red's lower edge is the pinstripe's upper edge: both photos
 # show the dark red sitting right on the white. Built from the raw pinstripe
@@ -398,7 +394,7 @@ for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB
 # behind its tip, and the dark red down to the pinstripe within the red, red
 # and dark red being drawn as one layer.
 _HAIR = 0.2 * DEG
-E_B3D = np.where(XG > 1046.8, E_B3 - _HAIR, E_B3)
+E_B3D = np.where(XG > X_C, E_B3 - _HAIR, E_B3)
 _in_dr = (XG >= DR_FRONT) & (XG <= DR_BACK)
 E_DLOP = E_DLO + _HAIR * _in_dr * np.clip(1 - (E_B5 - E_DLO) / (0.5 * DEG), 0, 1)
 EDGES = [E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL, E_B3D, E_DLOP]
