@@ -104,8 +104,14 @@ def edge(pts, crown_x=None, blend=50 * DEG, after=None):
 CROWN = {
     'B1': ([(752.0, 0), (805.8, 14.0), (831.5, 19.8), (857.2, 28.2), (882.1, 33.2), (907.1, 38.9),
             (932.4, 45.3)], 45),
-    'B2': ([(955.3, 30.8), (970.6, 36.1), (983.3, 40.3)], 40),
-    'B3': ([(955.3, 30.8), (970.6, 31.0), (996.1, 31.6), (1021.6, 31.6), (1046.8, 32.4),
+    # The dark green runs on forward as a thinning sliver to ~924 (eye-level
+    # photo: still 2-3 px deep at 930-943, gone by 917; the first photo's
+    # trace starts at 938), its top edge rising a little towards the crown
+    # so the light green over it is no wider than the photo shows.
+    'B2': ([(924.0, 22.0), (930.0, 25.0), (943.0, 29.0), (956.0, 31.9), (970.6, 35.3),
+            (983.3, 39.6)], 40),
+    'B3': ([(924.0, 22.0), (930.0, 22.6), (943.0, 24.7), (956.0, 25.6), (970.6, 27.4),
+            (983.3, 28.6), (996.1, 29.8), (1008.8, 30.8), (1021.6, 31.6), (1046.8, 32.4),
             (1059.3, 36.1), (1072.0, 39.6), (1085.0, 42.8), (1098.0, 45.9)], 45),
     'B5': ([(1002.0, 0), (1046.8, 15.6), (1059.3, 21.0), (1072.0, 25.3), (1085.0, 30.8),
             (1098.0, 33.9), (1111.0, 38.3)], 38),
@@ -152,7 +158,7 @@ _bx = np.array([q[0] for q in BL_PTS], float)
 _bt = theta_of(_bx, np.array([q[1] for q in BL_PTS], float))
 E_BL = np.interp(XG, _bx, _bt, left=_bt[0], right=0.0)
 # the dark green ends in a point below the crown: no dark green ahead of it
-APEX_X = 955.3
+APEX_X = 924.0
 E_B2[XG < APEX_X] = 0.0
 E_B3[XG < APEX_X] = 0.0
 # thin light-green sliver over the dark green's tip, white above it (eye level)
@@ -177,16 +183,22 @@ E_B43 = np.where(XG <= 1046.8, b4, E_B3)
 # angles are weighted by how sharply it resolves them there (its px per deg,
 # squared): near the crown the photo from below sees almost nothing, while
 # towards the door the two agree to a few degrees.
-DR_FRONT, DR_BACK = 1086.0, 1490.0
-LA_BOT = [(1086, 29.5), (1090, 29.2), (1111, 27.4), (1131, 27.2), (1151, 25.3), (1172, 25.4),
-          (1192, 27.4), (1212, 27.5), (1233, 29.4), (1253, 31.2), (1274, 34.4), (1294, 36.0),
-          (1306, 35.5)]
+# Re-measured on the eye-level photo row by row (bright leaf A against the
+# dark below it, offset to this map by the green's edges there): the feather
+# begins as a sliver on the pinstripe at ~1043, not with a blunt end at 1086,
+# and leaf A's lower edge sits ~5 deg higher all along, dipping at ~1145.
+DR_FRONT, DR_BACK = 1042.0, 1490.0
+LA_BOT = [(1042, 16.6), (1052, 17.4), (1062, 20.0), (1072, 22.4), (1083, 23.0), (1093, 23.0),
+          (1103, 22.8), (1114, 21.6), (1124, 20.6), (1134, 19.8), (1145, 19.4), (1155, 19.6),
+          (1165, 20.4), (1175, 21.0), (1186, 21.6), (1196, 22.4), (1206, 23.0), (1217, 23.6),
+          (1227, 24.4), (1237, 25.3), (1248, 26.4), (1258, 27.8), (1268, 29.3), (1279, 30.7),
+          (1294, 33.2), (1306, 35.5)]
 # Leaf A's top: up to the crown at the front. From station 1159 the dark red
 # from both sides meets along the crown in one slender forward-pointing V
 # (the eye-level E190 photo's top edge darkens from here; the 737 shows the V
 # from above), its sides becoming leaf A's top edge as measured further back.
-LA_TOP = [(1086, 0.0), (1159, 0.0), (1195, 9.0), (1233, 18.7), (1253, 23.6), (1274, 27.7),
-          (1294, 31.3), (1306, 35.5)]
+LA_TOP = [(1042, 0.0), (1159, 0.0), (1180, 5.5), (1200, 10.5), (1217, 14.2), (1237, 17.4),
+          (1258, 22.4), (1279, 26.5), (1294, 29.6), (1306, 35.5)]
 LB_BOT = [(1306, 0.0), (1322, 0.0), (1332, 8.0), (1343, 15.5), (1356, 21.5), (1370, 27.5),
           (1380, 31.5), (1390, 34.8), (1400, 38.2), (1410, 41.2), (1420, 44.0), (1430, 48.6),
           (1440, 54.0), (1450, 59.0), (1456, 62.8), (1462, 67.0), (1467, 70.0), (1472, 72.4),
@@ -271,8 +283,7 @@ E_B43 = np.where(XG < 1000.0, E_B43, (1 - _w) * E_B43 + _w * (E_B3 - _gap))
 # show the dark red sitting right on the white. Built from the raw pinstripe
 # curve and smoothed on its own, it had drifted up to 2 deg above the
 # smoothed one, leaving a thin bright-red line along the white. So it is
-# rebuilt from the smoothed pinstripe edge and the line below the windows (a
-# smooth curve through its traced points, so the rise into the tip is kept),
+# rebuilt from the smoothed pinstripe edge and the line below the windows,
 # joined by a smooth minimum over the last 1.5 deg where it leaves.
 def _smin(a, b, k):
     h = np.clip(k - np.abs(a - b), 0, k) / k
@@ -282,6 +293,25 @@ def _smin(a, b, k):
 _dlx = [q[0] for q in DR_LOW]
 _low_s = np.where(XG < _dlx[0], math.pi,
                   PchipInterpolator(_dlx, [q[1] * DEG for q in DR_LOW])(np.clip(XG, _dlx[0], _dlx[-1])))
+# From 1400 to the tip in the rear door the line below the windows runs
+# straight in side view, as on the jet: the traced points dipped ~2 deg
+# under the windows and rose again into the tip, a slight curve that showed
+# in the sim. Straight between its height at 1400 and the tip's.
+def _side_y(x, th):
+    c, b = crown_p(x), belly_p(x)
+    return (b + c) / 2 - (b - c) / 2 * np.cos(th)
+
+
+def _side_th(x, y):
+    c, b = crown_p(x), belly_p(x)
+    return np.arccos(np.clip(((b + c) / 2 - y) / ((b - c) / 2), -1, 1))
+
+
+_x0, _x1 = 1400.0, _dlx[-1]
+_y0 = float(_side_y(_x0, np.interp(_x0, XG, _low_s)))
+_y1 = float(_side_y(_x1, DR_LOW[-1][1] * DEG))
+_st = (XG >= _x0) & (XG <= _x1)
+_low_s[_st] = _side_th(XG[_st], _y0 + (_y1 - _y0) * (XG[_st] - _x0) / (_x1 - _x0))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), _smin(E_B5, _low_s, 1.5 * DEG), 0.0)
 for k, e in zip(_raw, (E_B1, E_B2, E_B3, E_B5, E_B43, E_DUP, E_DLO, E_LAT, E_LAB, E_BL)):
     print(f'smoothed {k}: max change {np.degrees(np.abs(e - _raw[k]).max()):.1f} deg', flush=True)
