@@ -234,28 +234,60 @@ E_B43 = np.where(XG <= B4_PTS[-1][0], b4, E_B3)
 # These stations are the texture's own (from the eye-level window row), so
 # unlike the first photo's points they need no shift to the rear door.
 DR_FRONT, DR_BACK = 1046.0, 1490.0
-LA_TIP = 1308.0
 LA_BOT = [(1046, 20.3), (1055, 23.0), (1064, 25.8), (1072, 28.2), (1080, 29.8), (1088, 30.4),
           (1094, 30.0), (1100, 29.2), (1110, 28.4), (1120, 27.6), (1130, 27.2), (1140, 26.6),
           (1150, 26.6), (1160, 26.9), (1170, 27.2), (1180, 27.9), (1190, 28.6), (1200, 29.2),
           (1210, 30.3), (1220, 31.3), (1230, 32.4), (1240, 33.6), (1250, 34.3), (1260, 35.4),
-          (1270, 36.6), (1280, 37.9), (1290, 38.8), (1298, 39.6), (1304, 40.0), (LA_TIP, 40.1)]
-# Leaf A's top: the dark red on top is one slender V centred on the crown,
-# coming to a fine point just behind the red's own point and widening evenly
-# down both sides (as the 737 shows from above), its sides becoming leaf A's
-# top edge. One smooth curve from the point at 1045 through the edge the
-# eye-level photo shows clearly from ~1200 back (17.5 deg there, within
-# ~0.8 of each column to 1300) into leaf A's tip; ahead of 1200 it is under
-# ~10 deg, which at eye level is the top px or two of the outline.
-LA_V = 1045.0
-_tv1, _tv2 = 1200.0 - LA_V, LA_TIP - LA_V
-_av, _bv = np.linalg.solve([[_tv1, _tv1 ** 2], [_tv2, _tv2 ** 2]], [17.5, 40.1])
-LA_TOP = [(x, _av * (x - LA_V) + _bv * (x - LA_V) ** 2) for x in np.arange(LA_V, LA_TIP, 5.0)]
-LA_TOP.append((LA_TIP, 40.1))
-LB_BOT = [(LA_TIP, 0.0), (1316, 0.0), (1322, 6.5), (1328, 13.0), (1334, 19.0), (1340, 24.0),
-          (1347.6, 29.1), (1357.4, 31.8), (1367.6, 34.3), (1377.4, 37.6), (1387.5, 40.3),
-          (1397.4, 42.8), (1407.5, 45.9), (1417.5, 48.9), (1427.5, 51.9), (1437.5, 54.2),
-          (1442.4, 55.8)]
+          (1270, 36.6), (1280, 37.9), (1290, 38.8), (1298, 39.6), (1304, 40.0), (1308, 40.1),
+          # carried on at the same gentle slope to leaf A's later tip
+          (1316, 41.0), (1324, 41.9), (1332, 42.8), (1340, 43.7), (1348, 44.6)]
+# The rest of the feather follows the same design on a 737, unwrapped off a
+# view of its left side (through its crown antenna, window row and outline,
+# paint edges taken where the brightness steps, so the shading doesn't count).
+# Its stations, in m behind the red's point, are scaled to the E190 by that
+# point (1003) and the spike's tip in the rear door (11.65 m back on the 737);
+# its angles by 0.85, the ratio of the two liveries' heights on the fuselage
+# (the dark green's top 33.7 against 40 deg, the window rows 68 against 80):
+# - the dark red on top is one V centred on the crown, coming to a fine point
+#   3.2 m back (a quarter of the way to the door; ahead of it the red is bright
+#   over the top) and widening evenly down both sides: 10 deg 1.4 m behind the
+#   point, 21 at 2.8 m, then steepening into leaf A's tip (33 at 3.8 m, 47 at
+#   4.7 m), its sides being leaf A's top edge;
+# - leaf A, the bright crescent under it, ends in a point ~8 m back, ~50 deg;
+# - bright leaf B starts on the crown 6.5 m back, inside the V before leaf A
+#   ends, its lower edge leaving the crown slowly (3-4 deg to ~7.2 m, 10 at
+#   8 m) and steepening steadily (25 at 9 m, 43 at 10 m) into the spike.
+# The eye-level E190 photo has the V ~7 deg wider at 1200 and leaf B dropping
+# faster behind the wing tip; the 737 is followed for both. Behind the door
+# the 737 carries a third dark V over the top of its tail; the E190 photo shows
+# the red there plain, so it stays bright.
+M737 = (1489.7 - 1003.0) / 11.65             # E190 px per 737 m
+
+
+def _m(x):
+    return (np.asarray(x, float) - 1003.0) / M737
+
+
+def _lat737(m):
+    """the V's half-width on the 737, deg"""
+    return (6.9 * np.clip(m - 3.2, 0, None) ** 1.1
+            + 3.0 * np.clip(m - 6.0, 0, None) ** 2)
+
+
+LA_V = 1003.0 + 3.2 * M737
+_xs = np.arange(LA_V, 1400.0, 0.25)
+_lab = np.interp(_xs, [q[0] for q in LA_BOT], [q[1] for q in LA_BOT])
+_lat = 0.85 * _lat737(_m(_xs))
+LA_TIP = float(_xs[np.argmax(_lat >= _lab)])          # where leaf A's two edges meet
+LA_TOP = [(x, 0.85 * float(_lat737(_m(x)))) for x in np.arange(LA_V, LA_TIP, 4.0)]
+LA_TOP.append((LA_TIP, float(np.interp(LA_TIP, _xs, _lab))))
+LB_V = 1003.0 + 6.5 * M737
+_LB737 = [(6.5, 0.0), (7.0, 3.5), (7.5, 6.0), (8.0, 10.0), (8.5, 17.0), (9.0, 25.0),
+          (9.5, 34.0), (10.0, 43.0), (10.5, 51.0)]
+# angles scaled as above near the crown, easing to the 737's own by 9.5 m,
+# where the edge runs into the first photo's points at the rear door
+LB_BOT = [(1003.0 + m * M737, t * (0.85 + 0.15 * min(max((m - 7.5) / 2.0, 0), 1)))
+          for m, t in _LB737]
 LB_DOOR = [(1450, 59.0), (1456, 62.8), (1462, 67.0), (1467, 70.0), (1472, 72.4), (1477, 74.3),
            (1481, 75.5)]                     # first photo, into the rear door
 # the line below the windows, carried forward to where the (lower) stripe
@@ -287,7 +319,7 @@ def curve(pts, lo, hi, outside):
 
 E_LAB = curve(LA_BOT, DR_FRONT, LA_TIP, 0.0)
 E_LAT = curve(LA_TOP, LA_V, LA_TIP, 0.0)
-E_DUP = np.where(XG < LA_TIP, 0.0, curve(LB_BOT, LA_TIP, DR_BACK, math.pi))
+E_DUP = np.where(XG < LB_V, 0.0, curve(LB_BOT, LB_V, DR_BACK, math.pi))
 low = np.where(XG < DR_LOW[0][0], math.pi,
                np.interp(XG, [q[0] for q in DR_LOW], [q[1] * DEG for q in DR_LOW]))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), np.minimum(E_B5, low), 0.0)
@@ -322,8 +354,9 @@ _raw = dict(B1=E_B1, B2=E_B2, B3=E_B3, B5=E_B5, B43=E_B43, DUP=E_DUP, DLO=E_DLO,
 E_B1, E_B2, E_B3, E_B5, E_B43 = (smooth_edge(e) for e in (E_B1, E_B2, E_B3, E_B5, E_B43))
 # the dark red's back edges are traced point by point already; smoothing them
 # as hard as the photo traces would iron out the turn into the tip
-E_DUP, E_DLO = (smooth_edge(e, rms_px=0.5) for e in (E_DUP, E_DLO))
-E_LAT, E_LAB, E_BL = (smooth_edge(e) for e in (E_LAT, E_LAB, E_BL))
+# and the V's sides are one designed curve already
+E_DUP, E_DLO, E_LAT = (smooth_edge(e, rms_px=0.5) for e in (E_DUP, E_DLO, E_LAT))
+E_LAB, E_BL = (smooth_edge(e) for e in (E_LAB, E_BL))
 # The dark green's lower edge, which the light green runs along, is in both
 # photos a straight line in angle from just behind its tip back past the
 # wing (~0.26 deg per px), curling up into the tip over its last few px.
@@ -513,11 +546,11 @@ _low_s[_st] = _side_th(XG[_st], _y0 + (_y1 - _y0) * (XG[_st] - _x0) / (_x1 - _x0
 # line, but seen from above the dark red stood clearly above the dark green.
 # The sliver it had run forward along the stripe from 1046 was mostly the
 # photo's dark sharpening rim along the white. Ahead of ~1085 leaf A reaches
-# down to the stripe, so the only dark red there is the V on the crown,
-# which begins at LA_V.
+# down to the stripe and the V on the crown only begins at LA_V (~1137), so
+# there the red is bright all over, as on the 737.
 _lvl = float(E_B3[np.searchsorted(XG, X_C) - 1])       # the dark green's top at the closure
 DR_SIDE = float(XG[np.argmax((XG > X_C) & (E_B5 >= _lvl))])   # where the side wedge begins
-DR_FRONT = LA_V
+DR_FRONT = min(LA_V, DR_SIDE - 10.0)
 E_LAB = np.where((XG < DR_FRONT) | (XG > LA_TIP), 0.0,
                  -_smin(-np.full_like(XG, _lvl), -E_LAB, 3.0 * DEG))
 E_DLO = np.where((XG >= DR_FRONT) & (XG <= DR_BACK), _smin(E_B5, _low_s, 1.5 * DEG), 0.0)
