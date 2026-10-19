@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from scipy import ndimage
-from scipy.interpolate import PchipInterpolator, UnivariateSpline, splprep, splev
+from scipy.interpolate import LSQUnivariateSpline, PchipInterpolator, UnivariateSpline, splprep, splev
 from scipy.optimize import curve_fit
 
 sys.path.insert(0, sys.argv[1])
@@ -435,7 +435,12 @@ E_B1 = np.clip(E_B1 + np.where(XG >= _x1, _off, _ease), 0.0, math.pi)
 # step. So from 1295, where both still match the photo, each is eased onto
 # the belly line: the light green's lower edge arriving along it, the dark
 # green's crossing it just steeply enough to close the taper.
-XB0, XB1 = 1295.0, 1362.0
+# (Eased from 1295 to 1362, as photo 1 shows it, the dark green's lower edge
+# bent sharply onto the belly line, which from below in the sim showed as the
+# line going up and down: the bend now runs from 1240 to 1390, within ~2 deg
+# of photo 1's measurements at 1280-1330, and the light green tapers along the
+# belly line to ~1390.)
+XB0, XB1 = 1240.0, 1390.0
 
 
 def _ease_to(E, x0, x1, y1, m1):
@@ -500,6 +505,44 @@ _hi = UnivariateSpline(np.r_[[q[0] for q in _hp], _xe],
 _w = np.clip((XG - 1430.0) / 30.0, 0, 1)
 _w = _w * _w * (3 - 2 * _w)
 E_B5 = np.where(XG < _x5a, 0.0, np.clip((1 - _w) * _hi + _w * E_B5, 0.0, math.pi))
+# Behind the wing photo 1 loses the stripe under the wing (~1140-1300), and
+# both its edges had been joined there from the two photos' traces, each
+# through its own camera model: in the sim they went up and down, the red's
+# edge flattening at ~1320 and steepening again, the stripe pinching to 6 deg
+# at 1260 and doubling to 13 by 1380. So from 1150 back the red's edge is one
+# spline in angle (knots every ~110 px) through the eye-level edge ahead of the
+# wing, photo 1's column-by-column measurements behind it to the door and the
+# tail's points behind that (within ~1 deg of each), and the stripe's width
+# one smooth curve from its eye-level 7.6 deg at 1200, through a shallow
+# minimum, to photo 1's 10.5 at 1360, 14 at 1440 and 15.5 by 1500: the two
+# edges run parallel and turn together.
+def _sstep(x, a, b):
+    t = np.clip((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+B5_P1 = [(1310, 84.0), (1320, 85.7), (1330, 87.3), (1340, 89.0), (1350, 89.9), (1360, 91.6),
+         (1370, 93.3), (1380, 94.4), (1390, 96.1), (1400, 97.9), (1410, 99.1), (1420, 101.1),
+         (1430, 104.1), (1440, 107.7), (1450, 110.6), (1470, 116.5), (1480, 116.8)]
+_xa, _xc = np.arange(1050.0, 1181.0, 2.0), np.arange(1490.0, 1711.0, 4.0)
+_f5 = LSQUnivariateSpline(
+    np.r_[_xa, [q[0] for q in B5_P1], _xc],
+    np.r_[np.interp(_xa, XG, E_B5) / DEG, [q[1] for q in B5_P1], np.interp(_xc, XG, E_B5) / DEG],
+    [1170, 1280, 1390, 1500, 1610], w=np.r_[np.full(len(_xa), 4.0), np.ones(len(B5_P1) + len(_xc))],
+    k=3)(np.clip(XG, 1050.0, 1710.0)) * DEG
+_wid = (E_B43 - E_B5) / DEG
+_B5n = (1 - _sstep(XG, 1120, 1170)) * E_B5 + _sstep(XG, 1120, 1170) * _f5
+_B5n = (1 - _sstep(XG, 1680, 1710)) * _B5n + _sstep(XG, 1680, 1710) * E_B5
+W_PTS = [(1150, float(np.interp(1150, XG, _wid))), (1180, float(np.interp(1180, XG, _wid))),
+         (1200, 7.6), (1225, 7.35), (1260, 7.6), (1300, 8.6), (1340, 9.9), (1370, 10.9),
+         (1400, 12.2), (1440, 14.0), (1480, 15.2), (1510, 15.6),
+         (1540, float(np.interp(1540, XG, _wid))), (1556, float(np.interp(1556, XG, _wid)))]
+_wn = PchipInterpolator([q[0] for q in W_PTS], [q[1] for q in W_PTS])(np.clip(XG, 1150, 1556)) * DEG
+_s0, _s1 = _sstep(XG, 1140, 1170), _sstep(XG, 1530, 1556)
+_line = (1 - _s0) * E_B43 + _s0 * ((1 - _s1) * (_B5n + _wn) + _s1 * E_B43)
+E_B5 = np.where(XG < 1050, E_B5, np.clip(_B5n, 0.0, math.pi))
+E_B43 = np.where(XG < 1140, E_B43, np.clip(_line, 0.0, math.pi))
+E_B3 = np.where(XG < 1140, E_B3, E_B43)
 # Up to where it leaves for the line below the windows (~1255, behind the
 # wing), the dark red's lower edge is the pinstripe's upper edge: both photos
 # show the dark red sitting right on the white. Built from the raw pinstripe
