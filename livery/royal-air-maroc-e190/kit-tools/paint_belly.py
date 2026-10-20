@@ -21,5 +21,7 @@ cov = np.asarray(Image.open('layers/belly__paintmask.png').convert('L')).astype(
 white = np.array(G.WHITE, np.float32) / 255
 out = base.copy()
 out[..., :3] = base[..., :3] * (1 - cov + cov * white)
+# near-opaque kit alpha (240-254, a dither) made opaque, as in combine.py
+out[..., 3] = np.where(base[..., 3] >= 240, 255, base[..., 3])
 Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), 'RGBA').save(sys.argv[3], compress_level=6)
 print('saved', sys.argv[3])

@@ -14,7 +14,7 @@ from PIL import Image
 from scipy import ndimage
 
 V_TOP, V_BOT, AX = 2100.0, 4094.0, 3097.0     # aft section, 4K texels
-U0 = 1890                                      # start column (still linear)
+U0 = 1700                                      # start column (still linear)
 
 
 def line_masks(wire_png):
@@ -40,6 +40,18 @@ def column_centres(H, U, v0=2080, v1=4096):
 # Darts: where each opens (U, V at its tip); both of its edges are one seam,
 # so they carry the angle of the line through the tip.
 DART_TIPS = [(1955, 2876.0), (1955, 3316.0), (2535, 2309.0), (2535, 3883.0)]
+
+# Where the dart behind the wing really opens (4K U, by its mask tip's U).
+# The mask is padded a few texels past each strip, so its gap only shows once
+# the dart is ~8 texels wide; the wireframe's line already parts in two 200
+# columns earlier, at 1751, the upper branch rising off the straight lower
+# one. Mapped as linear up to the mask's tip, every strip beside it was off
+# by up to 1.5 deg there, which shifted all at once at the tip and showed as
+# notches in both edges of the light green behind the wing. (The upper dart,
+# at 2535, also opens early, at 2352, but blunt, already ~5 texels wide, and
+# the lines beside it don't move with it there; only plain red lies over it,
+# so it keeps the mask's tip.)
+DART_OPEN = {1955: 1751}
 
 
 def phi_lin(v):
@@ -211,7 +223,7 @@ def wire_strokes(wire_png):
     return (w[..., 3] > 60) & (w[..., :3].mean(2) < 200)
 
 
-def snap_edges(strokes, a, b, Ut, Vt, reach=10, min_gap=8):
+def snap_edges(strokes, a, b, Ut, Vt, reach=10, min_gap=8, tip=None):
     """Move followed dart edges from the paint mask onto the mesh.
 
     The kit's mask is padded 3-5 texels past each strip, so edges followed on
@@ -224,7 +236,9 @@ def snap_edges(strokes, a, b, Ut, Vt, reach=10, min_gap=8):
     too narrow to tell its two strokes apart, or no thin stroke is found (a
     few columns have other drawing there), the offset is interpolated from
     the neighbouring columns, falling to zero at the tip; a running median
-    along the dart keeps odd columns from pulling it."""
+    along the dart keeps odd columns from pulling it. Given the strokes' own
+    positions at the tip (tip: upper, lower), the offset falls to those
+    instead."""
     from scipy.ndimage import median_filter
     out = []
     for edge, sgn in ((a, -1), (b, +1)):
@@ -247,13 +261,75 @@ def snap_edges(strokes, a, b, Ut, Vt, reach=10, min_gap=8):
             run = runs[-1] if sgn < 0 else runs[0]          # the one nearest the gap
             offs[i] = (run[0] + run[-1] + 1) / 2.0 - v
         ok = np.isfinite(offs)
+        t0 = 0.0 if tip is None else tip[0 if sgn < 0 else 1] - edge[ks[0]]
         if ok.sum() >= 2:
             good = median_filter(offs[ok], size=51, mode='nearest')
-            offs = np.interp(ks, np.r_[Ut, ks[ok]], np.r_[0.0, good])
+            offs = np.interp(ks, np.r_[Ut, ks[ok]], np.r_[t0, good])
         else:
             offs = np.zeros(len(ks))
         out.append({U: edge[U] + o for U, o in zip(ks, offs)})
     return out
+
+
+def _runs(strokes, U, v0, v1):
+    """centres and lengths (rows) of the wireframe strokes in rows v0..v1-1"""
+    rows = np.arange(v0, v1)
+    r = rows[strokes[v0:v1, U]]
+    if not len(r):
+        return np.zeros(0), np.zeros(0, int)
+    g = np.split(r, np.nonzero(np.diff(r) > 1)[0] + 1)
+    return np.array([(x[0] + x[-1] + 1) / 2.0 for x in g]), np.array([len(x) for x in g])
+
+
+def line_at(strokes, U, V, reach=8):
+    """the lengthwise line (4K V of its stroke centre) nearest V just ahead of
+    column U: the median over the 40 columns before it, skipping ring lines"""
+    vs = []
+    for c in range(U - 45, U - 4):
+        cs, ln = _runs(strokes, c, int(V) - reach, int(V) + reach + 1)
+        if len(cs) and ln.max() <= 6:
+            vs.append(cs[np.argmin(np.abs(cs - V))])
+    return float(np.median(vs)) if vs else float(V)
+
+
+def tip_edges(strokes, Ut, Vt, reach=8):
+    """the dart's two strokes (upper, lower; 4K V) just ahead of its mask
+    tip, where it is already open: the medians over the 40 columns before it"""
+    up, dn = [], []
+    for c in range(Ut - 45, Ut - 4):
+        cs, ln = _runs(strokes, c, int(Vt) - reach, int(Vt) + reach + 1)
+        if not len(cs) or ln.max() > 6:
+            continue
+        a = cs[cs <= Vt + 0.5]; b = cs[cs > Vt + 0.5]
+        if len(a) and len(b):
+            up.append(a.max()); dn.append(b.min())
+    return (float(np.median(up)), float(np.median(dn))) if up else (float(Vt), float(Vt))
+
+
+def opening_edges(strokes, Uo, Ut, va, vb, V0, tol=2.6, half=1.75):
+    """The dart's two edges between where its line parts (Uo, on the line at
+    V0) and its mask tip (Ut), read off the wireframe walking forward from the
+    tip: in each column, the two strokes nearest the edges' positions in the
+    column behind. Over the first ~100 columns the dart is narrower than a
+    stroke and the two touch; there the edge leaving the line is read from the
+    merged stroke's far side, half a stroke in, and the one staying on it is
+    left to the fit. Columns a ring line crosses are left out."""
+    a, b = {}, {}
+    for U in range(Ut - 1, Uo, -1):
+        cs, ln = _runs(strokes, U, int(va) - 6, int(vb) + 7)
+        if not len(cs) or ln.max() > 7:
+            continue
+        ia, ib = np.argmin(np.abs(cs - va)), np.argmin(np.abs(cs - vb))
+        if ia != ib and ln[ia] <= 5 and ln[ib] <= 5:
+            if abs(cs[ia] - va) <= tol and abs(cs[ib] - vb) <= tol:
+                a[U], b[U] = va, vb = cs[ia], cs[ib]
+        elif ia == ib and ln[ia] >= 5:
+            top, bot = cs[ia] - ln[ia] / 2.0, cs[ia] + ln[ia] / 2.0
+            if V0 - top > bot - V0 and abs(top + half - va) <= tol:
+                a[U] = va = top + half
+            elif V0 - top <= bot - V0 and abs(bot - half - vb) <= tol:
+                b[U] = vb = bot - half
+    return a, b
 
 
 def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950, strokes=None,
@@ -273,10 +349,21 @@ def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950, strokes=Non
         if Vt > AX:
             continue
         a, b = dart_edges(mask4, Ut, Vt)
-        if strokes is not None:
+        Uo, V0, w0 = Ut, float(Vt), 1.0
+        if strokes is not None and Ut in DART_OPEN:
+            # from where the line parts: both edges start on it, at its angle
+            tip = tip_edges(strokes, Ut, Vt)
+            a, b = snap_edges(strokes, a, b, Ut, Vt, tip=tip)
+            Uo = DART_OPEN[Ut]
+            V0 = line_at(strokes, Uo, Vt)
+            oa, ob = opening_edges(strokes, Uo, Ut, *tip, V0)
+            a.update(oa); b.update(ob)
+            a[Uo] = b[Uo] = V0
+            w0 = 50.0
+        elif strokes is not None:
             a, b = snap_edges(strokes, a, b, Ut, Vt)
-        ka = np.array(sorted(a))
-        va = np.array([a[k] for k in ka]); vb = np.array([b[k] for k in ka])
+        ka, kb = np.array(sorted(a)), np.array(sorted(b))
+        va = np.array([a[k] for k in ka]); vb = np.array([b[k] for k in kb])
         # Followed column by column to the nearest texel (or half texel when
         # snapped), each edge wobbled by about one: its slope swung from flat
         # to nearly three times the average over a few dozen columns. Every
@@ -287,17 +374,19 @@ def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950, strokes=Non
         # texel of the followed one.
         if smooth_edges:
             from scipy.interpolate import LSQUnivariateSpline
-            fit = ka <= U_hold
-            kn = np.arange(ka[0] + 120, ka[fit][-1] - 60, 120)
-            va = np.where(fit, LSQUnivariateSpline(ka[fit], va[fit], kn, k=3)(np.minimum(ka, U_hold)), va)
-            vb = np.where(fit, LSQUnivariateSpline(ka[fit], vb[fit], kn, k=3)(np.minimum(ka, U_hold)), vb)
-            vb = np.maximum(vb, va)
+            def spl(k, v):
+                fit = k <= U_hold
+                kn = np.arange(k[0] + 120, k[fit][-1] - 60, 120)
+                w = np.where(k[fit] == Uo, w0, 1.0)       # holds it to the opening point
+                return np.where(fit, LSQUnivariateSpline(k[fit], v[fit], kn, w=w, k=3)(np.minimum(k, U_hold)), v)
+            va, vb = spl(ka, va), spl(kb, vb)
         Uc = np.minimum(Us, U_hold)
-        full_a = np.where(Us < Ut, Vt, np.interp(Uc, ka, va))
-        full_b = np.where(Us < Ut, Vt, np.interp(Uc, ka, vb))
+        full_a = np.where(Us < Uo, V0, np.interp(Uc, ka, va))
+        full_b = np.where(Us < Uo, V0, np.interp(Uc, kb, vb))
+        full_b = np.maximum(full_b, full_a)
         full_a = gaussian_filter1d(full_a, smooth, mode='nearest')
         full_b = gaussian_filter1d(full_b, smooth, mode='nearest')
-        phi = phi_lin(Vt)
+        phi = phi_lin(V0)
         edges.append((phi, full_a, full_b))
         edges.append((2 * np.pi - phi, 2 * AX - full_b, 2 * AX - full_a))
     edges.sort(key=lambda e: e[0])
