@@ -256,7 +256,8 @@ def snap_edges(strokes, a, b, Ut, Vt, reach=10, min_gap=8):
     return out
 
 
-def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950, strokes=None):
+def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950, strokes=None,
+                  smooth_edges=True):
     """phi for every 8K texel of the aft section from column U_from (4K) on,
     linear in V within each strip between seams. The left darts are followed
     on the mask (and moved onto the mesh's own edges when the wireframe's
@@ -276,6 +277,21 @@ def strip_phi_map(mask4, N=8192, U_from=U0, smooth=4.0, U_hold=3950, strokes=Non
             a, b = snap_edges(strokes, a, b, Ut, Vt)
         ka = np.array(sorted(a))
         va = np.array([a[k] for k in ka]); vb = np.array([b[k] for k in ka])
+        # Followed column by column to the nearest texel (or half texel when
+        # snapped), each edge wobbled by about one: its slope swung from flat
+        # to nearly three times the average over a few dozen columns. Every
+        # colour edge crossing the strip took the same steps, which showed
+        # in the sim as jagged lines under the tail cone. The mesh's seams
+        # are smooth lines, so each edge is one cubic spline along U (knots
+        # every 120 columns, up to where the edges are held), within ~0.4
+        # texel of the followed one.
+        if smooth_edges:
+            from scipy.interpolate import LSQUnivariateSpline
+            fit = ka <= U_hold
+            kn = np.arange(ka[0] + 120, ka[fit][-1] - 60, 120)
+            va = np.where(fit, LSQUnivariateSpline(ka[fit], va[fit], kn, k=3)(np.minimum(ka, U_hold)), va)
+            vb = np.where(fit, LSQUnivariateSpline(ka[fit], vb[fit], kn, k=3)(np.minimum(ka, U_hold)), vb)
+            vb = np.maximum(vb, va)
         Uc = np.minimum(Us, U_hold)
         full_a = np.where(Us < Ut, Vt, np.interp(Uc, ka, va))
         full_b = np.where(Us < Ut, Vt, np.interp(Uc, ka, vb))
