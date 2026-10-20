@@ -264,7 +264,8 @@ local function ini_text()
     return text
 end
 local stats = { shots = {}, cam_frames = 0, cockpit_frames = 0, min_dist = 1e9, max_dist = 0, below_ground = 0,
-    too_close = 0, cruise_ground_trackside = 0, focus_frames = 0, focus_off = 0, focus_kept = 0, focus_back = 0 }
+    too_close = 0, cruise_ground_trackside = 0, focus_frames = 0, focus_off = 0, focus_kept = 0, focus_back = 0,
+    overzoom = 0 }
 local S_expected = 0.9 * 78000 ^ (1 / 3)
 -- generated shots, as they start
 local orbiting_shots, cockpit_shots = {}, {}
@@ -316,7 +317,11 @@ local function frame(dt)
             ps.dmin, ps.dmax = math.min(ps.dmin, d), math.max(ps.dmax, d)
             ps.zmax = math.max(ps.zmax, cam.zoom)
             ps.rollmax = math.max(ps.rollmax, math.abs(cam.roll))
-            check(shot_zoom >= 0.99 and shot_zoom <= 10.01 and cam.zoom >= 0.4 and cam.zoom <= 12, "zoom in range " .. cam.zoom)
+            check(shot_zoom >= 0.99 and shot_zoom <= 10.01 and cam.zoom >= 0.4 and cam.zoom <= 30.01, "zoom in range " .. cam.zoom)
+            -- past 4x, + and - never make the aircraft more than three times the picture's width
+            if CVt.user_zoom > 4.0001 and CVt.size * cam.zoom / (2 * d * math.tan(math.rad(30))) > 3.05 then
+                stats.overzoom = stats.overzoom + 1
+            end
             if d < 0.65 * CVt.size + 2 - 0.5 then stats.too_close = stats.too_close + 1 end
             if mode == "ffi" then
                 stats.focus_frames = stats.focus_frames + 1
@@ -622,6 +627,31 @@ if lib then
     check(ground_frames > 0, "trackside cameras on the ground come up flying low")
     check(ground_high == 0, "and stand on the ground")
     check(motion.trackside and motion.trackside.over == 0, "trackside cameras turn within the camera speed limit")
+    -- a trackside camera far off: + zooms on past 4x until the aircraft fills the picture
+    local function cam_dist() return math.sqrt((cam.x - ac.x) ^ 2 + (cam.y - ac.y) ^ 2 + (cam.z - ac.z) ^ 2) end
+    for _ = 1, 30 * 180 do
+        frame(1 / 30)
+        local sh = CVt.shot
+        if sh and sh.def.id == "trackside" and T - sh.t0 < 0.5 and lib.mock_camera_controlled() ~= 0 and cam_dist() > 250 then break end
+    end
+    local far_shot = CVt.shot
+    check(far_shot and far_shot.def.id == "trackside" and cam_dist() > 250, "a far-off trackside camera to zoom on")
+    local far_zoom, far_fill, far_cam, held_for = 0, 0, 0, 0
+    key(0xB0, "pressed")
+    for _ = 1, 30 * 4 do
+        frame(1 / 30)
+        key(0xB0, "released") -- key repeats, as FlyWithLua reports them
+        if CVt.shot == far_shot and lib.mock_camera_controlled() ~= 0 then
+            held_for = held_for + 1 / 30
+            far_zoom = math.max(far_zoom, CVt.user_zoom)
+            far_fill = CVt.size * cam.zoom / (2 * cam_dist() * math.tan(math.rad(30)))
+            far_cam = cam.zoom
+        end
+    end
+    seconds(1)
+    print(string.format("  far-off zoom: + to %.1fx (camera %.1fx), aircraft %.2f of the picture's width after %.1f s", far_zoom, far_cam, far_fill, held_for))
+    check(held_for > 2.5 and (far_fill > 0.9 or far_cam > 29.5),
+        string.format("held long enough, the aircraft fills the picture (%.2f) or the zoom reaches 30x (%.1f)", far_fill, far_cam))
     command("toggle")
 
     -- 10e. a ridge beside the flight path: terrain never hides the aircraft for long
@@ -1219,6 +1249,7 @@ for id, ps in pairs(per_shot) do
         id, ps.n, ps.ang, ps.dmin, ps.dmax, ps.zmax, ps.rollmax))
     check(ps.ang < 40, id .. " keeps the aircraft in frame")
 end
+check(stats.overzoom == 0, "zooming past 4x stops at the aircraft three times the picture's width (" .. stats.overzoom .. " frames over)")
 local kinds = 0
 for _ in pairs(shots_seen) do kinds = kinds + 1 end
 check(kinds >= 3, "several kinds of shot (" .. kinds .. ")")

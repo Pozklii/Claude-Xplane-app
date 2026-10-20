@@ -40,7 +40,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.6"
+local VERSION = "2.7"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -370,6 +370,7 @@ local CV = {
     size = 15,
     user_zoom = 1,          -- zoom set with + and - during a cinematic, as shown (eased)
     zoom_target = 1,        -- where the zoom is heading
+    zoom_limit = 4,         -- how far + and - may zoom in on this camera
     zoom_from = 1,          -- the target when this zoom began, so a tap still makes a step
     zoom_dir = 0,           -- +1 zooming in, -1 zooming out
     zoom_held = 0,          -- seconds this zoom has been held; it ramps up
@@ -1186,6 +1187,7 @@ local function focus_release()
 end
 
 local update_zoom -- (below, with the rest of the zoom)
+local CAM_ZOOM_MAX = 30 -- the most the camera zooms: the shot's own zoom and + and - together
 local cam_ctx = {}
 local cam_out = { x = 0, y = 0, z = 0, heading = 0, pitch = 0, roll = 0, zoom = 1 }
 
@@ -1254,9 +1256,10 @@ local function camera_func(pos, losing)
     end
     pos.x, pos.y, pos.z = cam_out.x, cam_out.y, cam_out.z
     pos.heading, pos.pitch, pos.roll = cam_out.heading, cam_out.pitch, cam_out.roll
-    update_zoom(c.dt)
-    focus_on(sqrt((cam_out.x - c.x) ^ 2 + (cam_out.y - c.y) ^ 2 + (cam_out.z - c.z) ^ 2))
-    pos.zoom = M.clamp(cam_out.zoom * CV.user_zoom, 0.4, 12)
+    local dist = sqrt((cam_out.x - c.x) ^ 2 + (cam_out.y - c.y) ^ 2 + (cam_out.z - c.z) ^ 2)
+    update_zoom(c.dt, c.size, dist, cam_out.zoom)
+    focus_on(dist)
+    pos.zoom = M.clamp(cam_out.zoom * CV.user_zoom, 0.4, CAM_ZOOM_MAX)
     return 1
 end
 
@@ -1484,6 +1487,7 @@ local function outside_shot()
 end
 
 local ZOOM_MIN, ZOOM_MAX = 0.5, 4
+local ZOOM_FILL = 3    -- past 4x, + zooms on until the aircraft is this many times the picture's width
 local ZOOM_RATE = 0.7  -- while held: about 2x a second once it has ramped up
 local ZOOM_STEP = 1.1  -- the least a tap zooms
 local WHEEL_STEP = 1.12 -- each notch of the mouse wheel
@@ -1493,7 +1497,7 @@ local function zoom_end()
         -- a tap still makes a step (eased in like the rest)
         local step = math.log(CV.zoom_target / CV.zoom_from) * CV.zoom_dir
         if step < math.log(ZOOM_STEP) then
-            CV.zoom_target = M.clamp(CV.zoom_from * ZOOM_STEP ^ CV.zoom_dir, ZOOM_MIN, ZOOM_MAX)
+            CV.zoom_target = M.clamp(CV.zoom_from * ZOOM_STEP ^ CV.zoom_dir, ZOOM_MIN, CV.zoom_limit)
         end
     end
     CV.zoom_dir = 0
@@ -1508,7 +1512,7 @@ end
 
 -- A step for each notch of the mouse wheel (eased in like the rest).
 local function zoom_wheel(notches)
-    CV.zoom_target = M.clamp(CV.zoom_target * WHEEL_STEP ^ notches, ZOOM_MIN, ZOOM_MAX)
+    CV.zoom_target = M.clamp(CV.zoom_target * WHEEL_STEP ^ notches, ZOOM_MIN, CV.zoom_limit)
 end
 
 -- Where X-Plane's zoom is the one that works (the cockpit and X-Plane's own
@@ -1550,13 +1554,22 @@ end
 -- Each frame of an outside shot: the target moves while a zoom is held,
 -- ramping up over a quarter of a second, and the zoom shown eases after it,
 -- so starting and stopping are smooth.
-function update_zoom(dt)
+-- How far in + and - may zoom: 4x on any camera, and further on one far
+-- enough off that the aircraft is still small at 4x (a trackside camera
+-- hundreds of metres away, say), until it's ZOOM_FILL times the picture's
+-- width. It moves with the camera's distance, and a zoom past it (carried
+-- over from a far camera to a close one) comes back to it.
+function update_zoom(dt, size, dist, shot_zoom)
+    local shot = math.max(shot_zoom, 0.01)
+    CV.zoom_limit = math.max(ZOOM_MAX, math.min(framing_zoom(size, dist, ZOOM_FILL), CAM_ZOOM_MAX) / shot)
     if CV.zoom_dir ~= 0 then
         CV.zoom_held = CV.zoom_held + dt
         local rate = ZOOM_RATE * math.min(1, CV.zoom_held / 0.25)
-        CV.zoom_target = M.clamp(CV.zoom_target * math.exp(CV.zoom_dir * rate * dt), ZOOM_MIN, ZOOM_MAX)
+        CV.zoom_target = M.clamp(CV.zoom_target * math.exp(CV.zoom_dir * rate * dt), ZOOM_MIN, CV.zoom_limit)
     end
+    CV.zoom_target = math.min(CV.zoom_target, CV.zoom_limit)
     CV.user_zoom = CV.user_zoom + (CV.zoom_target - CV.user_zoom) * M.smooth(dt, 0.12)
+    CV.user_zoom = math.min(CV.user_zoom, CV.zoom_limit)
 end
 
 local function start(reason)
@@ -1582,7 +1595,7 @@ local function start(reason)
     CV.hold = false
     CV.prefer_close = false
     zoom_end()
-    CV.user_zoom, CV.zoom_target, CV.zoom_from = 1, 1, 1
+    CV.user_zoom, CV.zoom_target, CV.zoom_from, CV.zoom_limit = 1, 1, 1, ZOOM_MAX
     next_shot(true)
 end
 
