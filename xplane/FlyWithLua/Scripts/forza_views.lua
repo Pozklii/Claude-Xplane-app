@@ -1,5 +1,5 @@
 --[[
-    Cinematic View for X-Plane 12
+    Forza Views for X-Plane 12
     A FlyWithLua NG+ script
 
     A self-directing camera in the style of the Need for Speed and Forza
@@ -8,9 +8,10 @@
     flight path, or fixed to the airframe, and the pilot's view in the
     cockpit, with letterbox bars and fades. Shots suit what the aircraft is
     doing (runway-level shots on takeoff and landing, air-to-air in cruise),
-    and liftoff and touchdown get shots of their own. At sunrise and sunset
-    cameras line up with the low sun; at night they stay close; terrain never
-    hides the aircraft for long; in cloud the shots move into the cockpit.
+    and moments cut in with shots of their own: the gear or flaps moving, a
+    steep turn, an engine starting. At sunrise and sunset cameras line up
+    with the low sun; at night they stay close; terrain never hides the
+    aircraft for long; in thick cloud the shots move into the cockpit.
 
     It can be switched on and off by hand, and it starts by itself after a
     while with no keyboard, mouse or joystick input (any input ends it again).
@@ -19,19 +20,22 @@
     stays focused on the aircraft.
 
     Install: copy this file to X-Plane 12/Resources/plugins/FlyWithLua/Scripts/
+    It used to be called cinematic_view.lua: remove that file if it's there
+    (with both, this one stands down and says so). Settings carry over;
+    joystick buttons need assigning to the new commands below.
 
     Everything is in one window: Plugins > FlyWithLua > FlyWithLua Macros >
-    Cinematic View. It starts and stops the cinematic, holds all the settings
+    Forza Views. It starts and stops the cinematic, holds all the settings
     and lets you set a key for each action. Settings and keys are saved next
-    to this script in cinematic_view.ini.
+    to this script in forza_views.ini.
 
     Each action is also an X-Plane command, for joystick buttons (Settings >
-    Joystick, search for "cinematic"):
-        FlyWithLua/cinematic_view/toggle       start/stop
-        FlyWithLua/cinematic_view/next_shot    cut to the next shot
-        FlyWithLua/cinematic_view/hold         hold the shot / let it go on
-        FlyWithLua/cinematic_view/toggle_afk   auto-start when away on/off
-        FlyWithLua/cinematic_view/settings     show/hide the window
+    Joystick, search for "forza"):
+        FlyWithLua/forza_views/toggle       start/stop
+        FlyWithLua/forza_views/next_shot    cut to the next shot
+        FlyWithLua/forza_views/hold         hold the shot / let it go on
+        FlyWithLua/forza_views/toggle_afk   auto-start when away on/off
+        FlyWithLua/forza_views/settings     show/hide the window
 
     How it moves the camera: outside shots take control of X-Plane's camera
     through the plugin SDK (XPLMControlCamera, called through LuaJIT's FFI),
@@ -40,7 +44,23 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.8"
+local VERSION = "3.0"
+
+-- The earlier version of this script, cinematic_view.lua, still in the
+-- Scripts folder (FlyWithLua loads it first): two would fight over the
+-- camera and the keys, so this one stands down, and says why in Log.txt and
+-- on screen for a while.
+if ForzaViews_old_version_warning == nil and CinematicView_tick ~= nil then
+    local text = "Forza Views: remove cinematic_view.lua (its old version) from FlyWithLua's Scripts folder, then reload the scripts"
+    if logMsg then logMsg(text) end
+    local frames = 0
+    function ForzaViews_old_version_warning()
+        frames = frames + 1
+        if frames < 60 * 30 and draw_string then draw_string(40, (SCREEN_HEIGHT or 1080) - 60, text, 1, 0.75, 0.3) end
+    end
+    if do_every_draw then do_every_draw("ForzaViews_old_version_warning()") end
+    do return end
+end
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -81,11 +101,11 @@ for k, v in pairs(DEFAULTS) do settings[k] = v end
 -- "size:<file> = <metres>".
 local aircraft_sizes = {}
 
-local function settings_path()
+local function settings_path(name)
     local dir = SCRIPT_DIRECTORY or ""
     local last = dir:sub(-1)
     if dir ~= "" and last ~= "/" and last ~= "\\" then dir = dir .. "/" end
-    return dir .. "cinematic_view.ini"
+    return dir .. (name or "forza_views.ini")
 end
 
 local function sanitize_settings()
@@ -104,8 +124,14 @@ local function sanitize_settings()
     end
 end
 
+-- Reads the settings; "old" if they came from the file the script used
+-- under its earlier name, cinematic_view.ini.
 local function load_settings()
     local f = io.open(settings_path(), "r")
+    local from = "new"
+    if not f then
+        f, from = io.open(settings_path("cinematic_view.ini"), "r"), "old"
+    end
     if not f then return end
     for line in f:lines() do
         local plane, metres = line:match("^size:(.-)%s*=%s*([%d%.]+)%s*$")
@@ -124,12 +150,13 @@ local function load_settings()
     end
     f:close()
     sanitize_settings()
+    return from
 end
 
 local function save_settings()
     local f = io.open(settings_path(), "w")
     if not f then return end
-    f:write("# Cinematic View settings (written by cinematic_view.lua)\n")
+    f:write("# Forza Views settings (written by forza_views.lua)\n")
     local keys = {}
     for k in pairs(DEFAULTS) do keys[#keys + 1] = k end
     table.sort(keys)
@@ -208,11 +235,11 @@ do
         -- earlier declaration too.
         local function cdef(s) pcall(ffi.cdef, s) end
         XP.cdef = cdef
-        cdef("typedef struct { float x, y, z, pitch, heading, roll, zoom; } cinematic_view_cam_t;")
-        cdef("typedef int (*cinematic_view_cam_f)(cinematic_view_cam_t *, int, void *);")
+        cdef("typedef struct { float x, y, z, pitch, heading, roll, zoom; } forza_views_cam_t;")
+        cdef("typedef int (*forza_views_cam_f)(forza_views_cam_t *, int, void *);")
         cdef([[typedef struct { int structSize; float locationX, locationY, locationZ;
             float normalX, normalY, normalZ; float velocityX, velocityY, velocityZ;
-            int is_wet; } cinematic_view_probe_t;]])
+            int is_wet; } forza_views_probe_t;]])
         cdef("void *XPLMFindDataRef(const char *);")
         cdef("void *XPLMFindCommand(const char *);")
         cdef("int XPLMGetDatai(void *);")
@@ -312,11 +339,32 @@ do
         m_max = "sim/aircraft/weight/acf_m_max",
         vr = "sim/graphics/VR/enabled",
         onground = "sim/flightmodel/failures/onground_any",
+        -- for the moments: gear, flaps, engines
+        gear_deploy = "sim/flightmodel2/gear/deploy_ratio",
+        tire_x = "sim/flightmodel/parts/tire_x_no_deflection",
+        tire_y = "sim/flightmodel/parts/tire_y_no_deflection",
+        tire_z = "sim/flightmodel/parts/tire_z_no_deflection",
+        flaps = "sim/flightmodel2/controls/flap1_deploy_ratio",
+        num_engines = "sim/aircraft/engine/acf_num_engines",
+        engn_running = "sim/flightmodel/engine/ENGN_running",
+        starter = "sim/flightmodel2/engines/starter_is_running",
+        eng_x = "sim/flightmodel2/engines/location_x_mtr",
+        eng_y = "sim/flightmodel2/engines/location_y_mtr",
+        eng_z = "sim/flightmodel2/engines/location_z_mtr",
         fov = "sim/graphics/view/field_of_view_deg",
         axes = "sim/joystick/joystick_axis_values",
         buttons = "sim/joystick/joystick_button_values",
     }
     for key, name in pairs(list) do R[key] = XP.find(name) end
+    -- older names for some of them
+    local older = {
+        gear_deploy = "sim/aircraft/parts/acf_gear_deploy",
+        tire_x = "sim/aircraft/parts/acf_gear_xnodef",
+        tire_y = "sim/aircraft/parts/acf_gear_ynodef",
+        tire_z = "sim/aircraft/parts/acf_gear_znodef",
+        flaps = "sim/flightmodel/controls/flaprat",
+    }
+    for key, name in pairs(older) do R[key] = R[key] or XP.find(name) end
 end
 
 local function gi(r, default) if r then return XP.geti(r) end return default or 0 end
@@ -400,7 +448,7 @@ local function now()
 end
 
 local function log(msg)
-    if logMsg then logMsg("Cinematic View: " .. msg) end
+    if logMsg then logMsg("Forza Views: " .. msg) end
 end
 
 local function toast(text, seconds)
@@ -479,7 +527,7 @@ end
 local function terrain_y(x, y, z)
     if not XP.probe then return nil end
     local info = XP.probe_info
-    info[0].structSize = XP.ffi.sizeof("cinematic_view_probe_t")
+    info[0].structSize = XP.ffi.sizeof("forza_views_probe_t")
     if XP.lib.XPLMProbeTerrainXYZ(XP.probe, x, y, z, info) ~= 0 then return nil end -- 0: hit terrain
     return info[0].locationY
 end
@@ -583,12 +631,16 @@ local function find_cloud_layers()
     log("found no cloud layers to check, so outside shots don't avoid cloud")
 end
 
--- Up to n values of a float array dataref, from index 0.
-local float_buf
-local function read_floats(ref, n)
+local read_floats, read_ints
+do
+local float_buf, int_buf
+
+-- Up to n (at most 16) values of a float array dataref, from index 0.
+function read_floats(ref, n)
     local out = {}
+    n = math.min(n, 16)
     if XP.lib then
-        float_buf = float_buf or XP.ffi.new("float[8]")
+        float_buf = float_buf or XP.ffi.new("float[16]")
         local got = XP.lib.XPLMGetDatavf(ref, float_buf, 0, n)
         for i = 0, got - 1 do out[i] = float_buf[i] end
     elseif XPLMGetDatavf then
@@ -596,6 +648,19 @@ local function read_floats(ref, n)
         if t then for i = 0, n - 1 do out[i] = t[i] end end
     end
     return out
+end
+
+-- And of an int array dataref (through the SDK only).
+function read_ints(ref, n)
+    local out = {}
+    if XP.lib then
+        n = math.min(n, 16)
+        int_buf = int_buf or XP.ffi.new("int[16]")
+        local got = XP.lib.XPLMGetDatavi(ref, int_buf, 0, n)
+        for i = 0, got - 1 do out[i] = int_buf[i] end
+    end
+    return out
+end
 end
 
 local THICK_CLOUD = 0.8 -- cover that counts: 7/8 or overcast (X-Plane 12 draws broken cloud with plenty of gaps)
@@ -1002,40 +1067,210 @@ local OUTSIDE_MIX = {
     low = { 0.4, 0.4, 0.2 }, cruise = { 0.65, 0.15, 0.2 },
 }
 
--- Moments: these cut in when they happen instead of waiting their turn.
-local EVENT_SHOTS = {
-    -- by the runway a little past where the aircraft is about to touch down
-    -- (allowing for the flare)
-    touchdown = {
-        id = "touchdown", kind = "outside", event = true,
-        init = function(s, c)
-            local T = M.clamp(c.agl / math.max(-c.vy, 0.5), 2, 16)
-            s.duration = T + 5
-            s.pan_cap = pan_cap(s)
-            s.f = M.rand(0.3, 0.5)
-            s.height = M.rand(1.0, 1.8)
-            if not plan_trackside(s, c, T, light_side(c) * math.max(c.gs, 1) / rad(s.pan_cap),
-                0.3 * c.size + 15 + c.gs * 1.5, true) then return orbit_instead(s, c) end
-            s.dutch = maybe_dutch(0.5, 3)
-        end,
-        update = trackside_update,
-    },
-    -- low by the runway as the aircraft lifts off and climbs away
-    liftoff = {
-        id = "liftoff", kind = "outside", event = true,
-        init = function(s, c)
-            s.duration = 7
-            s.pan_cap = pan_cap(s)
-            s.f = M.rand(0.3, 0.5)
-            s.height = M.rand(0.8, 1.5)
-            if not plan_trackside(s, c, 0.6, light_side(c) * math.max(c.gs, 1) / rad(s.pan_cap), 0, true) then
-                return orbit_instead(s, c)
+------------------------------------------------------------------------------
+-- Moments: the gear or flaps moving, a steep turn, an engine starting. Each
+-- cuts straight to a shot of its own as it begins, the way racing games cut
+-- to a jump. Gear, flaps and engines get a camera close to them, bolted to
+-- the airframe; a steep turn, one behind and below with the horizon level.
+--
+-- Where the parts are comes from X-Plane where it says (in the aircraft's
+-- own axes: metres right, up and aft of its centre), otherwise it's guessed
+-- from the aircraft's size. Close cameras go nearer than the others (inside
+-- the clearance sphere), to spots that are usually clear of the airframe.
+------------------------------------------------------------------------------
+
+-- What the moments are watching, between frames.
+local MOMENT = {
+    gear_moving = false,
+    flap_last = nil, flap_rest = nil, flap_still_t = 0, flap_moving = false,
+    bank_since = nil, bank_shown = -1000,
+    starter = {}, running = {}, engine_shown = {}, engine = 0,
+}
+
+local EVENT_SHOTS, watch_moments
+do
+local BANK_STEEP = 25 -- degrees of bank, held for 2 s, that make a steep turn
+
+-- A part position X-Plane gives that's plausible for an aircraft this size.
+local function part_ok(x, y, z, S)
+    return x ~= nil and y ~= nil and z ~= nil and (x ~= 0 or y ~= 0 or z ~= 0)
+        and abs(x) <= 0.7 * S and abs(y) <= 0.4 * S and abs(z) <= 1.2 * S
+end
+
+-- A main gear leg on one side (1 right, -1 left), and the nose gear's z if there is one.
+local function main_gear(S, side)
+    if R.tire_x and R.tire_y and R.tire_z then
+        local xs, ys, zs = read_floats(R.tire_x, 10), read_floats(R.tire_y, 10), read_floats(R.tire_z, 10)
+        local best, nose
+        for i = 0, 9 do
+            local x, y, z = xs[i], ys[i], zs[i]
+            if part_ok(x, y, z, S) then
+                if x * side > 0.02 * S and (not best or abs(z) < abs(best[3])) then best = { x, y, z } end
+                if abs(x) <= 0.02 * S and z < -0.1 * S then nose = z end
             end
-            s.dutch = maybe_dutch(0.5, 3)
+        end
+        if best then return best[1], best[2], best[3], nose end
+    end
+    return side * 0.11 * S, -0.1 * S, 0.04 * S, nil
+end
+
+-- Where engine i is.
+local function engine_at(i, S)
+    if R.eng_x and R.eng_y and R.eng_z then
+        local x, y, z = read_floats(R.eng_x, 16)[i], read_floats(R.eng_y, 16)[i], read_floats(R.eng_z, 16)[i]
+        if part_ok(x, y, z, S) then return x, y, z end
+    end
+    local n = math.max(1, gi(R.num_engines, 1))
+    local e = CV.eye or { y = 1, z = -0.2 * S }
+    if n == 1 then return 0, e.y - 0.4, e.z - 0.12 * S - 1 end -- in the nose
+    -- along the wings, from the left
+    local k = (i % n) / (n - 1) * 2 - 1
+    return k * (n >= 4 and 0.33 or 0.17) * S, -0.06 * S, -0.08 * S
+end
+
+-- A close camera: where it is and what it looks at, bolted to the airframe,
+-- the look drifting a little over the shot. It sets the shot's aim point
+-- (in the world) for focus.
+local function close_init(s, mx, my, mz, lx, ly, lz)
+    s.mx, s.my, s.mz, s.lx, s.ly, s.lz = mx, my, mz, lx, ly, lz
+    local reach = sqrt((mx - lx) ^ 2 + (my - ly) ^ 2 + (mz - lz) ^ 2)
+    s.drift = M.sign() * math.tan(rad(math.min(MOTION_RATE * s.pan * s.duration * 0.3, 6))) * reach
+end
+
+local function close_update(s, c, t, out)
+    local lx = s.lx + s.drift * (M.ease(t / s.duration) - 0.5)
+    mounted(out, c, s.mx, s.my, s.mz, lx, s.ly, s.lz)
+    s.aim_x, s.aim_y, s.aim_z = body_point(c, lx, s.ly, s.lz)
+end
+
+EVENT_SHOTS = {
+    -- the gear going up or down: under the wing behind a main leg, looking
+    -- forward at it and its well, or under the belly ahead of it, looking back
+    gear = {
+        id = "gear", kind = "outside", event = true, close = true,
+        init = function(s, c)
+            s.duration = M.rand(9, 11)
+            local S = c.size
+            local side = M.sign()
+            local gx, gy, gz, nose = main_gear(S, side)
+            local sx = gx >= 0 and 1 or -1
+            local ty = gy * 0.55 -- halfway up the leg
+            if math.random() < 0.65 then
+                local k = math.max(1, 4 / (0.24 * S)) -- (no closer than 4 m)
+                close_init(s, gx + sx * 0.1 * S * k, gy + 0.02 * S, gz + 0.22 * S * k, gx, ty, gz)
+            else
+                local ahead = nose and (gz + nose) / 2 or gz - 0.24 * S
+                close_init(s, sx * 0.03 * S, gy - 0.01 * S, ahead, gx, ty, gz)
+            end
         end,
-        update = trackside_update,
+        update = close_update,
+    },
+    -- the flaps moving: behind the wing and outboard, above or below it,
+    -- looking at the inner flap
+    flaps = {
+        id = "flaps", kind = "outside", event = true, close = true,
+        init = function(s, c)
+            s.duration = M.rand(7, 9)
+            local S = c.size
+            local side = M.sign()
+            local k = math.max(1, 6 / (0.32 * S)) -- (no closer than 6 m: wings sit high or low)
+            local tx, ty, tz = side * 0.2 * S, 0, 0.06 * S
+            if math.random() < 0.6 then
+                close_init(s, side * (0.2 + 0.13 * k) * S, 0.13 * S * k, tz + 0.26 * S * k, tx, ty, tz)
+            else
+                close_init(s, side * (0.2 + 0.1 * k) * S, -0.1 * S * k, tz + 0.24 * S * k, tx, ty, tz)
+            end
+        end,
+        update = close_update,
+    },
+    -- an engine starting: ahead of a propeller in the nose, ahead of and
+    -- outboard of an intake under a wing, alongside one at the tail
+    engine = {
+        id = "engine", kind = "outside", event = true, close = true,
+        init = function(s, c)
+            s.duration = M.rand(12, 15)
+            local S = c.size
+            local x, y, z = engine_at(MOMENT.engine, S)
+            local out = abs(x) > 0.02 * S and (x > 0 and 1 or -1) or M.sign()
+            if abs(x) < 0.05 * S and z < 0 then
+                close_init(s, out * math.max(0.22 * S, 2.5), y + 0.03 * S, z - math.max(0.2 * S, 2.5), 0, y, z - 0.02 * S)
+            elseif z < 0.15 * S then
+                close_init(s, x + out * 0.1 * S, y - 0.01 * S, z - math.max(0.25 * S, 3), x, y, z - 0.04 * S)
+            else
+                close_init(s, x + out * math.max(0.2 * S, 3), y, z - 0.05 * S, x, y, z)
+            end
+        end,
+        update = close_update,
+    },
+    -- a steep turn: behind and below in a frame that turns with the
+    -- aircraft's track, the camera level, so the bank shows against the horizon
+    bank = {
+        id = "bank", kind = "outside", event = true,
+        init = function(s, c)
+            s.duration = M.rand(7, 10)
+            s.d = math.max(framing_distance(c.size, M.rand(0.4, 0.55)), clearance(c) + 3)
+            s.az, s.el = M.rand(-18, 18), -M.rand(5, 9)
+            s.hdg = c.track
+        end,
+        update = function(s, c, t, out)
+            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.5))
+            local a, e = rad(s.az), rad(s.el)
+            local cx, cy, cz = yaw_point(c, s.hdg, sin(a) * cos(e) * s.d, sin(e) * s.d, cos(a) * cos(e) * s.d)
+            cx, cy, cz = keep_clear(c, cx, cy, cz)
+            aim(out, cx, cy, cz, c.x, c.y, c.z, 0, 1)
+        end,
     },
 }
+
+-- Each frame: which moment, if any, has just begun.
+function watch_moments(t, cond)
+    if not XP.lib then return nil end
+    local event
+    -- an engine starting while parked: its starter turning, or it coming to life
+    local n = math.min(math.max(gi(R.num_engines, 8), 1), 16)
+    local st = R.starter and read_ints(R.starter, n) or {}
+    local run = R.engn_running and read_ints(R.engn_running, n) or {}
+    for i = 0, n - 1 do
+        local starting = (st[i] or 0) ~= 0 and (MOMENT.starter[i] or 1) == 0
+        local lit = (run[i] or 0) ~= 0 and (MOMENT.running[i] or 1) == 0
+        if (starting or lit) and cond.onground and cond.gs < 3 and t - (MOMENT.engine_shown[i] or -1000) > 60 and not event then
+            event, MOMENT.engine = EVENT_SHOTS.engine, i
+        end
+        MOMENT.starter[i], MOMENT.running[i] = st[i], run[i]
+    end
+    -- the gear part-way between up and down
+    if R.gear_deploy then
+        local moving = false
+        local g = read_floats(R.gear_deploy, 10)
+        for i = 0, 9 do
+            if g[i] and g[i] > 0.02 and g[i] < 0.98 then moving = true end
+        end
+        if moving and not MOMENT.gear_moving then event = event or EVENT_SHOTS.gear end
+        MOMENT.gear_moving = moving
+    end
+    -- the flaps on the move from where they last rested
+    if R.flaps then
+        local f = gf(R.flaps)
+        if MOMENT.flap_last and abs(f - MOMENT.flap_last) > 1e-4 then MOMENT.flap_still_t = t end
+        MOMENT.flap_last = f
+        if not MOMENT.flap_rest or t - MOMENT.flap_still_t > 1.5 then
+            MOMENT.flap_rest, MOMENT.flap_moving = f, false
+        end
+        if not MOMENT.flap_moving and abs(f - MOMENT.flap_rest) > 0.02 then
+            MOMENT.flap_moving = true
+            event = event or EVENT_SHOTS.flaps
+        end
+    end
+    -- a steep turn, held, now and then
+    if not cond.onground and cond.agl > 30 and abs(gf(R.phi)) > BANK_STEEP then
+        MOMENT.bank_since = MOMENT.bank_since or t
+        if t - MOMENT.bank_since >= 2 and t - MOMENT.bank_shown > 60 then event = event or EVENT_SHOTS.bank end
+    else
+        MOMENT.bank_since = nil
+    end
+    return event
+end
+end
 
 -- Used when the plugin SDK can't be loaded: X-Plane's own outside views.
 local BUILTIN_SHOTS = {
@@ -1121,20 +1356,20 @@ end
 local function find_focus_settings()
     if not XP.lib then return end
     local ffi = XP.ffi
-    XP.cdef("typedef struct { int structSize; const char *name; int type; int writable; int owner; } cinematic_view_drinfo_t;")
+    XP.cdef("typedef struct { int structSize; const char *name; int type; int writable; int owner; } forza_views_drinfo_t;")
     XP.cdef("int XPLMCountDataRefs(void);")
     XP.cdef("void XPLMGetDataRefsByIndex(int, int, void *);")
     XP.cdef("void XPLMGetDataRefInfo(void *, void *);")
     local total = XP.lib.XPLMCountDataRefs() -- (X-Plane 12 and later; an error before)
     local refs = ffi.new("void *[256]")
-    local info = ffi.new("cinematic_view_drinfo_t[1]")
+    local info = ffi.new("forza_views_drinfo_t[1]")
     local found = {}
     for offset = 0, total - 1, 256 do
         local count = math.min(256, total - offset)
         XP.lib.XPLMGetDataRefsByIndex(offset, count, refs)
         for i = 0, count - 1 do
             if refs[i] ~= nil then
-                info[0].structSize = ffi.sizeof("cinematic_view_drinfo_t")
+                info[0].structSize = ffi.sizeof("forza_views_drinfo_t")
                 info[0].name = nil
                 XP.lib.XPLMGetDataRefInfo(refs[i], info)
                 if info[0].name ~= nil then
@@ -1264,7 +1499,8 @@ local function camera_func(pos, losing)
     -- shot is cut short (in the tick)
     if t_now - (s.view_t or -1) >= 0.2 then
         s.view_t = t_now
-        if terrain_blocks(cam_out.x, cam_out.y, cam_out.z, c.x, aircraft_top(c), c.z) then
+        local tx, ty, tz = s.aim_x or c.x, s.aim_y or aircraft_top(c), s.aim_z or c.z
+        if terrain_blocks(cam_out.x, cam_out.y, cam_out.z, tx, ty, tz) then
             s.hidden_t = s.hidden_t or t_now
             if t_now - s.hidden_t >= 0.6 then s.hidden = true end
         else
@@ -1275,7 +1511,8 @@ local function camera_func(pos, losing)
     pos.heading, pos.pitch, pos.roll = cam_out.heading, cam_out.pitch, cam_out.roll
     local dist = sqrt((cam_out.x - c.x) ^ 2 + (cam_out.y - c.y) ^ 2 + (cam_out.z - c.z) ^ 2)
     update_zoom(c.dt, c.size, dist, cam_out.zoom)
-    focus_on(dist)
+    -- (focused on the aircraft, or on the part a close camera looks at)
+    focus_on(s.aim_x and sqrt((cam_out.x - s.aim_x) ^ 2 + (cam_out.y - s.aim_y) ^ 2 + (cam_out.z - s.aim_z) ^ 2) or dist)
     pos.zoom = M.clamp(cam_out.zoom * CV.user_zoom, 0.4, CAM_ZOOM_MAX)
     return 1
 end
@@ -1283,7 +1520,7 @@ end
 if XP.lib then
     local ok = pcall(function()
         local ffi = XP.ffi
-        XP.cam_cb = ffi.cast("cinematic_view_cam_f", function(pos, losing, refcon)
+        XP.cam_cb = ffi.cast("forza_views_cam_f", function(pos, losing, refcon)
             local fine, keep = pcall(camera_func, pos, losing)
             if fine then return keep end
             CV.cam_error = tostring(keep)
@@ -1293,7 +1530,7 @@ if XP.lib then
         XP.cam_ptr = ffi.cast("void *", XP.cam_cb)
         XP.probe = XP.lib.XPLMCreateProbe(0) -- xplm_ProbeY
         if XP.probe == nil then XP.probe = nil end
-        XP.probe_info = ffi.new("cinematic_view_probe_t[1]")
+        XP.probe_info = ffi.new("forza_views_probe_t[1]")
     end)
     XP.camera_ok = ok and XP.cam_cb ~= nil
 end
@@ -1592,7 +1829,7 @@ end
 local function start(reason)
     if CV.active or CV.disabled then return end
     if vr_on() then
-        toast("Cinematic view isn't available in VR")
+        toast("Forza Views isn't available in VR")
         return
     end
     CV.active = true
@@ -1774,27 +2011,16 @@ local function update_cockpit_shot(s, t)
     write_head(e.x + dx, e.y + dy, e.z + dz, psi, the, phi)
 end
 
--- Liftoff and touchdown cut straight to shots of their own.
+-- Each frame: what the aircraft is doing, and a moment's shot when one begins.
 local function watch_flight(t)
     local cond = conditions()
     CV.phase = cond.phase
     CV.light, CV.sun_h, CV.sun_p = light()
-    if cond.onground then
-        if CV.was_on_ground ~= true then CV.ground_since = t end
-    elseif cond.agl > 150 then
-        CV.landing_shown = false -- ready for the next approach
-    end
-    local event
-    if CV.was_on_ground == true and not cond.onground and cond.gs > 25 and t - (CV.ground_since or t) > 3 then
-        event = EVENT_SHOTS.liftoff
-    elseif not cond.onground and not CV.landing_shown and cond.agl < 40 and cond.vy < -0.8 and cond.gs > 20 then
-        event = EVENT_SHOTS.touchdown
-    end
-    CV.was_on_ground = cond.onground
-    CV.last_vy = cond.vy
+    local event = watch_moments(t, cond)
     if event and CV.active and XP.camera_ok and settings.mode ~= "cockpit" and not cond.paused
         and not CV.hold and not cloud_keeps_inside() and not (CV.shot and CV.shot.def.event) then
-        if event == EVENT_SHOTS.touchdown then CV.landing_shown = true end
+        if event == EVENT_SHOTS.bank then MOMENT.bank_shown = t end
+        if event == EVENT_SHOTS.engine then MOMENT.engine_shown[MOMENT.engine] = t end
         cut_to(event)
     end
     return cond
@@ -2024,13 +2250,13 @@ local function toggle_settings()
         return
     end
     if not float_wnd_create then
-        toast("The settings window needs FlyWithLua NG+; edit cinematic_view.ini instead", 4)
+        toast("The settings window needs FlyWithLua NG+; edit forza_views.ini instead", 4)
         return
     end
     CV.wnd = float_wnd_create(480, 560, 1, true)
-    float_wnd_set_title(CV.wnd, "Cinematic View " .. VERSION)
-    float_wnd_set_imgui_builder(CV.wnd, "CinematicView_build_settings")
-    float_wnd_set_onclose(CV.wnd, "CinematicView_settings_closed")
+    float_wnd_set_title(CV.wnd, "Forza Views " .. VERSION)
+    float_wnd_set_imgui_builder(CV.wnd, "ForzaViews_build_settings")
+    float_wnd_set_onclose(CV.wnd, "ForzaViews_settings_closed")
 end
 
 ------------------------------------------------------------------------------
@@ -2050,8 +2276,8 @@ local function toggle_afk()
     settings.afk_enabled = not settings.afk_enabled
     mark_dirty()
     toast(settings.afk_enabled
-        and string.format("Cinematic view starts after %d s away", settings.afk_timeout)
-        or "Cinematic view won't start by itself")
+        and string.format("Forza Views starts after %d s away", settings.afk_timeout)
+        or "Forza Views won't start by itself")
 end
 
 -- Next shot, asked for: lets go of a held shot too.
@@ -2065,7 +2291,7 @@ local function hold_shot()
     if CV.active then CV.hold = not CV.hold end
 end
 
--- id: the X-Plane command (FlyWithLua/cinematic_view/<id>) and the ini key (bind_<id>)
+-- id: the X-Plane command (FlyWithLua/forza_views/<id>) and the ini key (bind_<id>)
 local ACTIONS = {
     { id = "toggle", label = "Start / stop", desc = "start/stop", press = toggle_cinematic },
     { id = "next_shot", label = "Next shot", desc = "cut to the next shot", press = user_next_shot },
@@ -2252,6 +2478,8 @@ end
 -- Start/Stop and Next shot, the shot mix) over tabs for everything else
 ------------------------------------------------------------------------------
 
+local build_settings
+do
 local UI = {
     amber = "#E8A33D", amber_hi = "#F2B95F", red = "#E05A4F", red_hi = "#EA7A70",
     dark = "#1A1C20", tab = "#22252A", frame = "#2C3036", frame_hi = "#383D44", frame_on = "#42474F",
@@ -2528,14 +2756,14 @@ local function tab_keys()
     end
     imgui.Spacing()
     muted_text("Press Set, then the key (Esc cancels). Keys set here take priority over X-Plane's own. "
-        .. "+ and - zoom during a cinematic. For joystick buttons, assign the FlyWithLua/cinematic_view "
+        .. "+ and - zoom during a cinematic. For joystick buttons, assign the FlyWithLua/forza_views "
         .. "commands under Settings > Joystick.", true)
 end
 
 -- Camera first: it's the tab people come back to.
 local TABS = { { "Camera", tab_camera }, { "Shots", tab_shots }, { "Auto-start", tab_auto }, { "Keys", tab_keys } }
 
-local function build_settings()
+function build_settings()
     local colors, vars = push_theme()
     header()
     if imgui.BeginTabBar("cinematic_tabs") then
@@ -2551,6 +2779,7 @@ local function build_settings()
     pop_vars(vars)
     imgui.PopStyleColor(colors)
 end
+end
 
 ------------------------------------------------------------------------------
 -- Global entry points for FlyWithLua (commands, menu, callbacks)
@@ -2563,31 +2792,31 @@ local function guarded(name, fn)
     end
 end
 
-CinematicView_tick = guarded("frame", tick)
-CinematicView_draw = guarded("draw", draw)
-CinematicView_on_key = guarded("keyboard", on_key)
+ForzaViews_tick = guarded("frame", tick)
+ForzaViews_draw = guarded("draw", draw)
+ForzaViews_on_key = guarded("keyboard", on_key)
 
-CinematicView_command = guarded("command", function(id, down)
+ForzaViews_command = guarded("command", function(id, down)
     local a = ACTION_BY_ID[id]
     if not a then return end
     if down then press_action(a, true) else release_action(a, true) end
 end)
 
-CinematicView_toggle_settings = guarded("settings", toggle_settings)
-CinematicView_build_settings = guarded("settings window", build_settings)
-function CinematicView_settings_closed()
+ForzaViews_toggle_settings = guarded("settings", toggle_settings)
+ForzaViews_build_settings = guarded("settings window", build_settings)
+function ForzaViews_settings_closed()
     CV.wnd = nil
     CV.capturing = nil
 end
 
-CinematicView_on_mouse = guarded("mouse", function()
+ForzaViews_on_mouse = guarded("mouse", function()
     CV.input_flag = true
 end)
 
 -- During a cinematic the mouse wheel zooms, like + and -, instead of ending
 -- it: our camera in outside shots (X-Plane's zoom can't move it), X-Plane's
 -- own zoom elsewhere.
-CinematicView_on_wheel = guarded("mouse wheel", function()
+ForzaViews_on_wheel = guarded("mouse wheel", function()
     CV.wheel_t = now()
     if not CV.active then
         CV.input_flag = true
@@ -2604,7 +2833,7 @@ CinematicView_on_wheel = guarded("mouse wheel", function()
     end
 end)
 
-function CinematicView_on_exit()
+function ForzaViews_on_exit()
     pcall(function()
         if CV.active then stop("exit") end
         if CV.saved_head and CV.restore_frames > 0 then
@@ -2629,10 +2858,17 @@ end
 
 math.randomseed(os.time())
 math.random(); math.random()
-load_settings()
+if load_settings() == "old" then save_settings() end -- (carried over to forza_views.ini)
 pcall(joystick_setup)
 if not pcall(find_zoom_commands) then CV.xp_zoom = false end
 pcall(find_cloud_layers)
+do
+    local missing = {}
+    if not R.gear_deploy then missing[#missing + 1] = "gear" end
+    if not R.flaps then missing[#missing + 1] = "flaps" end
+    if not (R.starter or R.engn_running) then missing[#missing + 1] = "engine start" end
+    if XP.camera_ok and #missing > 0 then log("found nothing to watch for " .. table.concat(missing, ", ") .. ", so no shots of those") end
+end
 if not (R.sun_pitch and R.sun_heading) then log("found no sun position, so shots don't follow the light") end
 if not pcall(find_focus_settings) then
     log("couldn't list X-Plane's datarefs to find its focus setting")
@@ -2642,23 +2878,23 @@ CV.heartbeat = now()
 CV.last_tick = now()
 CV.size = current_size()
 
-do_every_frame("CinematicView_tick()")
-do_every_draw("CinematicView_draw()")
-do_on_keystroke("CinematicView_on_key()")
-do_on_mouse_click("CinematicView_on_mouse()")
-do_on_mouse_wheel("CinematicView_on_wheel()")
-do_on_exit("CinematicView_on_exit()")
+do_every_frame("ForzaViews_tick()")
+do_every_draw("ForzaViews_draw()")
+do_on_keystroke("ForzaViews_on_key()")
+do_on_mouse_click("ForzaViews_on_mouse()")
+do_on_mouse_wheel("ForzaViews_on_wheel()")
+do_on_exit("ForzaViews_on_exit()")
 
 -- every action as an X-Plane command too, for joystick buttons (the release
 -- is handled for all of them, so letting go of the button isn't "input")
 for _, a in ipairs(ACTIONS) do
-    create_command("FlyWithLua/cinematic_view/" .. a.id, "Cinematic view: " .. a.desc,
-        string.format('CinematicView_command("%s", true)', a.id), "",
-        string.format('CinematicView_command("%s", false)', a.id))
+    create_command("FlyWithLua/forza_views/" .. a.id, "Forza Views: " .. a.desc,
+        string.format('ForzaViews_command("%s", true)', a.id), "",
+        string.format('ForzaViews_command("%s", false)', a.id))
 end
 
 -- one menu entry: the window has everything else
-add_macro("Cinematic View", "CinematicView_toggle_settings()")
+add_macro("Forza Views", "ForzaViews_toggle_settings()")
 
 log(string.format("version %s loaded (%s)", VERSION,
     XP.camera_ok and "custom outside cameras" or "X-Plane's built-in outside views"))

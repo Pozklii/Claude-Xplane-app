@@ -13,7 +13,7 @@ local function upvalue(f, name)
         if n == name then return v end
     end
 end
-local tick = upvalue(CinematicView_tick, "fn")
+local tick = upvalue(ForzaViews_tick, "fn")
 local M = upvalue(tick, "M")
 local fails = 0
 local function near(a, b, tol, msg) if math.abs(a - b) > (tol or 1e-6) then fails = fails + 1 print("FAIL " .. msg .. ": " .. a .. " vs " .. b) end end

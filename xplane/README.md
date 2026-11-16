@@ -1,4 +1,4 @@
-# Cinematic View for X-Plane 12
+# Forza Views for X-Plane 12
 
 A [FlyWithLua NG+](https://forums.x-plane.org/index.php?/files/file/82888-flywithlua-ng-next-generation-plus-edition-for-x-plane-12-win-lin-mac/) script that turns X-Plane's camera into a self-directing cinematic camera, like the attract modes in the Need for Speed and Forza Horizon games. It cuts between shots outside the aircraft and inside the cockpit, with letterbox bars and fades. The shots aren't picked from a fixed list: each one is generated as it starts, and they follow the light (lined up with a low sun at sunrise and sunset, close at night), keep terrain from hiding the aircraft, and move into the cockpit while you're in cloud.
 
@@ -7,12 +7,14 @@ It can be switched on and off whenever you like, and it starts by itself after a
 ## Install
 
 1. Install FlyWithLua NG+ for X-Plane 12 if you don't have it.
-2. Copy [`FlyWithLua/Scripts/cinematic_view.lua`](FlyWithLua/Scripts/cinematic_view.lua) to `X-Plane 12/Resources/plugins/FlyWithLua/Scripts/`.
+2. Copy [`FlyWithLua/Scripts/forza_views.lua`](FlyWithLua/Scripts/forza_views.lua) to `X-Plane 12/Resources/plugins/FlyWithLua/Scripts/`.
 3. Start X-Plane, or choose **Plugins → FlyWithLua → Reload all Lua script files**.
+
+**Upgrading from Cinematic View:** the script used to be `cinematic_view.lua`. Delete that file from the Scripts folder: with both there, Forza Views stands down and says so on screen and in `Log.txt`, rather than have two fight over the camera. Your settings, keys and aircraft sizes carry over from `cinematic_view.ini` to `forza_views.ini` the first time it runs. Joystick buttons need assigning again, to the new `FlyWithLua/forza_views/…` commands.
 
 ## Use
 
-Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic View**.
+Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → Forza Views**.
 
 - **At the top:** what it's doing (with a bar counting down to auto-start), a big **Start cinematic** / **Stop** button, **Next shot**, **Hold shot**, and **Mixed / Outside / Cockpit** to choose the shots.
 - **Tabs below:** **Camera** (camera speed, panning speed, aircraft size, letterbox bars, fades), **Shots** (cockpit share, shot lengths, window seat shots, cockpit shots in cloud), **Auto-start** (whether and when it starts by itself) and **Keys** (a key for each action).
@@ -22,7 +24,7 @@ Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → 
 - **Zoom:** hold **=** / **+** to zoom in and **-** to zoom out (main keyboard or keypad). In outside shots this zooms the cinematic camera smoothly: it speeds up gently when you press, eases to a stop when you let go, and a tap makes a small step. It goes in to 4× on any camera, and further on a camera far enough off that the aircraft is still small (a trackside camera hundreds of metres away, say): on until the aircraft is about three times the picture's width, up to 30× in all. The zoom carries on into the next outside shots until the cinematic ends. In the cockpit the keys go to X-Plane's own zoom.
 - **Mouse wheel zoom:** the mouse wheel zooms as well as + and -, in every shot: scroll up to zoom in, down to zoom out, a step for each notch. It doesn't end the cinematic (nor does the small mouse movement of a hand on the wheel), and in cockpit shots it zooms rather than turning a knob under the pointer. Once the cinematic is over the wheel is X-Plane's again.
 - **Focus:** if you use X-Plane's depth of field (screenshot controls), outside shots stay focused on the aircraft. See *How it works* if they don't.
-- **Hold shot:** when a shot looks great, press **Hold shot** (or its key) and it carries on until you press it again: nothing cuts it short, not even touchdown or cloud. **Next shot** lets go of it too. Cameras that move round the aircraft come to rest and follow it; a camera standing by the runway keeps watching as it flies away.
+- **Hold shot:** when a shot looks great, press **Hold shot** (or its key) and it carries on until you press it again: nothing cuts it short, not even a moment's shot (gear, flaps, a steep turn, an engine starting) or cloud. **Next shot** lets go of it too. Cameras that move round the aircraft come to rest and follow it; a camera standing by the runway keeps watching as it flies away.
 
 ### Keys
 
@@ -36,7 +38,7 @@ In the window's **Keys** tab, press **Set** next to an action, then the key you 
 | Auto-start on/off | Turn starting when you're away on or off |
 | This window | Show or hide the window |
 
-For joystick buttons, each action is also an X-Plane command, under **Settings → Joystick** (search for "cinematic"): `FlyWithLua/cinematic_view/toggle`, `next_shot`, `hold`, `toggle_afk` and `settings`. Pressing one of these buttons doesn't count as the input that ends a cinematic.
+For joystick buttons, each action is also an X-Plane command, under **Settings → Joystick** (search for "forza"): `FlyWithLua/forza_views/toggle`, `next_shot`, `hold`, `toggle_afk` and `settings`. Pressing one of these buttons doesn't count as the input that ends a cinematic.
 
 ## Shots
 
@@ -46,10 +48,18 @@ There's no fixed list of shots. Each one is generated as it starts, from random 
 - **Trackside** — a camera standing still by the flight path, on the ground when you're low or in the air when you're high, that the aircraft passes, comes towards or leaves behind, zooming to keep it a similar size. Only while moving.
 - **Mounted** — a camera fixed just off the airframe (above and behind the tail, off a wingtip, ahead of the nose looking back, or below to one side), rolling and pitching with it.
 
-Moments that cut in as they happen, the way racing games cut to a jump or a finish:
+Moments that cut in as they happen, the way racing games cut to a jump:
 
-- **Touchdown** — on short final (below about 130 ft, descending), a camera by the runway a little past where you'll touch down.
-- **Liftoff** — as the wheels leave the runway, a camera low by the runway as the aircraft lifts off and climbs away.
+- **Gear** — as the gear starts going up or down, a camera close by a main gear leg, bolted to the airframe: under the wing behind the leg, looking forward at it and its well, or under the belly ahead of it, looking back.
+- **Flaps** — as the flaps start moving (setting them for takeoff on the ground, too), a camera behind the wing and out from the fuselage, above or below it, looking at the inner flap.
+- **Steep turn** — banked more than 25° for 2 seconds in the air, a camera behind and below the aircraft that turns with it, kept level so the bank shows against the horizon. At most once a minute.
+- **Engine start** — parked, as an engine's starter turns (or it comes to life), a camera close to that engine: ahead of a propeller in the nose, ahead of and outboard of an intake under a wing, or alongside an engine at the tail. Once a minute at most for each engine.
+
+Where the gear legs and engines are comes from X-Plane (`sim/flightmodel/parts/tire_*_no_deflection`, `sim/flightmodel2/engines/location_*_mtr`), and where X-Plane doesn't say, it's guessed from the aircraft's size; the flaps are always placed from its size. These cameras go closer than the others, so on an unusual airframe one may sit inside a part of it. `Log.txt` says if X-Plane gives nothing to watch for one of them (`found nothing to watch for …`).
+
+You'll mostly see these in a cinematic you started yourself, which carries on while you fly: your own input ends one that started while you were away, so it only sees the gear, flaps or engines move then if something else moves them (a copilot add-on, say). A steep turn on the autopilot shows either way.
+
+There are no takeoff or landing shots: those used trackside cameras like the others and looked no different.
 
 Inside the cockpit, the pilot's head is placed somewhere (the pilot's seat, over the shoulder, leaning towards the panel, or the other seat in a side-by-side cockpit), looks somewhere (forward, out of the side window, at the panel, across the cockpit) and pans slowly. It holds still otherwise: no bobbing.
 
@@ -66,7 +76,7 @@ Inside the cockpit, the pilot's head is placed somewhere (the pilot's seat, over
 - **Following the light.** When the sun is low (from 6° below the horizon to 14° above), about two outside shots in three line up with it. Some look into the sun from across the aircraft, framed so the sun sits just beside it, inside the letterbox, and the aircraft stands out against it. Others have the sun behind the camera, lighting the aircraft. Those shots move mostly in or out, so the light stays put. Trackside cameras pick the side of the flight path that does the same.
 - **At night** (the sun more than 6° down), when there's little to see but what the aircraft's own lights show, orbiting shots come in close without long lenses, mounted shots come up more and distant trackside shots less.
 - **Terrain doesn't hide the aircraft.** A trackside camera checks its view over the terrain before it stands somewhere, trying the other side of the flight path, then the air, and an orbiting shot instead if nowhere works. Any outside shot that loses sight of the aircraft behind terrain for more than about half a second is cut short for a camera close to it. This only knows about terrain, not buildings: X-Plane's terrain probe doesn't see objects.
-- **In cloud.** Inside a thick cloud layer (7/8 cover or overcast), outside shots show only grey, so after 2 seconds in it the shots move into the cockpit, even showing outside shots only, until you've been out of it for 3 seconds. The window's status line says so (*in cloud: cockpit shots*), and `Log.txt` notes each time it goes in, with the layer (`Cinematic View: in cloud (layer 2, 2500 to 3600 m, cover 0.90; the aircraft at 3000 m)…`), and out. Scattered or broken cloud, which X-Plane 12 draws with plenty of gaps, doesn't count, nor does flying above the tops. If outside shots stop when they shouldn't, that log line shows what it took for cloud; **Cockpit shots in cloud** in the **Shots** tab turns this off.
+- **In cloud.** Inside a thick cloud layer (7/8 cover or overcast), outside shots show only grey, so after 2 seconds in it the shots move into the cockpit, even showing outside shots only, until you've been out of it for 3 seconds. The window's status line says so (*in cloud: cockpit shots*), and `Log.txt` notes each time it goes in, with the layer (`Forza Views: in cloud (layer 2, 2500 to 3600 m, cover 0.90; the aircraft at 3000 m)…`), and out. Scattered or broken cloud, which X-Plane 12 draws with plenty of gaps, doesn't count, nor does flying above the tops. If outside shots stop when they shouldn't, that log line shows what it took for cloud; **Cockpit shots in cloud** in the **Shots** tab turns this off.
 
 ### Camera speed and panning speed
 
@@ -74,7 +84,7 @@ Two sliders limit how fast the picture moves, each from 0.1 to 2 (default 0.5):
 
 - **Camera speed** is how fast cameras travel: an orbiting camera going round the aircraft, up or down, in or out (about 2.5° a second at the default, 0.5° at the slowest). A zoomed-in camera moves less, since zoom magnifies motion.
 - **Panning speed** is how fast cameras turn:
-  - Trackside cameras stand far enough from the flight path that they never have to turn faster than the limit to follow the aircraft (about 20° a second at the default, 4° at the slowest), and zoom out as it passes so the picture doesn't sweep faster than that. The touchdown and liftoff cameras do the same, so with fast aircraft and slow panning they stand well back from the runway.
+  - Trackside cameras stand far enough from the flight path that they never have to turn faster than the limit to follow the aircraft (about 20° a second at the default, 4° at the slowest), and zoom out as it passes so the picture doesn't sweep faster than that.
   - Mounted cameras' slow drift across the aircraft, and the pilot's head panning in cockpit shots (about 3.75° a second at the default), keep to it too.
 
 Both take effect from the next shot.
@@ -85,7 +95,7 @@ Shots are framed and kept clear of the aircraft using its size: its span, or a g
 
 ## Settings
 
-Changed in the window, or in `cinematic_view.ini` next to the script (written when you change something):
+Changed in the window, or in `forza_views.ini` next to the script (written when you change something):
 
 | Setting | Default | |
 | --- | --- | --- |
@@ -111,10 +121,10 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 - **Outside shots** take control of X-Plane's camera through the plugin SDK's `XPLMControlCamera`, called from Lua through LuaJIT's FFI, which FlyWithLua NG+ includes. The camera is worked out in X-Plane's camera callback from where the aircraft is that frame, so it keeps up with the aircraft at speed, and terrain probes keep it above the ground. The view underneath is X-Plane's chase view, so you hear the outside sounds.
 - **Cockpit shots** switch to the 3D cockpit and move the pilot's head (`sim/graphics/view/pilots_head_*`), so cockpit lighting, sounds and reflections stay right.
 - **Zoom:** X-Plane's own zoom can't act on a camera a plugin controls, so in outside shots the script catches + and - and zooms its camera itself. FlyWithLua reports X-Plane's key repeats (while a key is held) as releases, so the script treats a key as held until it's let go quickly after the press (a tap) or its events stop coming, which also copes with slow key-repeat settings. The zoom ramps up over a quarter of a second and the camera eases after it. How far in it goes is worked out each frame from the camera's distance and its own zoom: 4× at least, and past that until the aircraft would be three times the picture's width, with the camera's zoom in all at most 30×. A zoom carried over from a far camera to a close one comes back to the close one's limit. In the cockpit the keys go straight through to X-Plane's own zoom. The mouse wheel does the same: in outside shots the script zooms its camera (a 12% step a notch, eased in like the keys), and in the cockpit (and X-Plane's own views, if the SDK library can't be loaded) it runs X-Plane's zoom commands, `sim/general/zoom_in` and `sim/general/zoom_out` (the ones + and - run), holding one down for 0.12 s a notch, like a tap of the key. If X-Plane doesn't have those commands, the script says so in `Log.txt` and leaves the wheel to X-Plane there.
-- **Focus:** X-Plane's depth of field can't tell where a plugin's camera is, so its auto-focus misses the aircraft in outside shots. During one, the script pauses that auto-focus and sets the focus distance itself each frame, to the distance from its camera to the aircraft, then puts both settings back as the shot ends (cockpit shots and X-Plane's own views keep X-Plane's focus). It finds the settings by name when it loads, from X-Plane's list of datarefs (X-Plane 12's SDK can list them all), and writes what it found to X-Plane's `Log.txt`: a line starting `Cinematic View: focus-related datarefs:`, then `Cinematic View: focusing outside shots with …` or `Cinematic View: found no focus distance setting to drive`. If the focus still misses, those lines say what it found.
-- **Light and weather** come from X-Plane's datarefs: the sun's position from `sim/graphics/scenery/sun_pitch_degrees` and `sun_heading_degrees`, and cloud layers (bases, tops and cover) from X-Plane 12's weather at the aircraft, `sim/weather/aircraft/cloud_*`, or the region's or the older `sim/weather/cloud_*` ones if those aren't there, checked against the aircraft's height above sea level. `Log.txt` says which cloud datarefs it uses (`Cinematic View: checks for cloud with …`), or that it found none (`found no cloud layers to check`), and if there's no sun position (`found no sun position`) shots simply don't follow the light.
+- **Focus:** X-Plane's depth of field can't tell where a plugin's camera is, so its auto-focus misses the aircraft in outside shots. During one, the script pauses that auto-focus and sets the focus distance itself each frame, to the distance from its camera to the aircraft, then puts both settings back as the shot ends (cockpit shots and X-Plane's own views keep X-Plane's focus). It finds the settings by name when it loads, from X-Plane's list of datarefs (X-Plane 12's SDK can list them all), and writes what it found to X-Plane's `Log.txt`: a line starting `Forza Views: focus-related datarefs:`, then `Forza Views: focusing outside shots with …` or `Forza Views: found no focus distance setting to drive`. If the focus still misses, those lines say what it found.
+- **Light and weather** come from X-Plane's datarefs: the sun's position from `sim/graphics/scenery/sun_pitch_degrees` and `sun_heading_degrees`, and cloud layers (bases, tops and cover) from X-Plane 12's weather at the aircraft, `sim/weather/aircraft/cloud_*`, or the region's or the older `sim/weather/cloud_*` ones if those aren't there, checked against the aircraft's height above sea level. `Log.txt` says which cloud datarefs it uses (`Forza Views: checks for cloud with …`), or that it found none (`found no cloud layers to check`), and if there's no sun position (`found no sun position`) shots simply don't follow the light.
 - **Terrain checks** sample X-Plane's terrain probe along the line from the camera to the top of the aircraft, five times a second during outside shots.
-- **Switching views quietly:** X-Plane announces a view change on screen when its view commands are used, so the script switches views by setting X-Plane's view number (`sim/graphics/view/view_type`) directly. The 3D cockpit's number is fixed; the chase view's (used under the outside shots) is learned the first time with X-Plane's chase command, so you may see its name that once, and kept in `cinematic_view.ini` as `chase_view`. If a direct switch doesn't take, the script falls back to the command.
+- **Switching views quietly:** X-Plane announces a view change on screen when its view commands are used, so the script switches views by setting X-Plane's view number (`sim/graphics/view/view_type`) directly. The 3D cockpit's number is fixed; the chase view's (used under the outside shots) is learned the first time with X-Plane's chase command, so you may see its name that once, and kept in `forza_views.ini` as `chase_view`. If a direct switch doesn't take, the script falls back to the command.
 - **Keys** set in the window are caught with FlyWithLua's keyboard sniffer, which runs before X-Plane's own key bindings.
 - If the SDK library can't be loaded, outside shots fall back to X-Plane's own chase, circle and flyby (still spot/linear spot) views.
 - **Ending a cinematic** puts back the view and head position you had. If you pick a view yourself during one, it stops and leaves you in that view.
@@ -128,4 +138,4 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 xplane/test/run.sh
 ```
 
-It also flies a simulated landing and takeoff to check that the touchdown and liftoff shots cut in, with their cameras by the runway, and flies low until trackside cameras on the ground come up. It flies beside a ridge to check terrain never hides the aircraft for long, at golden hour to check the sun is in the picture when shots look into it (and behind the camera when they don't), at night for closer shots, and into, through and above cloud. It checks that generated shots come from all round the aircraft with a mix of lenses and heights, that cameras stay outside the aircraft's clearance sphere, that orbiting and trackside cameras move within the camera speed limit, and that cockpit shots hold the head steady. It can't show what the shots look like in X-Plane, only that they keep the aircraft in frame, never go below the ground, and that starting, stopping, input, view changes, zoom (keys and mouse wheel), focus, holding a shot, window seat shots, keys and settings behave.
+It moves the gear and flaps, banks steeply and starts an engine to check each cuts straight to its shot, with the camera close to the part and looking at it (behind and below for the turn, the camera level), and flies low until trackside cameras on the ground come up. It flies beside a ridge to check terrain never hides the aircraft for long, at golden hour to check the sun is in the picture when shots look into it (and behind the camera when they don't), at night for closer shots, and into, through and above cloud. It checks that generated shots come from all round the aircraft with a mix of lenses and heights, that cameras stay outside the aircraft's clearance sphere, that orbiting and trackside cameras move within the camera speed limit, and that cockpit shots hold the head steady. It can't show what the shots look like in X-Plane, only that they keep the aircraft in frame, never go below the ground, and that starting, stopping, input, view changes, zoom (keys and mouse wheel), focus, holding a shot, window seat shots, keys and settings behave, that settings carry over from `cinematic_view.ini`, and that it stands down if the old `cinematic_view.lua` is loaded too.

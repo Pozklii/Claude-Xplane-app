@@ -1,4 +1,4 @@
-// Minimal stand-in for X-Plane's XPLM library, for testing cinematic_view.lua
+// Minimal stand-in for X-Plane's XPLM library, for testing forza_views.lua
 // outside X-Plane: datarefs, the camera API, terrain probes and the timer.
 #include <string.h>
 #include <stdlib.h>
@@ -15,6 +15,9 @@ static float ground_y = 0;
 static float axes[500];
 static int buttons[3200];
 static float cloud_base[3], cloud_tops[3], cloud_cover[3];
+static float gear_deploy[10], tire_x[10], tire_y[10], tire_z[10];
+static float eng_x[16], eng_y[16], eng_z[16];
+static int eng_running[16], eng_starter[16];
 static float wall_z0, wall_z1, wall_h; // a ridge along x, between two z lines
 
 static DR *add(const char *name, int type) { DR *d = &drs[ndrs++]; memset(d, 0, sizeof *d); strncpy(d->name, name, 127); d->type = type; return d; }
@@ -29,9 +32,10 @@ static void init(void) {
         "sim/graphics/view/pilots_head_psi","sim/graphics/view/pilots_head_the","sim/graphics/view/pilots_head_phi",
         "sim/aircraft/view/acf_peX","sim/aircraft/view/acf_peY","sim/aircraft/view/acf_peZ",
         "sim/aircraft/weight/acf_m_max","sim/flightmodel/forces/g_nrml",
-        "sim/graphics/scenery/sun_pitch_degrees","sim/graphics/scenery/sun_heading_degrees",0};   // acf_size_x/z deliberately missing
+        "sim/graphics/scenery/sun_pitch_degrees","sim/graphics/scenery/sun_heading_degrees",
+        "sim/flightmodel2/controls/flap1_deploy_ratio",0};   // acf_size_x/z deliberately missing
     const char *ints[] = {"sim/time/paused","sim/graphics/view/view_type","sim/graphics/VR/enabled",
-        "sim/flightmodel/failures/onground_any",0};
+        "sim/flightmodel/failures/onground_any","sim/aircraft/engine/acf_num_engines",0};
     for (int i = 0; dbl[i]; i++) add(dbl[i], 4);
     for (int i = 0; flt[i]; i++) add(flt[i], 2);
     for (int i = 0; ints[i]; i++) add(ints[i], 1);
@@ -45,6 +49,16 @@ static void init(void) {
     DR *cb = add("sim/weather/aircraft/cloud_base_msl_m", 8); cb->vf = cloud_base; cb->n = 3;
     DR *ct = add("sim/weather/aircraft/cloud_tops_msl_m", 8); ct->vf = cloud_tops; ct->n = 3;
     DR *cc = add("sim/weather/aircraft/cloud_coverage_percent", 8); cc->vf = cloud_cover; cc->n = 3;
+    // gear, tyres, engines
+    DR *gd = add("sim/flightmodel2/gear/deploy_ratio", 8); gd->vf = gear_deploy; gd->n = 10;
+    DR *tx = add("sim/flightmodel/parts/tire_x_no_deflection", 8); tx->vf = tire_x; tx->n = 10;
+    DR *ty = add("sim/flightmodel/parts/tire_y_no_deflection", 8); ty->vf = tire_y; ty->n = 10;
+    DR *tz = add("sim/flightmodel/parts/tire_z_no_deflection", 8); tz->vf = tire_z; tz->n = 10;
+    DR *ex = add("sim/flightmodel2/engines/location_x_mtr", 8); ex->vf = eng_x; ex->n = 16;
+    DR *ey = add("sim/flightmodel2/engines/location_y_mtr", 8); ey->vf = eng_y; ey->n = 16;
+    DR *ez = add("sim/flightmodel2/engines/location_z_mtr", 8); ez->vf = eng_z; ez->n = 16;
+    DR *er = add("sim/flightmodel/engine/ENGN_running", 16); er->vi = eng_running; er->n = 16;
+    DR *es = add("sim/flightmodel2/engines/starter_is_running", 16); es->vi = eng_starter; es->n = 16;
 }
 
 static int cmd_dummy;
@@ -81,5 +95,9 @@ int mock_call_camera(cam_t *pos, int losing) { if (!cam_cb) return -1; int r = c
 void mock_set_ground(float g) { ground_y = g; }
 void mock_set_wall(float z0, float z1, float h) { wall_z0 = z0; wall_z1 = z1; wall_h = h; }
 void mock_set_cloud(int i, float base, float tops, float cover) { cloud_base[i] = base; cloud_tops[i] = tops; cloud_cover[i] = cover; }
+void mock_set_gear(int i, float deploy) { gear_deploy[i] = deploy; }
+void mock_set_tire(int i, float x, float y, float z) { tire_x[i] = x; tire_y[i] = y; tire_z[i] = z; }
+void mock_set_engine(int i, int running, int starter) { eng_running[i] = running; eng_starter[i] = starter; }
+void mock_set_engine_at(int i, float x, float y, float z) { eng_x[i] = x; eng_y[i] = y; eng_z[i] = z; }
 void mock_set_axis(int i, float v) { axes[i] = v; }
 void mock_set_button(int i, int v) { buttons[i] = v; }

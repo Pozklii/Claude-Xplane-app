@@ -1,4 +1,4 @@
--- Simulates FlyWithLua and X-Plane around cinematic_view.lua and checks what
+-- Simulates FlyWithLua and X-Plane around forza_views.lua and checks what
 -- it does: idle detection, shots, camera control, restoring the view, input,
 -- the settings window. Run through run.sh.
 -- usage: luajit harness.lua <script> ffi|fallback   (from the directory holding Resources/plugins/XPLM_64.so)
@@ -107,6 +107,8 @@ if mode == "ffi" then
         int mock_call_camera(mock_cam_t *pos, int losing); void mock_set_ground(float g);
         void mock_set_axis(int i, float v); void mock_set_button(int i, int v);
         void mock_set_wall(float z0, float z1, float h); void mock_set_cloud(int i, float base, float tops, float cover);
+        void mock_set_gear(int i, float deploy); void mock_set_tire(int i, float x, float y, float z);
+        void mock_set_engine(int i, int running, int starter); void mock_set_engine_at(int i, float x, float y, float z);
         void *XPLMFindDataRef(const char *); int XPLMGetDatai(void *); void XPLMSetDatai(void *, int);
         float XPLMGetDataf(void *); void XPLMSetDataf(void *, float); double XPLMGetDatad(void *);
     ]]
@@ -193,33 +195,58 @@ if mode == "ffi" then
     set_i("mock/camera/auto_focus", 1)
     set_f("sim/graphics/scenery/sun_pitch_degrees", 45) -- midday, until the light tests
     set_f("sim/graphics/scenery/sun_heading_degrees", 180)
+    -- an A320's gear (down) and engines (running), in metres right, up and aft of its centre
+    lib.mock_set_tire(0, 0, -3.6, -11.5)
+    lib.mock_set_tire(1, -3.8, -3.6, 1.2)
+    lib.mock_set_tire(2, 3.8, -3.6, 1.2)
+    for g = 0, 2 do lib.mock_set_gear(g, 1) end
+    set_i("sim/aircraft/engine/acf_num_engines", 2)
+    lib.mock_set_engine_at(0, -5.75, -2.2, -3.0)
+    lib.mock_set_engine_at(1, 5.75, -2.2, -3.0)
+    lib.mock_set_engine(0, 1, 0)
+    lib.mock_set_engine(1, 1, 0)
 end
 set_f("sim/operation/misc/frame_rate_period", 1 / 30)
 set_i("sim/graphics/view/view_type", 1026)
 push_aircraft()
 
+-- settings from when the script was called cinematic_view.lua
+do
+    local f = assert(io.open(SCRIPT_DIRECTORY .. "/cinematic_view.ini", "w"))
+    f:write("# Cinematic View settings (written by cinematic_view.lua)\njoystick_deadband = 0.031\nsize:Other.acf = 50.0\n")
+    f:close()
+end
+
 -- load the script ----------------------------------------------------------
 local ok, err = pcall(dofile, script)
 check(ok, "script loads: " .. tostring(err))
-check(commands["FlyWithLua/cinematic_view/toggle"] ~= nil, "toggle command created")
+check(commands["FlyWithLua/forza_views/toggle"] ~= nil, "toggle command created")
 for _, id in ipairs({ "toggle", "next_shot", "hold", "toggle_afk", "settings" }) do
-    check(commands["FlyWithLua/cinematic_view/" .. id] and command_ends["FlyWithLua/cinematic_view/" .. id] ~= "",
+    check(commands["FlyWithLua/forza_views/" .. id] and command_ends["FlyWithLua/forza_views/" .. id] ~= "",
         id .. " command with press and release")
 end
 for _, id in ipairs({ "cycle_mode", "zoom_in", "zoom_out" }) do
-    check(commands["FlyWithLua/cinematic_view/" .. id] == nil, "no " .. id .. " command")
+    check(commands["FlyWithLua/forza_views/" .. id] == nil, "no " .. id .. " command")
 end
 local macro_count = 0
 for name in pairs(macros) do macro_count = macro_count + 1 end
-check(macro_count == 1 and macros["Cinematic View"] == "CinematicView_toggle_settings()", "one menu entry, opening the window")
+check(macro_count == 1 and macros["Forza Views"] == "ForzaViews_toggle_settings()", "one menu entry, opening the window")
 check(#chunks.frame == 1 and #chunks.draw == 1 and #chunks.key == 1 and #chunks.click == 1, "callbacks registered")
 for _, l in ipairs(logs) do print("log: " .. l) end
+do
+    local f = io.open(SCRIPT_DIRECTORY .. "/forza_views.ini", "r")
+    local new = f and f:read("*a") or ""
+    if f then f:close() end
+    check(new:find("joystick_deadband = 0.031", 1, true) and new:find("size:Other.acf = 50.0", 1, true),
+        "settings from cinematic_view.ini carried over to forza_views.ini:\n" .. new)
+    check(io.open(SCRIPT_DIRECTORY .. "/cinematic_view.ini", "r") ~= nil, "and the old file left alone")
+end
 
 local cam = mode == "ffi" and ffi.new("mock_cam_t") or nil
 local function upvalue(f, name)
     for i = 1, 200 do local n, v = debug.getupvalue(f, i) if not n then return nil end if n == name then return v end end
 end
-local CVt = upvalue(upvalue(CinematicView_tick, "fn"), "CV")
+local CVt = upvalue(upvalue(ForzaViews_tick, "fn"), "CV")
 local per_shot = {}
 local shots_seen, shot_log = {}, {}
 local function shots_since(i)
@@ -244,8 +271,8 @@ local function tap(vk, mods)
     return consumed
 end
 local function command(id)
-    run({ commands["FlyWithLua/cinematic_view/" .. id] })
-    run({ command_ends["FlyWithLua/cinematic_view/" .. id] })
+    run({ commands["FlyWithLua/forza_views/" .. id] })
+    run({ command_ends["FlyWithLua/forza_views/" .. id] })
 end
 local MODE_BUTTONS = { mixed = "Mixed##mode", outside = "Outside##mode", cockpit = "Cockpit##mode" }
 local function set_mode(m)
@@ -258,7 +285,7 @@ local function set_mode(m)
     if opened then command("settings") end
 end
 local function ini_text()
-    local f = io.open(SCRIPT_DIRECTORY .. "/cinematic_view.ini", "r")
+    local f = io.open(SCRIPT_DIRECTORY .. "/forza_views.ini", "r")
     local text = f and f:read("*a") or ""
     if f then f:close() end
     return text
@@ -306,7 +333,12 @@ local function frame(dt)
             if cam.y < ac.y - ac.agl + 0.5 then stats.below_ground = stats.below_ground + 1 end
             local h, p = math.rad(cam.heading), math.rad(cam.pitch)
             local fx, fy, fz = math.cos(p) * math.sin(h), math.sin(p), -math.cos(p) * math.cos(h)
-            local dx, dy, dz = (ac.x - cam.x) / d, (ac.y - cam.y) / d, (ac.z - cam.z) / d
+            -- (a close camera looks at, and focuses on, a part of the aircraft rather than its centre)
+            local close = CVt.shot and CVt.shot.aim_x and CVt.shot
+            local tx, ty, tz = ac.x, ac.y, ac.z
+            if close then tx, ty, tz = close.aim_x, close.aim_y, close.aim_z end
+            local td = math.sqrt((tx - cam.x) ^ 2 + (ty - cam.y) ^ 2 + (tz - cam.z) ^ 2)
+            local dx, dy, dz = (tx - cam.x) / td, (ty - cam.y) / td, (tz - cam.z) / td
             local ang = math.deg(math.acos(math.max(-1, math.min(1, fx * dx + fy * dy + fz * dz))))
             local id = CVt.shot and CVt.shot.def.id or "?"
             local ps = per_shot[id] or { n = 0, ang = 0, dmin = 1e9, dmax = 0, zmax = 0, rollmax = 0 }
@@ -322,10 +354,10 @@ local function frame(dt)
             if CVt.user_zoom > 4.0001 and CVt.size * cam.zoom / (2 * d * math.tan(math.rad(30))) > 3.05 then
                 stats.overzoom = stats.overzoom + 1
             end
-            if d < 0.65 * CVt.size + 2 - 0.5 then stats.too_close = stats.too_close + 1 end
+            if d < 0.65 * CVt.size + 2 - 0.5 and not (CVt.shot and CVt.shot.def.close) then stats.too_close = stats.too_close + 1 end
             if mode == "ffi" then
                 stats.focus_frames = stats.focus_frames + 1
-                if math.abs(get_f("mock/camera/focus_distance_m") - math.max(d, 1)) > 0.05 * d + 0.5 then stats.focus_off = stats.focus_off + 1 end
+                if math.abs(get_f("mock/camera/focus_distance_m") - math.max(td, 1)) > 0.05 * td + 0.5 then stats.focus_off = stats.focus_off + 1 end
                 if get_i("mock/camera/auto_focus") ~= 0 then stats.focus_kept = stats.focus_kept + 1 end
             end
             local sh = CVt.shot
@@ -404,7 +436,7 @@ for i = 1, 30 * 240 do
         stats.cockpit_frames = stats.cockpit_frames + 1
     end
     -- bank and climb now and then
-    ac.phi = 25 * math.sin(T * 0.05)
+    ac.phi = 30 * math.sin(T * 0.05)
     ac.psi = (ac.psi + 0.02) % 360
 end
 measuring = false
@@ -473,7 +505,7 @@ seconds(2)
 check(drawn.rects == r1, "nothing drawn once stopped")
 
 -- 5. manual start: input doesn't end it; toggling does
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 seconds(3)
 MOUSE_X = MOUSE_X + 50
 tap(0x41)
@@ -482,16 +514,16 @@ local active_after_input = false
 -- active if the letterbox is still being drawn
 local r2 = drawn.rects seconds(0.5) active_after_input = drawn.rects > r2
 check(active_after_input, "manual cinematic survives input")
-run({ commands["FlyWithLua/cinematic_view/next_shot"] })
+run({ commands["FlyWithLua/forza_views/next_shot"] })
 seconds(2)
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 seconds(3)
 local r3 = drawn.rects seconds(1)
 check(drawn.rects == r3, "manual cinematic stops on toggle")
 check(get_i("sim/graphics/view/view_type") == 1026, "view restored after manual stop")
 
 -- 6. user picks another view during a cinematic: stop and leave them there
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 seconds(5)
 set_i("sim/graphics/view/view_type", 1000) -- e.g. the 2D panel
 seconds(1)
@@ -502,7 +534,7 @@ check(drawn.rects == r4, "cinematic stopped after the user picked a view")
 -- 7. another plugin takes the camera
 if lib then
     set_mode("outside")
-    run({ commands["FlyWithLua/cinematic_view/toggle"] })
+    run({ commands["FlyWithLua/forza_views/toggle"] })
     seconds(3)
     check(lib.mock_camera_controlled() ~= 0, "outside-only mode holds the camera")
     lib.mock_call_camera(nil, 1) -- losing control
@@ -516,14 +548,14 @@ end
 -- 8. a stalled script hands the camera back (heartbeat)
 if lib then
     set_mode("outside")
-    run({ commands["FlyWithLua/cinematic_view/toggle"] })
+    run({ commands["FlyWithLua/forza_views/toggle"] })
     seconds(3)
     T = T + 5 lib.mock_set_time(T)
     local r = lib.mock_call_camera(cam, 0)
     check(r == 0, "camera callback lets go when the script stops ticking")
     seconds(1)
     check(lib.mock_camera_controlled() ~= 0, "camera taken back once ticking resumes")
-    run({ commands["FlyWithLua/cinematic_view/toggle"] })
+    run({ commands["FlyWithLua/forza_views/toggle"] })
     seconds(1)
     set_mode("mixed")
 end
@@ -532,20 +564,20 @@ end
 ac.y, ac.agl, ac.vy, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, true
 if lib then lib.mock_set_ground(0) end
 stats.below_ground = 0
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 seconds(120)
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 check(stats.below_ground == 0, "camera above ground on the runway")
 
 -- 10. parked and paused: no flyby, still works
 ac.vx, ac.vy, ac.vz = 0, 0, 0
 set_i("sim/time/paused", 1)
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 local before = #shot_log
 seconds(90)
 local parked_shots = shots_since(before)
 check(not parked_shots.trackside and not parked_shots.xp_spot, "no trackside shots while parked")
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 -- 10a. it doesn't start by itself while paused
 MOUSE_X = MOUSE_X + 40
 seconds(1)
@@ -558,55 +590,143 @@ tap(0x41)
 seconds(1)
 check(not CVt.active, "and a key ends it")
 
--- 10b. a landing gets a touchdown shot by the runway
+-- 10b. moments: the gear and flaps moving, a steep turn and an engine
+-- starting each cut straight to a shot of their own
 if lib then
-    ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 300, 300, 70, -3.5, 0, 2, 0, 90, false
-    command("toggle")
-    local touchdown_seen, touchdown_closest, touchdown_cam_low, touched_at = false, 1e9, true, nil
-    for _ = 1, 30 * 140 do
-        if not ac.onground then
-            if ac.y <= 2.5 then
-                ac.y, ac.vy, ac.onground = 2.5, 0, true
-                touched_at = T
-            end
-        else
-            ac.vx = math.max(0, ac.vx - 2 / 30)
-        end
-        ac.agl = ac.y
-        frame(1 / 30)
-        if CVt.shot and CVt.shot.def.id == "touchdown" and lib.mock_camera_controlled() ~= 0 then
-            touchdown_seen = true
-            local d = math.sqrt((cam.x - ac.x) ^ 2 + (cam.z - ac.z) ^ 2)
-            touchdown_closest = math.min(touchdown_closest, d)
-            if cam.y < 0.9 or cam.y > 2.0 then touchdown_cam_low = false end
-        end
+    local Mt = upvalue(upvalue(ForzaViews_tick, "fn"), "M")
+    -- a point in the aircraft's axes, in the world
+    local function world(x, y, z)
+        local wx, wy, wz = Mt.body_to_world(x, y, z, ac.psi, ac.the, ac.phi)
+        return ac.x + wx, ac.y + wy, ac.z + wz
     end
-    check(touched_at ~= nil, "simulated landing touched down")
-    check(touchdown_seen, "a touchdown shot cut in on short final")
-    check(touchdown_cam_low, "the touchdown camera stands by the runway")
-    -- (far enough back that it never has to turn faster than the camera speed allows)
-    check(touchdown_closest > 30 and touchdown_closest < 300, "and the aircraft passes by it: " .. touchdown_closest)
-    command("toggle")
-
-    -- 10c. a takeoff gets a liftoff shot
+    local function dist3(ax, ay, az, bx, by, bz) return math.sqrt((ax - bx) ^ 2 + (ay - by) ^ 2 + (az - bz) ^ 2) end
+    -- how far a point is from the middle of the picture, in degrees
+    local function off_centre(px, py, pz)
+        local h, p = math.rad(cam.heading), math.rad(cam.pitch)
+        local fx, fy, fz = math.cos(p) * math.sin(h), math.sin(p), -math.cos(p) * math.cos(h)
+        local d = dist3(px, py, pz, cam.x, cam.y, cam.z)
+        return math.deg(math.acos(math.max(-1, math.min(1, ((px - cam.x) * fx + (py - cam.y) * fy + (pz - cam.z) * fz) / d))))
+    end
+    -- runs frames, with set(i) changing something before frame i, and
+    -- measures the shots of one kind that come up: how many, when the
+    -- first did, and the worst of measure(shot) over their frames
+    local function moment(kind, frames, set, measure)
+        local m = { shots = 0, first = nil, worst = {} }
+        local last
+        for i = 1, frames do
+            if set then set(i) end
+            frame(1 / 30)
+            local sh = CVt.shot
+            if sh and sh.def.id == kind and lib.mock_camera_controlled() ~= 0 then
+                if sh ~= last then m.shots, last = m.shots + 1, sh end
+                m.first = m.first or T
+                if measure then
+                    for k, v in pairs(measure(sh)) do m.worst[k] = math.max(m.worst[k] or -1e9, v) end
+                end
+            end
+        end
+        return m
+    end
+    local S = CVt.size
+    ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 300, 300, 70, 0, 0, 2, 0, 90, false
+    set_mode("outside")
     command("toggle")
     seconds(5)
-    local liftoff_seen, liftoff_cam_low = false, true
-    for _ = 1, 30 * 70 do
-        if ac.onground then
-            ac.vx = ac.vx + 2.5 / 30
-            if ac.vx >= 75 then ac.onground, ac.vy, ac.the = false, 5, 8 end
-        end
-        ac.agl = ac.y
+
+    -- the gear going up, over 8 s
+    local began
+    local gear = moment("gear", 30 * 14, function(i)
+        local r = math.max(0, 1 - i / (30 * 8))
+        for g = 0, 2 do lib.mock_set_gear(g, r) end
+        if r < 0.98 and not began then began = T + 1 / 30 end
+    end, function(sh)
+        local lx, ly, lz = world(-3.8, -3.6, 1.2)
+        local rx, ry, rz = world(3.8, -3.6, 1.2)
+        return { dist = dist3(cam.x, cam.y, cam.z, sh.aim_x, sh.aim_y, sh.aim_z), off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z),
+            leg = math.min(dist3(sh.aim_x, sh.aim_y, sh.aim_z, lx, ly, lz), dist3(sh.aim_x, sh.aim_y, sh.aim_z, rx, ry, rz)) }
+    end)
+    print(string.format("  gear: camera %.1f m from what it looks at, %.1f m from a main leg", gear.worst.dist or -1, gear.worst.leg or -1))
+    check(gear.shots == 1 and gear.first and gear.first - began < 0.1, "the gear going up cuts straight to one gear shot")
+    check((gear.worst.dist or 1e9) < 0.4 * S and (gear.worst.off or 1e9) < 1, "a camera close by, looking at it")
+    check((gear.worst.leg or 1e9) < 0.12 * S, "at a main gear leg")
+    seconds(15)
+    gear = moment("gear", 30 * 12, function(i)
+        for g = 0, 2 do lib.mock_set_gear(g, math.min(1, i / (30 * 8))) end
+    end)
+    check(gear.shots == 1, "and going down again, another")
+
+    -- the flaps out to the first stage, over 4 s
+    seconds(15)
+    began = nil
+    local flaps = moment("flaps", 30 * 10, function(i)
+        local f = math.min(0.25, i / (30 * 4) * 0.25)
+        set_f("sim/flightmodel2/controls/flap1_deploy_ratio", f)
+        if f > 0.02 and not began then began = T + 1 / 30 end
+    end, function(sh)
+        local lx, ly, lz = world(-0.2 * S, 0, 0.06 * S)
+        local rx, ry, rz = world(0.2 * S, 0, 0.06 * S)
+        return { off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z),
+            flap = math.min(dist3(sh.aim_x, sh.aim_y, sh.aim_z, lx, ly, lz), dist3(sh.aim_x, sh.aim_y, sh.aim_z, rx, ry, rz)),
+            dist = dist3(cam.x, cam.y, cam.z, sh.aim_x, sh.aim_y, sh.aim_z) }
+    end)
+    check(flaps.shots == 1 and flaps.first and flaps.first - began < 0.1, "the flaps moving cut straight to a flaps shot")
+    check((flaps.worst.off or 1e9) < 1 and (flaps.worst.flap or 1e9) < 2.5 and (flaps.worst.dist or 1e9) < 0.5 * S,
+        "close to an inner flap, looking at it")
+
+    -- a steep turn, held for half a minute
+    seconds(15)
+    began = nil
+    local bank = moment("bank", 30 * 30, function()
+        ac.phi = 35
+        began = began or T + 1 / 30
+    end, function(sh)
+        local fx, fz = math.sin(math.rad(90)), -math.cos(math.rad(90)) -- along the track
+        return { ahead = (cam.x - ac.x) * fx + (cam.z - ac.z) * fz, above = cam.y - ac.y,
+            roll = math.abs(cam.roll), off = off_centre(ac.x, ac.y, ac.z) }
+    end)
+    ac.phi = 0
+    check(bank.shots == 1 and bank.first and bank.first - began >= 1.9 and bank.first - began < 2.3,
+        "a steep turn held for 2 s cuts to a bank shot, and not again for a minute")
+    check((bank.worst.ahead or 1) < 0 and (bank.worst.above or 1) < -1, "from behind and below")
+    check((bank.worst.roll or 1) < 0.01 and (bank.worst.off or 1e9) < 1, "the camera level, the aircraft in the middle")
+
+    -- an engine starting, parked: the right one's starter, then it running
+    ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, 0, 0, true
+    lib.mock_set_engine(0, 0, 0)
+    lib.mock_set_engine(1, 0, 0)
+    seconds(15)
+    began = nil
+    local engine = moment("engine", 30 * 20, function(i)
+        if i == 30 then lib.mock_set_engine(1, 0, 1) began = T + 1 / 30 end
+        if i == 30 * 6 then lib.mock_set_engine(1, 1, 0) end
+    end, function(sh)
+        local ex, ey, ez = world(5.75, -2.2, -3.0)
+        return { off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z), at = dist3(sh.aim_x, sh.aim_y, sh.aim_z, ex, ey, ez),
+            low = -cam.y }
+    end)
+    check(engine.shots == 1 and engine.first and engine.first - began < 0.1,
+        "an engine's starter cuts straight to an engine shot, and its running doesn't cut again")
+    check((engine.worst.off or 1e9) < 1 and (engine.worst.at or 1e9) < 3, "at the engine that's starting, looking at it")
+    check((engine.worst.low or 1e9) <= -0.79, "above the ground")
+    ac.vx = 10
+    seconds(2)
+    engine = moment("engine", 30 * 3, function(i) if i == 1 then lib.mock_set_engine(0, 0, 1) end end)
+    check(engine.shots == 0, "not while taxiing")
+    lib.mock_set_engine(0, 1, 0)
+    ac.vx = 0
+    -- none in cockpit-only mode
+    set_mode("cockpit")
+    seconds(3)
+    local inside_moment = false
+    for i = 1, 30 * 6 do
+        set_f("sim/flightmodel2/controls/flap1_deploy_ratio", math.max(0, 0.25 - i / (30 * 4) * 0.25))
         frame(1 / 30)
-        if CVt.shot and CVt.shot.def.id == "liftoff" and lib.mock_camera_controlled() ~= 0 then
-            liftoff_seen = true
-            if cam.y > 1.6 then liftoff_cam_low = false end
-        end
+        if CVt.shot and CVt.shot.def.event then inside_moment = true end
     end
-    check(liftoff_seen, "a liftoff shot cut in")
-    check(liftoff_cam_low, "the liftoff camera is low by the runway")
+    check(not inside_moment, "no moments showing cockpit shots only")
     command("toggle")
+    set_mode("outside")
+    ac.x, ac.z, ac.vx, ac.vz, ac.psi = 0, 0, 75, 0, 90
 
     -- 10d. low and level: trackside cameras on the ground (generated at random, so fly until some come up)
     ac.y, ac.agl, ac.vy, ac.the, ac.onground = 200, 200, 0, 0, false
@@ -741,7 +861,7 @@ if lib then
     check(golden.lit_ok > 0.9 * golden.lit_frames, "lit shots have the sun behind the camera")
 
     -- 10g. night: close shots, few distant ones
-    local pick_outside = upvalue(upvalue(upvalue(upvalue(CinematicView_tick, "fn"), "next_shot"), "pick_shot"), "pick_outside")
+    local pick_outside = upvalue(upvalue(upvalue(upvalue(ForzaViews_tick, "fn"), "next_shot"), "pick_shot"), "pick_outside")
     local function outside_mix()
         CVt.recent, CVt.prefer_close = {}, false
         local n = { orbiting = 0, trackside = 0, mounted = 0 }
@@ -809,7 +929,7 @@ if lib then
     seconds(5)
     check(not CVt.in_cloud, "broken cloud doesn't count")
     local out_log = false
-    for _, l in ipairs(logs) do if l == "Cinematic View: out of cloud" then out_log = true end end
+    for _, l in ipairs(logs) do if l == "Forza Views: out of cloud" then out_log = true end end
     check(out_log, "coming out of cloud is logged too")
     local back_outside = false
     for _ = 1, 30 * 30 do
@@ -969,10 +1089,10 @@ if lib then
     check(CVt.active, "scrolling didn't end the AFK cinematic")
     -- a joystick button that runs one of our commands isn't input either
     lib.mock_set_button(40, 1)
-    run({ commands["FlyWithLua/cinematic_view/next_shot"] })
+    run({ commands["FlyWithLua/forza_views/next_shot"] })
     seconds(0.2)
     lib.mock_set_button(40, 0)
-    run({ command_ends["FlyWithLua/cinematic_view/next_shot"] })
+    run({ command_ends["FlyWithLua/forza_views/next_shot"] })
     seconds(1)
     check(CVt.active, "a joystick button bound to next shot doesn't end it")
     -- in the cockpit, + and - go on to X-Plane's own zoom
@@ -1030,7 +1150,7 @@ end
 -- 13. keys set in the settings window
 command("settings")
 local wnd = next(windows)
-check(wnd and wnd.builder == "CinematicView_build_settings", "settings window opened")
+check(wnd and wnd.builder == "ForzaViews_build_settings", "settings window opened")
 local function build()
     _G[wnd.builder](wnd, 0, 0)
     check(ui.colors == 0 and ui.vars == 0 and ui.disabled == 0 and ui.tabbar == 0 and ui.tabitem == 0,
@@ -1247,10 +1367,27 @@ command("settings")
 check(next(windows) == nil, "settings window closed")
 
 -- 16. exit hook
-run({ commands["FlyWithLua/cinematic_view/toggle"] })
+run({ commands["FlyWithLua/forza_views/toggle"] })
 seconds(2)
 run(exit_code)
 check(lib == nil or lib.mock_camera_controlled() == 0, "camera released on exit")
+
+-- 17. the old version (cinematic_view.lua) loaded too: this one stands down and says so
+do
+    ForzaViews_tick = nil
+    CinematicView_tick = function() end
+    local frames_before, draws_before, logs_before = #chunks.frame, #chunks.draw, #logs
+    local ok2, err2 = pcall(dofile, script)
+    check(ok2, "loads beside the old version: " .. tostring(err2))
+    check(#chunks.frame == frames_before and #chunks.draw == draws_before + 1 and ForzaViews_tick == nil,
+        "with the old version running, it stands down")
+    check(#logs == logs_before + 1 and logs[#logs]:find("remove cinematic_view.lua", 1, true), "and says to remove the old one")
+    in_draw = true
+    run({ chunks.draw[#chunks.draw] })
+    in_draw = false
+    check(drawn.strings[#drawn.strings] and drawn.strings[#drawn.strings]:find("cinematic_view.lua", 1, true), "on screen too")
+    CinematicView_tick = nil
+end
 
 if mode == "ffi" then
     local sectors, zoomed, wide, el_lo, el_hi = {}, false, false, 90, -90
