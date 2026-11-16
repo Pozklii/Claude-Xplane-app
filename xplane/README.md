@@ -15,7 +15,7 @@ It can be switched on and off whenever you like, and it starts by itself after a
 Everything is in one window: **Plugins → FlyWithLua → FlyWithLua Macros → Cinematic View**.
 
 - **At the top:** what it's doing (with a bar counting down to auto-start), a big **Start cinematic** / **Stop** button, **Next shot**, **Hold shot**, and **Mixed / Outside / Cockpit** to choose the shots.
-- **Tabs below:** **Camera** (camera speed, panning speed, aircraft size, letterbox bars, fades), **Shots** (cockpit share, shot lengths, window seat shots), **Auto-start** (whether and when it starts by itself) and **Keys** (a key for each action).
+- **Tabs below:** **Camera** (camera speed, panning speed, aircraft size, letterbox bars, fades), **Shots** (cockpit share, shot lengths, window seat shots, cockpit shots in cloud), **Auto-start** (whether and when it starts by itself) and **Keys** (a key for each action).
 
 - **Start/stop by hand:** with the button, or a key you set in the window. A cinematic you start yourself keeps running while you use the controls (the autopilot is a good idea) until you stop it or pick another view.
 - **When you're away:** after the away time (2 minutes by default) with no keyboard, mouse, joystick or head-tracking input, it starts by itself, but never while the sim is paused. Any input ends it, except zooming (the zoom keys or the mouse wheel) and the keys you've set for the cinematic.
@@ -66,7 +66,7 @@ Inside the cockpit, the pilot's head is placed somewhere (the pilot's seat, over
 - **Following the light.** When the sun is low (from 6° below the horizon to 14° above), about two outside shots in three line up with it. Some look into the sun from across the aircraft, framed so the sun sits just beside it, inside the letterbox, and the aircraft stands out against it. Others have the sun behind the camera, lighting the aircraft. Those shots move mostly in or out, so the light stays put. Trackside cameras pick the side of the flight path that does the same.
 - **At night** (the sun more than 6° down), when there's little to see but what the aircraft's own lights show, orbiting shots come in close without long lenses, mounted shots come up more and distant trackside shots less.
 - **Terrain doesn't hide the aircraft.** A trackside camera checks its view over the terrain before it stands somewhere, trying the other side of the flight path, then the air, and an orbiting shot instead if nowhere works. Any outside shot that loses sight of the aircraft behind terrain for more than about half a second is cut short for a camera close to it. This only knows about terrain, not buildings: X-Plane's terrain probe doesn't see objects.
-- **In cloud.** Inside a cloud layer that covers most of the sky (broken or more), outside shots show only grey, so after 2 seconds in it the shots move into the cockpit, even showing outside shots only, until you've been out of it for 3 seconds. Flying through scattered cloud, or above the tops, doesn't count.
+- **In cloud.** Inside a thick cloud layer (7/8 cover or overcast), outside shots show only grey, so after 2 seconds in it the shots move into the cockpit, even showing outside shots only, until you've been out of it for 3 seconds. The window's status line says so (*in cloud: cockpit shots*), and `Log.txt` notes each time it goes in, with the layer (`Cinematic View: in cloud (layer 2, 2500 to 3600 m, cover 0.90; the aircraft at 3000 m)…`), and out. Scattered or broken cloud, which X-Plane 12 draws with plenty of gaps, doesn't count, nor does flying above the tops. If outside shots stop when they shouldn't, that log line shows what it took for cloud; **Cockpit shots in cloud** in the **Shots** tab turns this off.
 
 ### Camera speed and panning speed
 
@@ -99,6 +99,7 @@ Changed in the window, or in `cinematic_view.ini` next to the script (written wh
 | `letterbox` | `true` | Cinema bars top and bottom |
 | `fades` | `true` | Dip to black when switching between inside and outside, and now and then between other shots |
 | `window_seat` | `true` | Cockpit shots include a passenger's window seat |
+| `cloud_cockpit` | `true` | In thick cloud, cockpit shots until out of it |
 | `manual_exit_on_input` | `false` | Any input also ends a cinematic you started yourself |
 | `joystick_deadband` | `0.03` | How far an axis must move to count as input (raise it for noisy hardware) |
 | `bind_toggle`, `bind_next_shot`, `bind_hold`, `bind_toggle_afk`, `bind_settings` | empty | The keys set in the window, as `<virtual key code> <modifiers> <name>` (modifiers: 1 Shift, 2 Ctrl, 4 Alt); easiest set from the window |

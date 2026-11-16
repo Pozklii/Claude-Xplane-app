@@ -40,7 +40,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "2.7"
+local VERSION = "2.8"
 
 ------------------------------------------------------------------------------
 -- Settings
@@ -58,6 +58,7 @@ local DEFAULTS = {
     letterbox = true,             -- cinema bars top and bottom
     fades = true,                 -- dip to black between some shots
     window_seat = true,           -- cockpit shots include a passenger's window seat
+    cloud_cockpit = true,         -- in thick cloud, cockpit shots until out of it
     manual_exit_on_input = false, -- any input also ends a cinematic you started yourself
     joystick_deadband = 0.03,     -- how far an axis must move to count as input
     -- keys, as "<virtual key> <modifiers> <name>" (modifiers: 1 shift, 2 ctrl, 4 alt); empty for none
@@ -553,10 +554,11 @@ local function light_side(c)
 end
 
 ------------------------------------------------------------------------------
--- Cloud: outside shots in cloud show nothing but grey, so while the aircraft
--- is inside a layer covering most of the sky, the shots move into the
--- cockpit. The layers come from X-Plane's weather datarefs, from whichever of
--- these sets this version of X-Plane has.
+-- Cloud: outside shots in thick cloud show nothing but grey, so while the
+-- aircraft is inside a layer that (nearly) covers the sky, the shots move
+-- into the cockpit (a setting turns this off). The layers come from X-Plane's
+-- weather datarefs, from whichever of these sets this version of X-Plane
+-- has; each time it goes into or out of cloud, Log.txt says which layer.
 ------------------------------------------------------------------------------
 
 local CLOUD_SETS = {
@@ -596,27 +598,32 @@ local function read_floats(ref, n)
     return out
 end
 
--- Whether the aircraft is inside a cloud layer covering most of the sky
--- (broken or more; it flies in and out of scattered cloud).
-local function in_cloud_now()
+local THICK_CLOUD = 0.8 -- cover that counts: 7/8 or overcast (X-Plane 12 draws broken cloud with plenty of gaps)
+
+-- The cloud layer the aircraft is inside, if it's thick: its number, base,
+-- top and cover, and the aircraft's height (metres above sea level); nil
+-- otherwise. Layers that make no sense are left out.
+local function cloud_around()
     local base, tops, cover = read_floats(CLOUD.base, 3), read_floats(CLOUD.tops, 3), read_floats(CLOUD.cover, 3)
     local alt = gd(R.elev)
     for i = 0, 2 do
         local b, t, c = base[i], tops[i], cover[i]
-        if b and t and c then
+        if b and t and c and b > -500 and t < 25000 then
             c = c / CLOUD.full
             if c > 1.5 then c = c / 100 end -- (a percentage after all)
-            if c >= 0.55 and t - b > 50 and alt > b + 20 and alt < t - 20 then return true end
+            if c >= THICK_CLOUD and c <= 1.05 and t - b > 50 and alt > b + 20 and alt < t - 20 then
+                return { layer = i + 1, base = b, tops = t, cover = c, alt = alt }
+            end
         end
     end
-    return false
 end
 
 -- Each frame: in cloud once it has been inside for 2 s, out after 3 s clear.
 local function watch_cloud(t)
     if not CLOUD.base or t - CLOUD.check_t < 0.5 then return end
     CLOUD.check_t = t
-    local inside = in_cloud_now()
+    local around = cloud_around()
+    local inside = around ~= nil
     if inside == CV.in_cloud then
         CLOUD.since = nil
     else
@@ -624,9 +631,19 @@ local function watch_cloud(t)
         if t - CLOUD.since >= (inside and 2 or 3) then
             CV.in_cloud = inside
             CLOUD.since = nil
+            if around then
+                log(string.format("in cloud (layer %d, %.0f to %.0f m, cover %.2f; the aircraft at %.0f m)%s",
+                    around.layer, around.base, around.tops, around.cover, around.alt,
+                    settings.cloud_cockpit and ": cockpit shots until it's out" or ""))
+            else
+                log("out of cloud")
+            end
         end
     end
 end
+
+-- Whether cloud is keeping the shots in the cockpit.
+local function cloud_keeps_inside() return CV.in_cloud and settings.cloud_cockpit end
 
 ------------------------------------------------------------------------------
 -- Shots, generated
@@ -1380,7 +1397,7 @@ end
 local function pick_shot()
     if not CV.eye then CV.eye = find_eye() end
     local cond = conditions()
-    if CV.in_cloud then return COCKPIT end -- nothing to see outside
+    if cloud_keeps_inside() then return COCKPIT end -- nothing to see outside
     if CV.first_shot then
         CV.first_shot = false
         if XP.camera_ok and settings.mode ~= "cockpit" then return REVEAL end -- open with a reveal
@@ -1776,7 +1793,7 @@ local function watch_flight(t)
     CV.was_on_ground = cond.onground
     CV.last_vy = cond.vy
     if event and CV.active and XP.camera_ok and settings.mode ~= "cockpit" and not cond.paused
-        and not CV.hold and not CV.in_cloud and not (CV.shot and CV.shot.def.event) then
+        and not CV.hold and not cloud_keeps_inside() and not (CV.shot and CV.shot.def.event) then
         if event == EVENT_SHOTS.touchdown then CV.landing_shown = true end
         cut_to(event)
     end
@@ -1916,7 +1933,7 @@ local function tick()
                     CV.prefer_close = true
                     local def = pick_shot()
                     if def then cut_to(def) end -- (no fade: there's nothing to see)
-                elseif CV.in_cloud and s.def.kind ~= "cockpit" then
+                elseif cloud_keeps_inside() and s.def.kind ~= "cockpit" then
                     next_shot(true)
                 elseif t - s.t0 >= s.duration then
                     next_shot(false)
@@ -2339,8 +2356,9 @@ end
 local function status_parts()
     if CV.disabled then return "Switched off after errors", "see X-Plane's Log.txt", UI.red, 0 end
     if CV.active then
-        return "Running", CV.hold and "holding this shot" or (CV.reason == "afk" and "you were away" or "started by you"),
-            UI.red, 1
+        local why = CV.hold and "holding this shot" or cloud_keeps_inside() and "in cloud: cockpit shots"
+            or (CV.reason == "afk" and "you were away" or "started by you")
+        return "Running", why, UI.red, 1
     end
     if not settings.afk_enabled then return "Ready", "auto-start is off", UI.muted, 0 end
     if vr_on() then return "Ready", "not available in VR", UI.muted, 0 end
@@ -2458,6 +2476,10 @@ local function tab_shots()
     imgui.Spacing()
     checkbox("Window seat shots", "window_seat")
     muted_text("From a passenger window, looking out at the wing. Turn them off for aircraft without a cabin.", true)
+    imgui.Spacing()
+    checkbox("Cockpit shots in cloud", "cloud_cockpit")
+    muted_text("Inside thick cloud there's nothing to see outside but grey, so shots stay in the cockpit until you're out "
+        .. "of it, even showing outside shots only.", true)
 end
 
 local function tab_auto()

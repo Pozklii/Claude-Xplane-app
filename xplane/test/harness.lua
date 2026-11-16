@@ -786,23 +786,59 @@ if lib then
     check(CVt.in_cloud, "in cloud")
     seconds(2)
     check(CVt.shot and CVt.shot.def.kind == "cockpit", "into the cockpit, even showing outside shots only")
+    local cloud_log = false
+    for _, l in ipairs(logs) do
+        if l:find("in cloud (layer 2, 2500 to 3600 m, cover 0.90; the aircraft at 3000 m): cockpit shots until it's out", 1, true) then
+            cloud_log = true
+        end
+    end
+    check(cloud_log, "going into cloud is logged, with the layer")
+    command("settings")
+    local cw = next(windows)
+    widgets = {}
+    _G[cw.builder](cw, 0, 0)
+    check(table.concat(widgets, "|"):find("in cloud: cockpit shots", 1, true), "the window says why the shots are in the cockpit")
+    command("settings")
     local outside_in_cloud = 0
     for _ = 1, 30 * 60 do
         frame(1 / 30)
         if lib.mock_camera_controlled() ~= 0 then outside_in_cloud = outside_in_cloud + 1 end
     end
     check(outside_in_cloud == 0, "no outside shots in cloud: " .. outside_in_cloud .. " frames")
-    lib.mock_set_cloud(1, 2500, 3600, 0.3) -- thinned to scattered
+    lib.mock_set_cloud(1, 2500, 3600, 0.7) -- thinned to broken, with gaps
     seconds(5)
-    check(not CVt.in_cloud, "scattered cloud doesn't count")
+    check(not CVt.in_cloud, "broken cloud doesn't count")
+    local out_log = false
+    for _, l in ipairs(logs) do if l == "Cinematic View: out of cloud" then out_log = true end end
+    check(out_log, "coming out of cloud is logged too")
     local back_outside = false
     for _ = 1, 30 * 30 do
         frame(1 / 30)
         if CVt.shot and CVt.shot.def.kind == "outside" then back_outside = true break end
     end
     check(back_outside, "and outside shots come back")
+    -- with cockpit shots in cloud turned off, outside shots carry on in it
+    local function toggle_cloud_option()
+        command("settings")
+        local w = next(windows)
+        imgui_clicks["Cockpit shots in cloud"] = true
+        _G[w.builder](w, 0, 0)
+        imgui_clicks = {}
+        command("settings")
+    end
+    toggle_cloud_option()
+    lib.mock_set_cloud(1, 2500, 3600, 0.9)
+    seconds(5)
+    local outside_anyway = 0
+    for _ = 1, 30 * 30 do
+        frame(1 / 30)
+        if lib.mock_camera_controlled() ~= 0 then outside_anyway = outside_anyway + 1 end
+    end
+    check(CVt.in_cloud and outside_anyway > 600, "turned off, outside shots carry on in cloud: " .. outside_anyway .. " frames")
     lib.mock_set_cloud(1, 2000, 2900, 0.9) -- the aircraft just above the tops
-    seconds(10)
+    seconds(4)
+    toggle_cloud_option() -- (back on)
+    seconds(6)
     check(not CVt.in_cloud and CVt.shot.def.kind == "outside", "above the tops, outside shots carry on")
     command("toggle")
     lib.mock_set_cloud(1, 0, 0, 0)
@@ -1010,7 +1046,7 @@ for _, l in ipairs({ "Cycle shot types", "Zoom in", "Zoom out", "never starts", 
     check(not labels:find(l, 1, true), "window no longer has " .. l)
 end
 for _, l in ipairs({ "Start / stop", "Next shot", "Hold shot", "Auto-start on/off", "This window",
-    "Camera speed", "Panning speed", "Letterbox bars", "Fades", "Window seat shots" }) do
+    "Camera speed", "Panning speed", "Letterbox bars", "Fades", "Window seat shots", "Cockpit shots in cloud" }) do
     check(labels:find(l, 1, true), "window shows " .. l)
 end
 check(not labels:find("Caption"), "no captions option")
