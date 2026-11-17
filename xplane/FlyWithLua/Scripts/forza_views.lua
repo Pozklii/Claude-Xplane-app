@@ -8,8 +8,8 @@
     flight path, or fixed to the airframe, and the pilot's view in the
     cockpit, with letterbox bars and fades. Shots suit what the aircraft is
     doing (runway-level shots on takeoff and landing, air-to-air in cruise),
-    and moments cut in with shots of their own: the gear or flaps moving, a
-    steep turn, an engine starting. At sunrise and sunset cameras line up
+    and there are close shots by the gear, the wing and the engines, and one
+    from behind and below. At sunrise and sunset cameras line up
     with the low sun; at night they stay close; terrain never hides the
     aircraft for long; in thick cloud the shots move into the cockpit.
 
@@ -44,7 +44,7 @@
     circle and flyby views.
 --]]
 
-local VERSION = "3.0"
+local VERSION = "3.1"
 
 -- The earlier version of this script, cinematic_view.lua, still in the
 -- Scripts folder (FlyWithLua loads it first): two would fight over the
@@ -339,15 +339,11 @@ do
         m_max = "sim/aircraft/weight/acf_m_max",
         vr = "sim/graphics/VR/enabled",
         onground = "sim/flightmodel/failures/onground_any",
-        -- for the moments: gear, flaps, engines
-        gear_deploy = "sim/flightmodel2/gear/deploy_ratio",
+        -- where the gear and engines are, for the close shots
         tire_x = "sim/flightmodel/parts/tire_x_no_deflection",
         tire_y = "sim/flightmodel/parts/tire_y_no_deflection",
         tire_z = "sim/flightmodel/parts/tire_z_no_deflection",
-        flaps = "sim/flightmodel2/controls/flap1_deploy_ratio",
         num_engines = "sim/aircraft/engine/acf_num_engines",
-        engn_running = "sim/flightmodel/engine/ENGN_running",
-        starter = "sim/flightmodel2/engines/starter_is_running",
         eng_x = "sim/flightmodel2/engines/location_x_mtr",
         eng_y = "sim/flightmodel2/engines/location_y_mtr",
         eng_z = "sim/flightmodel2/engines/location_z_mtr",
@@ -358,11 +354,9 @@ do
     for key, name in pairs(list) do R[key] = XP.find(name) end
     -- older names for some of them
     local older = {
-        gear_deploy = "sim/aircraft/parts/acf_gear_deploy",
         tire_x = "sim/aircraft/parts/acf_gear_xnodef",
         tire_y = "sim/aircraft/parts/acf_gear_ynodef",
         tire_z = "sim/aircraft/parts/acf_gear_znodef",
-        flaps = "sim/flightmodel/controls/flaprat",
     }
     for key, name in pairs(older) do R[key] = R[key] or XP.find(name) end
 end
@@ -631,9 +625,9 @@ local function find_cloud_layers()
     log("found no cloud layers to check, so outside shots don't avoid cloud")
 end
 
-local read_floats, read_ints
+local read_floats
 do
-local float_buf, int_buf
+local float_buf
 
 -- Up to n (at most 16) values of a float array dataref, from index 0.
 function read_floats(ref, n)
@@ -646,18 +640,6 @@ function read_floats(ref, n)
     elseif XPLMGetDatavf then
         local t = XPLMGetDatavf(ref, 0, n)
         if t then for i = 0, n - 1 do out[i] = t[i] end end
-    end
-    return out
-end
-
--- And of an int array dataref (through the SDK only).
-function read_ints(ref, n)
-    local out = {}
-    if XP.lib then
-        n = math.min(n, 16)
-        int_buf = int_buf or XP.ffi.new("int[16]")
-        local got = XP.lib.XPLMGetDatavi(ref, int_buf, 0, n)
-        for i = 0, got - 1 do out[i] = int_buf[i] end
     end
     return out
 end
@@ -1060,18 +1042,12 @@ local MOUNTED = {
     end,
 }
 
--- How the outside kinds mix in each phase: orbiting, trackside, mounted.
-local GENERATED = { ORBITING, TRACKSIDE, MOUNTED }
-local OUTSIDE_MIX = {
-    parked = { 0.8, 0, 0.2 }, taxi = { 0.6, 0.2, 0.2 }, roll = { 0.45, 0.35, 0.2 },
-    low = { 0.4, 0.4, 0.2 }, cruise = { 0.65, 0.15, 0.2 },
-}
-
 ------------------------------------------------------------------------------
--- Moments: the gear or flaps moving, a steep turn, an engine starting. Each
--- cuts straight to a shot of its own as it begins, the way racing games cut
--- to a jump. Gear, flaps and engines get a camera close to them, bolted to
--- the airframe; a steep turn, one behind and below with the horizon level.
+-- Close shots, and one from below: cameras close to parts of the aircraft,
+-- bolted to the airframe (by a main gear leg, behind the wing at the inner
+-- flap, at an engine), and one behind and below that turns with it, kept
+-- level, so a bank shows against the horizon. They come up like any other
+-- shot, whatever the aircraft is doing.
 --
 -- Where the parts are comes from X-Plane where it says (in the aircraft's
 -- own axes: metres right, up and aft of its centre), otherwise it's guessed
@@ -1079,18 +1055,8 @@ local OUTSIDE_MIX = {
 -- the clearance sphere), to spots that are usually clear of the airframe.
 ------------------------------------------------------------------------------
 
--- What the moments are watching, between frames.
-local MOMENT = {
-    gear_moving = false,
-    flap_last = nil, flap_rest = nil, flap_still_t = 0, flap_moving = false,
-    bank_since = nil, bank_shown = -1000,
-    starter = {}, running = {}, engine_shown = {}, engine = 0,
-}
-
-local EVENT_SHOTS, watch_moments
+local GENERATED, OUTSIDE_MIX
 do
-local BANK_STEEP = 25 -- degrees of bank, held for 2 s, that make a steep turn
-
 -- A part position X-Plane gives that's plausible for an aircraft this size.
 local function part_ok(x, y, z, S)
     return x ~= nil and y ~= nil and z ~= nil and (x ~= 0 or y ~= 0 or z ~= 0)
@@ -1143,133 +1109,92 @@ local function close_update(s, c, t, out)
     s.aim_x, s.aim_y, s.aim_z = body_point(c, lx, s.ly, s.lz)
 end
 
-EVENT_SHOTS = {
-    -- the gear going up or down: under the wing behind a main leg, looking
-    -- forward at it and its well, or under the belly ahead of it, looking back
-    gear = {
-        id = "gear", kind = "outside", event = true, close = true,
-        init = function(s, c)
-            s.duration = M.rand(9, 11)
-            local S = c.size
-            local side = M.sign()
-            local gx, gy, gz, nose = main_gear(S, side)
-            local sx = gx >= 0 and 1 or -1
-            local ty = gy * 0.55 -- halfway up the leg
-            if math.random() < 0.65 then
-                local k = math.max(1, 4 / (0.24 * S)) -- (no closer than 4 m)
-                close_init(s, gx + sx * 0.1 * S * k, gy + 0.02 * S, gz + 0.22 * S * k, gx, ty, gz)
-            else
-                local ahead = nose and (gz + nose) / 2 or gz - 0.24 * S
-                close_init(s, sx * 0.03 * S, gy - 0.01 * S, ahead, gx, ty, gz)
-            end
-        end,
-        update = close_update,
-    },
-    -- the flaps moving: behind the wing and outboard, above or below it,
-    -- looking at the inner flap
-    flaps = {
-        id = "flaps", kind = "outside", event = true, close = true,
-        init = function(s, c)
-            s.duration = M.rand(7, 9)
-            local S = c.size
-            local side = M.sign()
-            local k = math.max(1, 6 / (0.32 * S)) -- (no closer than 6 m: wings sit high or low)
-            local tx, ty, tz = side * 0.2 * S, 0, 0.06 * S
-            if math.random() < 0.6 then
-                close_init(s, side * (0.2 + 0.13 * k) * S, 0.13 * S * k, tz + 0.26 * S * k, tx, ty, tz)
-            else
-                close_init(s, side * (0.2 + 0.1 * k) * S, -0.1 * S * k, tz + 0.24 * S * k, tx, ty, tz)
-            end
-        end,
-        update = close_update,
-    },
-    -- an engine starting: ahead of a propeller in the nose, ahead of and
-    -- outboard of an intake under a wing, alongside one at the tail
-    engine = {
-        id = "engine", kind = "outside", event = true, close = true,
-        init = function(s, c)
-            s.duration = M.rand(12, 15)
-            local S = c.size
-            local x, y, z = engine_at(MOMENT.engine, S)
-            local out = abs(x) > 0.02 * S and (x > 0 and 1 or -1) or M.sign()
-            if abs(x) < 0.05 * S and z < 0 then
-                close_init(s, out * math.max(0.22 * S, 2.5), y + 0.03 * S, z - math.max(0.2 * S, 2.5), 0, y, z - 0.02 * S)
-            elseif z < 0.15 * S then
-                close_init(s, x + out * 0.1 * S, y - 0.01 * S, z - math.max(0.25 * S, 3), x, y, z - 0.04 * S)
-            else
-                close_init(s, x + out * math.max(0.2 * S, 3), y, z - 0.05 * S, x, y, z)
-            end
-        end,
-        update = close_update,
-    },
-    -- a steep turn: behind and below in a frame that turns with the
-    -- aircraft's track, the camera level, so the bank shows against the horizon
-    bank = {
-        id = "bank", kind = "outside", event = true,
-        init = function(s, c)
-            s.duration = M.rand(7, 10)
-            s.d = math.max(framing_distance(c.size, M.rand(0.4, 0.55)), clearance(c) + 3)
-            s.az, s.el = M.rand(-18, 18), -M.rand(5, 9)
-            s.hdg = c.track
-        end,
-        update = function(s, c, t, out)
-            s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.5))
-            local a, e = rad(s.az), rad(s.el)
-            local cx, cy, cz = yaw_point(c, s.hdg, sin(a) * cos(e) * s.d, sin(e) * s.d, cos(a) * cos(e) * s.d)
-            cx, cy, cz = keep_clear(c, cx, cy, cz)
-            aim(out, cx, cy, cz, c.x, c.y, c.z, 0, 1)
-        end,
-    },
+-- By a main gear leg: under the wing behind it, looking forward at the leg
+-- and its well, or under the belly ahead of it, looking back.
+local GEAR = {
+    id = "gear", kind = "outside", close = true,
+    init = function(s, c)
+        local S = c.size
+        local gx, gy, gz, nose = main_gear(S, M.sign())
+        local sx = gx >= 0 and 1 or -1
+        local ty = gy * 0.55 -- halfway up the leg
+        if math.random() < 0.65 then
+            local k = math.max(1, 4 / (0.24 * S)) -- (no closer than 4 m)
+            close_init(s, gx + sx * 0.1 * S * k, gy + 0.02 * S, gz + 0.22 * S * k, gx, ty, gz)
+        else
+            local ahead = nose and (gz + nose) / 2 or gz - 0.24 * S
+            close_init(s, sx * 0.03 * S, gy - 0.01 * S, ahead, gx, ty, gz)
+        end
+    end,
+    update = close_update,
 }
 
--- Each frame: which moment, if any, has just begun.
-function watch_moments(t, cond)
-    if not XP.lib then return nil end
-    local event
-    -- an engine starting while parked: its starter turning, or it coming to life
-    local n = math.min(math.max(gi(R.num_engines, 8), 1), 16)
-    local st = R.starter and read_ints(R.starter, n) or {}
-    local run = R.engn_running and read_ints(R.engn_running, n) or {}
-    for i = 0, n - 1 do
-        local starting = (st[i] or 0) ~= 0 and (MOMENT.starter[i] or 1) == 0
-        local lit = (run[i] or 0) ~= 0 and (MOMENT.running[i] or 1) == 0
-        if (starting or lit) and cond.onground and cond.gs < 3 and t - (MOMENT.engine_shown[i] or -1000) > 60 and not event then
-            event, MOMENT.engine = EVENT_SHOTS.engine, i
+-- Behind the wing and out from the fuselage, above or below it, looking at
+-- the inner flap.
+local WING = {
+    id = "wing", kind = "outside", close = true,
+    init = function(s, c)
+        local S = c.size
+        local side = M.sign()
+        local k = math.max(1, 6 / (0.32 * S)) -- (no closer than 6 m: wings sit high or low)
+        local tx, ty, tz = side * 0.2 * S, 0, 0.06 * S
+        if math.random() < 0.6 then
+            close_init(s, side * (0.2 + 0.13 * k) * S, 0.13 * S * k, tz + 0.26 * S * k, tx, ty, tz)
+        else
+            close_init(s, side * (0.2 + 0.1 * k) * S, -0.1 * S * k, tz + 0.24 * S * k, tx, ty, tz)
         end
-        MOMENT.starter[i], MOMENT.running[i] = st[i], run[i]
-    end
-    -- the gear part-way between up and down
-    if R.gear_deploy then
-        local moving = false
-        local g = read_floats(R.gear_deploy, 10)
-        for i = 0, 9 do
-            if g[i] and g[i] > 0.02 and g[i] < 0.98 then moving = true end
+    end,
+    update = close_update,
+}
+
+-- At one of the engines: ahead of a propeller in the nose, ahead of and
+-- outboard of an intake under a wing, alongside one at the tail.
+local ENGINE = {
+    id = "engine", kind = "outside", close = true,
+    init = function(s, c)
+        local S = c.size
+        local n = math.min(math.max(gi(R.num_engines, 1), 1), 16)
+        local x, y, z = engine_at(math.random(0, n - 1), S)
+        local out = abs(x) > 0.02 * S and (x > 0 and 1 or -1) or M.sign()
+        if abs(x) < 0.05 * S and z < 0 then
+            close_init(s, out * math.max(0.22 * S, 2.5), y + 0.03 * S, z - math.max(0.2 * S, 2.5), 0, y, z - 0.02 * S)
+        elseif z < 0.15 * S then
+            close_init(s, x + out * 0.1 * S, y - 0.01 * S, z - math.max(0.25 * S, 3), x, y, z - 0.04 * S)
+        else
+            close_init(s, x + out * math.max(0.2 * S, 3), y, z - 0.05 * S, x, y, z)
         end
-        if moving and not MOMENT.gear_moving then event = event or EVENT_SHOTS.gear end
-        MOMENT.gear_moving = moving
-    end
-    -- the flaps on the move from where they last rested
-    if R.flaps then
-        local f = gf(R.flaps)
-        if MOMENT.flap_last and abs(f - MOMENT.flap_last) > 1e-4 then MOMENT.flap_still_t = t end
-        MOMENT.flap_last = f
-        if not MOMENT.flap_rest or t - MOMENT.flap_still_t > 1.5 then
-            MOMENT.flap_rest, MOMENT.flap_moving = f, false
-        end
-        if not MOMENT.flap_moving and abs(f - MOMENT.flap_rest) > 0.02 then
-            MOMENT.flap_moving = true
-            event = event or EVENT_SHOTS.flaps
-        end
-    end
-    -- a steep turn, held, now and then
-    if not cond.onground and cond.agl > 30 and abs(gf(R.phi)) > BANK_STEEP then
-        MOMENT.bank_since = MOMENT.bank_since or t
-        if t - MOMENT.bank_since >= 2 and t - MOMENT.bank_shown > 60 then event = event or EVENT_SHOTS.bank end
-    else
-        MOMENT.bank_since = nil
-    end
-    return event
-end
+    end,
+    update = close_update,
+}
+
+-- Behind and below, in a frame that turns with the aircraft's track, the
+-- camera level: in a turn, the bank shows against the horizon. It eases a
+-- little way round over the shot. (In the air only.)
+local BELOW = {
+    id = "below", kind = "outside",
+    init = function(s, c)
+        s.d = math.max(framing_distance(c.size, M.rand(0.4, 0.55)), clearance(c) + 3)
+        s.az, s.el = M.rand(-18, 18), -M.rand(5, 9)
+        s.daz = M.sign() * math.min(MOTION_RATE * s.pace * s.duration * 0.5, 12)
+        s.hdg = c.track
+    end,
+    update = function(s, c, t, out)
+        s.hdg = M.approach_angle(s.hdg, c.track, M.smooth(c.dt, 0.5))
+        local a, e = rad(s.az + s.daz * (M.ease(t / s.duration) - 0.5)), rad(s.el)
+        local cx, cy, cz = yaw_point(c, s.hdg, sin(a) * cos(e) * s.d, sin(e) * s.d, cos(a) * cos(e) * s.d)
+        cx, cy, cz = keep_clear(c, cx, cy, cz)
+        aim(out, cx, cy, cz, c.x, c.y, c.z, 0, 1)
+    end,
+}
+
+-- How the outside kinds mix in each phase: orbiting, trackside, mounted,
+-- gear, wing, engine, below.
+GENERATED = { ORBITING, TRACKSIDE, MOUNTED, GEAR, WING, ENGINE, BELOW }
+OUTSIDE_MIX = {
+    parked = { 0.8, 0, 0.2, 0.07, 0.07, 0.1, 0 }, taxi = { 0.6, 0.2, 0.2, 0.07, 0.07, 0.07, 0 },
+    roll = { 0.45, 0.35, 0.2, 0.07, 0.07, 0.07, 0 }, low = { 0.4, 0.4, 0.2, 0.07, 0.07, 0.07, 0.1 },
+    cruise = { 0.65, 0.15, 0.2, 0.07, 0.07, 0.07, 0.1 },
+}
 end
 
 -- Used when the plugin SDK can't be loaded: X-Plane's own outside views.
@@ -1292,14 +1217,17 @@ local COCKPIT = {
         local r = math.random()
         if settings.window_seat and math.random() < 0.18 then
             -- a passenger's window seat a little behind the wing's leading
-            -- edge, looking out at the wing (where the cabin would be for an
-            -- aircraft this size: not every aircraft models one)
+            -- edge, looking straight out of the window at the wing, barely
+            -- turning, so the view stays outside rather than in the cabin.
+            -- The seat is where the cabin wall would be for an aircraft this
+            -- size, far enough in that a window is always in view (not every
+            -- aircraft models a cabin)
             local S = CV.size
             local out = M.sign()
-            s.dx = out * math.max(0.05 * S - 0.4, 0.3) - e.x
+            s.dx = out * math.max(0.042 * S - 0.2, 0.25) - e.x
             s.dy = -0.1
             s.dz = 0.06 * S - e.z
-            s.psi0, s.the = out * M.rand(70, 115), M.rand(-14, -4)
+            s.psi0, s.the = out * M.rand(84, 96), M.rand(-6, -2)
             s.window = true
         elseif r < 0.3 then
             -- forward through the windscreen
@@ -1322,7 +1250,7 @@ local COCKPIT = {
         else
             s.psi0, s.the = -side * M.rand(20, 45), M.rand(-10, -4)
         end
-        local B = math.min(MOTION_RATE * s.pan * s.duration * 1.5, 40)
+        local B = math.min(MOTION_RATE * s.pan * s.duration * 1.5, s.window and 6 or 40)
         s.dpsi = M.sign() * B
         s.psi0 = s.psi0 - s.dpsi / 2
     end,
@@ -1603,8 +1531,8 @@ local function pick_from(pool, cond)
     return candidates[#candidates]
 end
 
--- At night: fewer distant trackside shots, more close mounted ones.
-local NIGHT_MIX = { 1, 0.3, 2.5 }
+-- At night: fewer distant trackside shots, more close ones.
+local NIGHT_MIX = { 1, 0.3, 2.5, 1.5, 1.5, 1.5, 1 }
 
 -- Which kind of outside shot to generate next.
 local function pick_outside(cond)
@@ -1711,7 +1639,7 @@ end
 
 local FADE_TIME = 0.4
 
--- A hard cut, for moments that can't wait.
+-- A hard cut (when terrain hides the aircraft there's nothing to fade from).
 local function cut_to(def)
     CV.trans = nil
     CV.fade = 0
@@ -2011,18 +1939,11 @@ local function update_cockpit_shot(s, t)
     write_head(e.x + dx, e.y + dy, e.z + dz, psi, the, phi)
 end
 
--- Each frame: what the aircraft is doing, and a moment's shot when one begins.
-local function watch_flight(t)
+-- Each frame: what the aircraft is doing, and the light.
+local function watch_flight()
     local cond = conditions()
     CV.phase = cond.phase
     CV.light, CV.sun_h, CV.sun_p = light()
-    local event = watch_moments(t, cond)
-    if event and CV.active and XP.camera_ok and settings.mode ~= "cockpit" and not cond.paused
-        and not CV.hold and not cloud_keeps_inside() and not (CV.shot and CV.shot.def.event) then
-        if event == EVENT_SHOTS.bank then MOMENT.bank_shown = t end
-        if event == EVENT_SHOTS.engine then MOMENT.engine_shown[MOMENT.engine] = t end
-        cut_to(event)
-    end
     return cond
 end
 
@@ -2084,7 +2005,7 @@ local function tick()
         CV.last_input = t
         CV.afk_armed = true
     end
-    local cond = watch_flight(t)
+    local cond = watch_flight()
     watch_cloud(t)
     check_taken_keys(t)
     if CV.wheel_cmd and (t >= CV.wheel_until or not CV.active or outside_shot()) then wheel_xp_end() end
@@ -2862,12 +2783,13 @@ if load_settings() == "old" then save_settings() end -- (carried over to forza_v
 pcall(joystick_setup)
 if not pcall(find_zoom_commands) then CV.xp_zoom = false end
 pcall(find_cloud_layers)
-do
-    local missing = {}
-    if not R.gear_deploy then missing[#missing + 1] = "gear" end
-    if not R.flaps then missing[#missing + 1] = "flaps" end
-    if not (R.starter or R.engn_running) then missing[#missing + 1] = "engine start" end
-    if XP.camera_ok and #missing > 0 then log("found nothing to watch for " .. table.concat(missing, ", ") .. ", so no shots of those") end
+if XP.camera_ok then
+    local guessed = {}
+    if not (R.tire_x and R.tire_y and R.tire_z) then guessed[#guessed + 1] = "gear" end
+    if not (R.eng_x and R.eng_y and R.eng_z) then guessed[#guessed + 1] = "engines" end
+    if #guessed > 0 then
+        log("X-Plane doesn't say where the " .. table.concat(guessed, " and ") .. " are, so close shots guess from the aircraft's size")
+    end
 end
 if not (R.sun_pitch and R.sun_heading) then log("found no sun position, so shots don't follow the light") end
 if not pcall(find_focus_settings) then

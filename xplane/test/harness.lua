@@ -590,11 +590,33 @@ tap(0x41)
 seconds(1)
 check(not CVt.active, "and a key ends it")
 
--- 10b. moments: the gear and flaps moving, a steep turn and an engine
--- starting each cut straight to a shot of their own
+-- 10b. close shots (gear, wing, engine) and the one from below come up like
+-- any other shot, and nothing the aircraft does cuts to them
 if lib then
-    local Mt = upvalue(upvalue(ForzaViews_tick, "fn"), "M")
-    -- a point in the aircraft's axes, in the world
+    local tick_fn = upvalue(ForzaViews_tick, "fn")
+    local Mt, cut_to = upvalue(tick_fn, "M"), upvalue(tick_fn, "cut_to")
+    local pick_outside = upvalue(upvalue(upvalue(tick_fn, "next_shot"), "pick_shot"), "pick_outside")
+    local kinds = {}
+    for _, def in ipairs(upvalue(pick_outside, "GENERATED")) do kinds[def.id] = def end
+    check(kinds.gear and kinds.wing and kinds.engine and kinds.below, "gear, wing, engine and below shots are in the list")
+    -- how often each comes up, by what the aircraft is doing
+    local function share(phase, gs)
+        CVt.recent, CVt.prefer_close = {}, false
+        local n = {}
+        for _ = 1, 3000 do
+            local id = pick_outside({ phase = phase, gs = gs, agl = 3000, paused = false }).id
+            n[id] = (n[id] or 0) + 1
+        end
+        return function(id) return (n[id] or 0) / 3000 end
+    end
+    local cruise, parked = share("cruise", 120), share("parked", 0)
+    print(string.format("  in cruise: gear %.3f, wing %.3f, engine %.3f, below %.3f; parked: gear %.3f, wing %.3f, engine %.3f, below %.3f",
+        cruise("gear"), cruise("wing"), cruise("engine"), cruise("below"), parked("gear"), parked("wing"), parked("engine"), parked("below")))
+    check(cruise("gear") > 0.03 and cruise("wing") > 0.03 and cruise("engine") > 0.03 and cruise("below") > 0.04,
+        "in the air, all of them come up")
+    check(parked("gear") > 0.03 and parked("wing") > 0.03 and parked("engine") > 0.03 and parked("below") == 0,
+        "on the ground too, apart from the one from below")
+
     local function world(x, y, z)
         local wx, wy, wz = Mt.body_to_world(x, y, z, ac.psi, ac.the, ac.phi)
         return ac.x + wx, ac.y + wy, ac.z + wz
@@ -607,126 +629,87 @@ if lib then
         local d = dist3(px, py, pz, cam.x, cam.y, cam.z)
         return math.deg(math.acos(math.max(-1, math.min(1, ((px - cam.x) * fx + (py - cam.y) * fy + (pz - cam.z) * fz) / d))))
     end
-    -- runs frames, with set(i) changing something before frame i, and
-    -- measures the shots of one kind that come up: how many, when the
-    -- first did, and the worst of measure(shot) over their frames
-    local function moment(kind, frames, set, measure)
-        local m = { shots = 0, first = nil, worst = {} }
-        local last
-        for i = 1, frames do
-            if set then set(i) end
+    -- cuts to a shot of this kind and measures the worst of measure() over 3 s of it
+    local function try(id, measure)
+        cut_to(kinds[id])
+        local worst = {}
+        for _ = 1, 30 * 3 do
             frame(1 / 30)
-            local sh = CVt.shot
-            if sh and sh.def.id == kind and lib.mock_camera_controlled() ~= 0 then
-                if sh ~= last then m.shots, last = m.shots + 1, sh end
-                m.first = m.first or T
-                if measure then
-                    for k, v in pairs(measure(sh)) do m.worst[k] = math.max(m.worst[k] or -1e9, v) end
-                end
+            if CVt.shot and CVt.shot.def.id == id and lib.mock_camera_controlled() ~= 0 then
+                for k, v in pairs(measure(CVt.shot)) do worst[k] = math.max(worst[k] or -1e9, v) end
             end
         end
-        return m
+        return worst
     end
     local S = CVt.size
-    ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 300, 300, 70, 0, 0, 2, 0, 90, false
-    set_mode("outside")
-    command("toggle")
-    seconds(5)
-
-    -- the gear going up, over 8 s
-    local began
-    local gear = moment("gear", 30 * 14, function(i)
-        local r = math.max(0, 1 - i / (30 * 8))
-        for g = 0, 2 do lib.mock_set_gear(g, r) end
-        if r < 0.98 and not began then began = T + 1 / 30 end
-    end, function(sh)
+    local function gear(sh)
         local lx, ly, lz = world(-3.8, -3.6, 1.2)
         local rx, ry, rz = world(3.8, -3.6, 1.2)
         return { dist = dist3(cam.x, cam.y, cam.z, sh.aim_x, sh.aim_y, sh.aim_z), off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z),
-            leg = math.min(dist3(sh.aim_x, sh.aim_y, sh.aim_z, lx, ly, lz), dist3(sh.aim_x, sh.aim_y, sh.aim_z, rx, ry, rz)) }
-    end)
-    print(string.format("  gear: camera %.1f m from what it looks at, %.1f m from a main leg", gear.worst.dist or -1, gear.worst.leg or -1))
-    check(gear.shots == 1 and gear.first and gear.first - began < 0.1, "the gear going up cuts straight to one gear shot")
-    check((gear.worst.dist or 1e9) < 0.4 * S and (gear.worst.off or 1e9) < 1, "a camera close by, looking at it")
-    check((gear.worst.leg or 1e9) < 0.12 * S, "at a main gear leg")
-    seconds(15)
-    gear = moment("gear", 30 * 12, function(i)
-        for g = 0, 2 do lib.mock_set_gear(g, math.min(1, i / (30 * 8))) end
-    end)
-    check(gear.shots == 1, "and going down again, another")
-
-    -- the flaps out to the first stage, over 4 s
-    seconds(15)
-    began = nil
-    local flaps = moment("flaps", 30 * 10, function(i)
-        local f = math.min(0.25, i / (30 * 4) * 0.25)
-        set_f("sim/flightmodel2/controls/flap1_deploy_ratio", f)
-        if f > 0.02 and not began then began = T + 1 / 30 end
-    end, function(sh)
+            leg = math.min(dist3(sh.aim_x, sh.aim_y, sh.aim_z, lx, ly, lz), dist3(sh.aim_x, sh.aim_y, sh.aim_z, rx, ry, rz)), low = -cam.y }
+    end
+    local function wing(sh)
         local lx, ly, lz = world(-0.2 * S, 0, 0.06 * S)
         local rx, ry, rz = world(0.2 * S, 0, 0.06 * S)
-        return { off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z),
-            flap = math.min(dist3(sh.aim_x, sh.aim_y, sh.aim_z, lx, ly, lz), dist3(sh.aim_x, sh.aim_y, sh.aim_z, rx, ry, rz)),
-            dist = dist3(cam.x, cam.y, cam.z, sh.aim_x, sh.aim_y, sh.aim_z) }
-    end)
-    check(flaps.shots == 1 and flaps.first and flaps.first - began < 0.1, "the flaps moving cut straight to a flaps shot")
-    check((flaps.worst.off or 1e9) < 1 and (flaps.worst.flap or 1e9) < 2.5 and (flaps.worst.dist or 1e9) < 0.5 * S,
-        "close to an inner flap, looking at it")
-
-    -- a steep turn, held for half a minute
-    seconds(15)
-    began = nil
-    local bank = moment("bank", 30 * 30, function()
-        ac.phi = 35
-        began = began or T + 1 / 30
-    end, function(sh)
+        return { dist = dist3(cam.x, cam.y, cam.z, sh.aim_x, sh.aim_y, sh.aim_z), off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z),
+            flap = math.min(dist3(sh.aim_x, sh.aim_y, sh.aim_z, lx, ly, lz), dist3(sh.aim_x, sh.aim_y, sh.aim_z, rx, ry, rz)) }
+    end
+    local function engine(sh)
+        local lx, ly, lz = world(-5.75, -2.2, -3.0)
+        local rx, ry, rz = world(5.75, -2.2, -3.0)
+        return { off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z), low = -cam.y,
+            at = math.min(dist3(sh.aim_x, sh.aim_y, sh.aim_z, lx, ly, lz), dist3(sh.aim_x, sh.aim_y, sh.aim_z, rx, ry, rz)) }
+    end
+    local function below()
         local fx, fz = math.sin(math.rad(90)), -math.cos(math.rad(90)) -- along the track
         return { ahead = (cam.x - ac.x) * fx + (cam.z - ac.z) * fz, above = cam.y - ac.y,
             roll = math.abs(cam.roll), off = off_centre(ac.x, ac.y, ac.z) }
-    end)
-    ac.phi = 0
-    check(bank.shots == 1 and bank.first and bank.first - began >= 1.9 and bank.first - began < 2.3,
-        "a steep turn held for 2 s cuts to a bank shot, and not again for a minute")
-    check((bank.worst.ahead or 1) < 0 and (bank.worst.above or 1) < -1, "from behind and below")
-    check((bank.worst.roll or 1) < 0.01 and (bank.worst.off or 1e9) < 1, "the camera level, the aircraft in the middle")
-
-    -- an engine starting, parked: the right one's starter, then it running
-    ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, 0, 0, true
-    lib.mock_set_engine(0, 0, 0)
-    lib.mock_set_engine(1, 0, 0)
-    seconds(15)
-    began = nil
-    local engine = moment("engine", 30 * 20, function(i)
-        if i == 30 then lib.mock_set_engine(1, 0, 1) began = T + 1 / 30 end
-        if i == 30 * 6 then lib.mock_set_engine(1, 1, 0) end
-    end, function(sh)
-        local ex, ey, ez = world(5.75, -2.2, -3.0)
-        return { off = off_centre(sh.aim_x, sh.aim_y, sh.aim_z), at = dist3(sh.aim_x, sh.aim_y, sh.aim_z, ex, ey, ez),
-            low = -cam.y }
-    end)
-    check(engine.shots == 1 and engine.first and engine.first - began < 0.1,
-        "an engine's starter cuts straight to an engine shot, and its running doesn't cut again")
-    check((engine.worst.off or 1e9) < 1 and (engine.worst.at or 1e9) < 3, "at the engine that's starting, looking at it")
-    check((engine.worst.low or 1e9) <= -0.79, "above the ground")
-    ac.vx = 10
-    seconds(2)
-    engine = moment("engine", 30 * 3, function(i) if i == 1 then lib.mock_set_engine(0, 0, 1) end end)
-    check(engine.shots == 0, "not while taxiing")
-    lib.mock_set_engine(0, 1, 0)
-    ac.vx = 0
-    -- none in cockpit-only mode
-    set_mode("cockpit")
-    seconds(3)
-    local inside_moment = false
-    for i = 1, 30 * 6 do
-        set_f("sim/flightmodel2/controls/flap1_deploy_ratio", math.max(0, 0.25 - i / (30 * 4) * 0.25))
-        frame(1 / 30)
-        if CVt.shot and CVt.shot.def.event then inside_moment = true end
     end
-    check(not inside_moment, "no moments showing cockpit shots only")
-    command("toggle")
+
+    -- in the air, banked
+    ac.x, ac.z, ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.psi, ac.onground = 0, 0, 300, 300, 70, 0, 0, 2, 30, 90, false
     set_mode("outside")
-    ac.x, ac.z, ac.vx, ac.vz, ac.psi = 0, 0, 75, 0, 90
+    command("toggle")
+    seconds(3)
+    for _ = 1, 3 do
+        local g = try("gear", gear)
+        check((g.dist or 1e9) < 0.4 * S and (g.off or 1e9) < 1 and (g.leg or 1e9) < 0.12 * S, "gear shot: close by a main gear leg, looking at it")
+        local w = try("wing", wing)
+        check((w.dist or 1e9) < 0.5 * S and (w.off or 1e9) < 1 and (w.flap or 1e9) < 2.5, "wing shot: close to an inner flap, looking at it")
+        local e = try("engine", engine)
+        check((e.off or 1e9) < 1 and (e.at or 1e9) < 3, "engine shot: at one of the engines, looking at it")
+        local b = try("below", below)
+        check((b.ahead or 1) < 0 and (b.above or 1) < -1, "below shot: from behind and below")
+        check((b.roll or 1) < 0.01 and (b.off or 1e9) < 1, "below shot: the camera level, the aircraft in the middle, banked")
+    end
+    -- parked
+    ac.y, ac.agl, ac.vx, ac.vy, ac.vz, ac.the, ac.phi, ac.onground = 2.5, 2.5, 0, 0, 0, 0, 0, true
+    seconds(2)
+    for _ = 1, 3 do
+        local g = try("gear", gear)
+        local e = try("engine", engine)
+        check((g.low or 1e9) <= -0.79 and (e.low or 1e9) <= -0.79, "close cameras stay above the ground")
+    end
+
+    -- the gear and flaps moving, a steep turn, an engine starting: none cuts the shot short
+    ac.y, ac.agl, ac.vx, ac.onground = 300, 300, 70, false
+    local waited = 0
+    repeat frame(1 / 30) waited = waited + 1 until (CVt.shot and T - CVt.shot.t0 < 0.1) or waited > 30 * 30
+    local running = CVt.shot
+    lib.mock_set_engine(1, 0, 0)
+    for i = 1, 30 * 3 do
+        for g = 0, 2 do lib.mock_set_gear(g, math.max(0, 1 - i / 60)) end
+        set_f("sim/flightmodel2/controls/flap1_deploy_ratio", math.min(0.25, i / 240))
+        ac.phi = 35
+        if i == 10 then lib.mock_set_engine(1, 0, 1) end
+        if i == 40 then lib.mock_set_engine(1, 1, 0) end
+        frame(1 / 30)
+    end
+    check(CVt.shot == running, "nothing the aircraft does cuts to a shot")
+    for g = 0, 2 do lib.mock_set_gear(g, 1) end
+    set_f("sim/flightmodel2/controls/flap1_deploy_ratio", 0)
+    command("toggle")
+    ac.x, ac.z, ac.vx, ac.vz, ac.psi, ac.phi = 0, 0, 75, 0, 90, 0
 
     -- 10d. low and level: trackside cameras on the ground (generated at random, so fly until some come up)
     ac.y, ac.agl, ac.vy, ac.the, ac.onground = 200, 200, 0, 0, false
@@ -867,7 +850,7 @@ if lib then
         local n = { orbiting = 0, trackside = 0, mounted = 0 }
         for _ = 1, 3000 do
             local def = pick_outside({ phase = "cruise", gs = 120, agl = 3000, paused = false })
-            n[def.id] = n[def.id] + 1
+            n[def.id] = (n[def.id] or 0) + 1
         end
         return n.trackside / 3000, n.mounted / 3000
     end
@@ -878,8 +861,8 @@ if lib then
     frame(1 / 30)
     local day_track, day_mounted = outside_mix()
     print(string.format("  trackside / mounted shots: by day %.2f / %.2f, at night %.2f / %.2f", day_track, day_mounted, night_track, night_mounted))
-    check(night_track < 0.07 and day_track > 0.11, "fewer distant trackside shots at night")
-    check(night_mounted > 0.35 and day_mounted < 0.25, "more close mounted ones")
+    check(night_track < 0.07 and day_track > 0.09, "fewer distant trackside shots at night")
+    check(night_mounted > 0.25 and day_mounted < 0.2, "more close mounted ones")
     set_f("sim/graphics/scenery/sun_pitch_degrees", -20)
     command("toggle")
     local night_orbits, night_wide = 0, 0
@@ -1324,14 +1307,17 @@ for i = first_cockpit + 1, #cockpit_shots do
         window_shots = window_shots + 1
         local e = CVt.eye
         local x, z = e.x + sh.dx, e.z + sh.dz
-        local look = sh.psi0 + sh.dpsi / 2
-        if z <= 0 or math.abs(x) < 0.3 or (x > 0) ~= (look > 0) or math.abs(look) < 60 or math.abs(look) > 125 then
+        -- all through the shot, the head looks within 10 degrees of straight out,
+        -- a little down, out of the window on its own side
+        local from, to = sh.psi0 * (x > 0 and 1 or -1), (sh.psi0 + sh.dpsi) * (x > 0 and 1 or -1)
+        if z <= 0 or math.abs(x) < 0.25 or math.min(from, to) < 80 or math.max(from, to) > 100
+            or sh.the < -6 or sh.the > -2 then
             window_bad = window_bad + 1
         end
     end
 end
 check(window_shots >= 1 and window_shots <= 0.4 * (#cockpit_shots - first_cockpit) and window_bad == 0,
-    string.format("window seat shots: behind the wing's leading edge, out to one side, looking out (%d of %d cockpit shots, %d off)",
+    string.format("window seat shots: behind the wing's leading edge, looking straight out of the window (%d of %d cockpit shots, %d off)",
         window_shots, #cockpit_shots - first_cockpit, window_bad))
 click("Window seat shots")
 first_cockpit = #cockpit_shots
